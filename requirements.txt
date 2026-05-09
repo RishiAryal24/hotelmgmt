@@ -1,0 +1,14 @@
+Django==4.2.7
+djangorestframework==3.14.0
+django-tenants==3.5.0
+psycopg[binary]==3.3.4
+djangorestframework-simplejwt==5.3.0
+celery==5.3.4
+redis==5.0.1
+django-cors-headers==4.3.1
+django-filter==23.5
+drf-yasg==1.21.7
+Pillow==10.1.0
+gunicorn==21.2.0
+dj-database-url==1.0.0
+whitenoise==6.4.0

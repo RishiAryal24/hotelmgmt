@@ -59,13 +59,19 @@ A production-ready starter architecture for a cloud-ready multi-tenant Hotel Man
 3. Set environment variable: `VITE_API_BASE_URL=https://your-backend-url.fly.dev/api/v1`
 
 ### Backend (Fly.io)
-1. Install Fly CLI: `curl -L https://fly.io/install.sh | sh`
+1. Install Fly CLI:
+   - macOS/Linux: `curl -L https://fly.io/install.sh | sh`
+   - Windows PowerShell: `iwr https://fly.io/install.ps1 -useb | iex`
 2. Login: `fly auth login`
-3. Deploy: `fly launch` (use the provided `fly.toml`)
-4. Set secrets:
+3. Create the Fly app if it does not exist yet: `fly apps create hotelmgmt-backend`
+4. Create or attach a Postgres database, then set secrets:
+   - `fly postgres create --name hotelmgmt-db`
+   - `fly postgres attach hotelmgmt-db --app hotelmgmt-backend`
    - `fly secrets set DJANGO_SECRET_KEY=your-secret-key`
-   - `fly secrets set DATABASE_URL=your-postgres-url`
-   - `fly secrets set DJANGO_DEBUG=False`
+5. Deploy from the repository root: `fly deploy`
+6. Optional first-run setup:
+   - `fly ssh console -C "python manage.py bootstrap_public_tenant --domain hotelmgmt-backend.fly.dev"`
+   - `fly ssh console -C "python manage.py seed_rbac"`
 
 ### Database (Supabase)
 1. Create a free Supabase project

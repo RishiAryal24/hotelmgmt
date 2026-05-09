@@ -5,6 +5,12 @@ app = "hotelmgmt-backend"
 
 [env]
   PORT = "8080"
+  DJANGO_DEBUG = "False"
+  DJANGO_ALLOWED_HOSTS = ".fly.dev,localhost,127.0.0.1"
+  CSRF_TRUSTED_ORIGINS = "https://hotelmgmt-backend.fly.dev"
+
+[deploy]
+  release_command = "python manage.py migrate_schemas --shared"
 
 [processes]
   web = "gunicorn hotelmgmt.wsgi:application --bind 0.0.0.0:$PORT --workers 3"
@@ -21,7 +27,3 @@ app = "hotelmgmt-backend"
   memory = "512mb"
   cpu_kind = "shared"
   cpus = 1
-
-[mounts]
-  source = "hotelmgmt_data"
-  destination = "/data"

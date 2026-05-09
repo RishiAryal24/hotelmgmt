@@ -21,7 +21,8 @@ services:
 
   backend:
     build:
-      context: ./backend
+      context: .
+      dockerfile: backend/Dockerfile
     command: gunicorn hotelmgmt.wsgi:application --bind 0.0.0.0:8000 --workers 3
     volumes:
       - ./backend:/app

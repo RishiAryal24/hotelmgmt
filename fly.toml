@@ -1,29 +1,36 @@
-app = "hotelmgmt-backend"
+# fly.toml app configuration file generated for hotelmgmt on 2026-05-09T13:25:18Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'hotelmgmt'
+primary_region = 'ams'
 
 [build]
-  dockerfile = "backend/Dockerfile"
-
-[env]
-  PORT = "8080"
-  DJANGO_DEBUG = "False"
-  DJANGO_ALLOWED_HOSTS = ".fly.dev,localhost,127.0.0.1"
-  CSRF_TRUSTED_ORIGINS = "https://hotelmgmt-backend.fly.dev"
+  dockerfile = 'backend/Dockerfile'
 
 [deploy]
-  release_command = "python manage.py migrate_schemas --shared"
+  release_command = 'python manage.py migrate_schemas --shared'
+
+[env]
+  CSRF_TRUSTED_ORIGINS = 'https://hotelmgmt-backend.fly.dev'
+  DJANGO_ALLOWED_HOSTS = '.fly.dev,localhost,127.0.0.1'
+  DJANGO_DEBUG = 'False'
+  PORT = '8080'
 
 [processes]
-  web = "gunicorn hotelmgmt.wsgi:application --bind 0.0.0.0:$PORT --workers 3"
+  web = 'gunicorn hotelmgmt.wsgi:application --bind 0.0.0.0:$PORT --workers 3'
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = true
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
-  processes = ["web"]
+  processes = ['web']
 
 [[vm]]
-  memory = "512mb"
-  cpu_kind = "shared"
+  memory = '512mb'
+  cpu_kind = 'shared'
   cpus = 1
+  memory_mb = 256

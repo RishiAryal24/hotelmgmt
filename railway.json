@@ -1,0 +1,25 @@
+{
+  "projectName": "hotelmgmt",
+  "services": [
+    {
+      "name": "backend",
+      "path": "backend",
+      "dockerfilePath": "backend/Dockerfile",
+      "startCommand": "gunicorn hotelmgmt.wsgi:application --bind 0.0.0.0:$PORT --workers 3"
+    },
+    {
+      "name": "frontend",
+      "path": "frontend",
+      "dockerfilePath": "frontend/Dockerfile",
+      "startCommand": "serve -s dist -l $PORT"
+    }
+  ],
+  "env": {
+    "DJANGO_SECRET_KEY": "",
+    "DJANGO_DEBUG": "True",
+    "DJANGO_ALLOWED_HOSTS": "*",
+    "DATABASE_URL": "",
+    "VITE_API_BASE_URL": "",
+    "REDIS_URL": ""
+  }
+}

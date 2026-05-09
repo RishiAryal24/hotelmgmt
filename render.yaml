@@ -1,27 +1,29 @@
 services:
   - type: web
-    name: hotelmgmt
-    env: python
-    plan: free
-
+    name: hotelmgmt-backend
+    runtime: python
     rootDir: backend
-
-    buildCommand: 
-      cd backend
+    plan: free
+    buildCommand: |
       pip install --upgrade pip setuptools wheel
-      apt-get update && apt-get install -y libjpeg-dev zlib1g-dev libpng-dev
       pip install -r requirements.txt
-      python manage.py migrate --noinput
       python manage.py collectstatic --noinput
-
-    startCommand: gunicorn hotelmgmt.wsgi:application --bind 0.0.0.0:$PORT
-
+    preDeployCommand: python manage.py migrate_schemas --noinput
+    startCommand: gunicorn hotelmgmt.wsgi:application --bind 0.0.0.0:$PORT --workers 3
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.9
+        value: 3.12.10
       - key: DJANGO_SETTINGS_MODULE
         value: hotelmgmt.settings
-      - key: SECRET_KEY
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_ALLOWED_HOSTS
+        value: ".onrender.com,localhost,127.0.0.1"
+      - key: CSRF_TRUSTED_ORIGINS
+        value: "https://hotelmgmt-backend.onrender.com"
+      - key: CORS_ALLOW_ALL_ORIGINS
+        value: "True"
+      - key: DATABASE_URL
         sync: false
-      - key: DEBUG
-        value: false

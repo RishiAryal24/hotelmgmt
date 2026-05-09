@@ -1,0 +1,27 @@
+app = "hotelmgmt-backend"
+
+[build]
+  dockerfile = "backend/Dockerfile"
+
+[env]
+  PORT = "8080"
+
+[processes]
+  web = "gunicorn hotelmgmt.wsgi:application --bind 0.0.0.0:$PORT --workers 3"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["web"]
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[mounts]
+  source = "hotelmgmt_data"
+  destination = "/data"

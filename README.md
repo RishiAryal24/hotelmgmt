@@ -49,6 +49,42 @@ A production-ready starter architecture for a cloud-ready multi-tenant Hotel Man
    docker compose up --build
    ```
 
+## Deployment (Free Tier Options)
+
+### Frontend (Cloudflare Pages)
+1. Connect your GitHub repo to Cloudflare Pages
+2. Set build settings:
+   - Build command: `cd frontend && npm install && npm run build`
+   - Build output directory: `frontend/dist`
+3. Set environment variable: `VITE_API_BASE_URL=https://your-backend-url.fly.dev/api/v1`
+
+### Backend (Fly.io)
+1. Install Fly CLI: `curl -L https://fly.io/install.sh | sh`
+2. Login: `fly auth login`
+3. Deploy: `fly launch` (use the provided `fly.toml`)
+4. Set secrets:
+   - `fly secrets set DJANGO_SECRET_KEY=your-secret-key`
+   - `fly secrets set DATABASE_URL=your-postgres-url`
+   - `fly secrets set DJANGO_DEBUG=False`
+
+### Database (Supabase)
+1. Create a free Supabase project
+2. Get the connection string from Project Settings > Database
+3. Use it as `DATABASE_URL` in Fly.io secrets
+
+### Alternative Database (Neon)
+1. Create a free Neon project
+2. Get the connection string
+3. Use as `DATABASE_URL`
+
+## Environment Variables
+
+- `DJANGO_SECRET_KEY`: Secure random key
+- `DATABASE_URL`: Postgres connection string
+- `DJANGO_DEBUG`: True for dev, False for prod
+- `DJANGO_ALLOWED_HOSTS`: Comma-separated host list
+- `VITE_API_BASE_URL`: Frontend API base URL
+
 3. Open:
 
    - Backend API: `http://localhost:8000/api/v1/`

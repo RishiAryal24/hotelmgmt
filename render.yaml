@@ -8,7 +8,7 @@ services:
       pip install --upgrade pip setuptools wheel
       pip install -r requirements.txt
       python manage.py collectstatic --noinput
-    startCommand: python manage.py migrate_schemas --noinput && gunicorn hotelmgmt.wsgi:application --bind 0.0.0.0:$PORT --workers 3
+    startCommand: python manage.py migrate_schemas --noinput && python manage.py bootstrap_public_tenant --domain ${RENDER_EXTERNAL_HOSTNAME:-hotelmgmt-backend.onrender.com} && gunicorn hotelmgmt.wsgi:application --bind 0.0.0.0:$PORT --workers 3
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.10

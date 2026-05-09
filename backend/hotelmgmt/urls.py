@@ -15,9 +15,18 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
+from django.http import JsonResponse
+from django.shortcuts import redirect
 from django.urls import include, path
 
+
+def health_check(_request):
+    return JsonResponse({'status': 'ok'})
+
+
 urlpatterns = [
+    path('', lambda request: redirect('/api/v1/docs/')),
+    path('healthz/', health_check),
     path('admin/', admin.site.urls),
     path('api/v1/', include('api.urls')),
 ]

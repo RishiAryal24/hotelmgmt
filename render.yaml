@@ -3,7 +3,9 @@ services:
     name: hotelmgmt
     env: python
     plan: free
-
+    
+    rootDir: backend   # 👈 IMPORTANT FIX
+    
     buildCommand: |
       pip install -r requirements.txt
       python manage.py collectstatic --noinput
@@ -13,7 +15,7 @@ services:
 
     envVars:
       - key: PYTHON_VERSION
-        value: 3.12
+        value: 3.11.9
       - key: DJANGO_SETTINGS_MODULE
         value: hotelmgmt.settings
       - key: SECRET_KEY

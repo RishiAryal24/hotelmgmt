@@ -176,6 +176,6 @@ CSRF_TRUSTED_ORIGINS = [
 
 TENANT_MODEL = 'tenants.Tenant'
 TENANT_DOMAIN_MODEL = 'tenants.Domain'
-SHOW_PUBLIC_IF_NO_TENANT = True
+SHOW_PUBLIC_IF_NO_TENANT_FOUND = True
 
 ADMIN_URL = os.environ.get('DJANGO_ADMIN_URL', 'admin/')

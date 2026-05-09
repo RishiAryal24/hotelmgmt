@@ -1,7 +1,7 @@
 [build]
   command = "cd frontend && npm install && npm run build"
   publish = "frontend/dist"
-  environment = { NODE_VERSION = "20" }
+  environment = { NODE_VERSION = "20", VITE_API_BASE_URL = "https://hotelmgmt-backend.onrender.com/api/v1" }
 
 [[redirects]]
   from = "/*"

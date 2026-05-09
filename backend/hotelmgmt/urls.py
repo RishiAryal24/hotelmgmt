@@ -26,6 +26,7 @@ def health_check(_request):
 
 urlpatterns = [
     path('', lambda request: redirect('/api/v1/docs/')),
+    path('healthz', health_check),
     path('healthz/', health_check),
     path('admin/', admin.site.urls),
     path('api/v1/', include('api.urls')),

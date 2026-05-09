@@ -1,0 +1,51 @@
+import { Route, Routes } from 'react-router-dom';
+import ProtectedRoute from './components/ProtectedRoute';
+import Dashboard from './pages/Dashboard';
+import Login from './pages/Login';
+import TenantOnboarding from './pages/TenantOnboarding';
+import Rooms from './pages/Rooms';
+import Bookings from './pages/Bookings';
+import Staff from './pages/Staff';
+import Housekeeping from './pages/Housekeeping';
+import Restaurant from './pages/Restaurant';
+import POS from './pages/POS';
+import Accounting from './pages/Accounting';
+
+function App() {
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      <Routes>
+        <Route path="/" element={<Login />} />
+        <Route element={<ProtectedRoute />}>
+          <Route path="/dashboard" element={<Dashboard />} />
+        </Route>
+        <Route element={<ProtectedRoute permissions={['users.staff.create']} />}>
+          <Route path="/staff" element={<Staff />} />
+        </Route>
+        <Route element={<ProtectedRoute permissions={['rooms.room.read', 'rooms.room.update']} />}>
+          <Route path="/rooms" element={<Rooms />} />
+        </Route>
+        <Route element={<ProtectedRoute permissions={['bookings.reservation.read', 'bookings.reservation.create']} />}>
+          <Route path="/bookings" element={<Bookings />} />
+        </Route>
+        <Route element={<ProtectedRoute permissions={['housekeeping.task.update']} />}>
+          <Route path="/housekeeping" element={<Housekeeping />} />
+        </Route>
+        <Route element={<ProtectedRoute permissions={['restaurant.order.create', 'restaurant.order.update', 'restaurant.kitchen.update']} />}>
+          <Route path="/restaurant" element={<Restaurant />} />
+        </Route>
+        <Route element={<ProtectedRoute permissions={['pos.sale.create']} />}>
+          <Route path="/pos" element={<POS />} />
+        </Route>
+        <Route element={<ProtectedRoute permissions={['accounting.ledger.read', 'accounting.journal.create']} />}>
+          <Route path="/accounting" element={<Accounting />} />
+        </Route>
+        <Route element={<ProtectedRoute permissions={['platform.tenants.create']} />}>
+          <Route path="/onboarding" element={<TenantOnboarding />} />
+        </Route>
+      </Routes>
+    </div>
+  );
+}
+
+export default App;

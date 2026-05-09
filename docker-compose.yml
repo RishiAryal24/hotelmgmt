@@ -1,0 +1,56 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hotelmgmt
+      POSTGRES_USER: hotelmgmt_user
+      POSTGRES_PASSWORD: hotelmgmt_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - hotelmgmt-network
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - hotelmgmt-network
+
+  backend:
+    build:
+      context: ./backend
+    command: gunicorn hotelmgmt.wsgi:application --bind 0.0.0.0:8000 --workers 3
+    volumes:
+      - ./backend:/app
+    env_file:
+      - ./backend/.env.example
+    ports:
+      - '8000:8000'
+    depends_on:
+      - db
+      - redis
+    networks:
+      - hotelmgmt-network
+
+  frontend:
+    build:
+      context: ./frontend
+    command: npm run dev -- --host 0.0.0.0 --port 5173
+    volumes:
+      - ./frontend:/app
+    ports:
+      - '5173:5173'
+    depends_on:
+      - backend
+    networks:
+      - hotelmgmt-network
+
+volumes:
+  postgres_data:
+
+networks:
+  hotelmgmt-network:
+    driver: bridge

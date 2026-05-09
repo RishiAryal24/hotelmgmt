@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.log
+*.pot
+*.pyc
+*.pyo
+*.pyd
+ENV/
+env/
+.venv/
+venv/
+
+# Django
+*.sqlite3
+*.log
+media/
+staticfiles/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.DS_Store
+
+# VS Code
+.vscode/
+
+# Environment
+*.env
+*.env.*
+
+# Docker
+docker-compose.override.yml
+
+# JetBrains
+.idea/

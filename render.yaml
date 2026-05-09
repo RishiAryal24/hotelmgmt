@@ -8,7 +8,7 @@ services:
       pip install --upgrade pip setuptools wheel
       pip install -r requirements.txt
       python manage.py collectstatic --noinput
-    startCommand: python manage.py migrate_schemas --noinput && python manage.py bootstrap_public_tenant --domain ${RENDER_EXTERNAL_HOSTNAME:-hotelmgmt-backend.onrender.com} && python manage.py create_tenant --name "Demo Hotel" --domain demo.hotelmgmt-backend.onrender.com --email admin@demo.com --password "StrongPassword123" --currency NPR && gunicorn hotelmgmt.wsgi:application --bind 0.0.0.0:$PORT --workers 3
+    startCommand: python manage.py migrate_schemas --noinput && python manage.py bootstrap_public_tenant --domain ${RENDER_EXTERNAL_HOSTNAME:-hotelmgmt-backend.onrender.com} && python manage.py bootstrap_tenant_from_env && gunicorn hotelmgmt.wsgi:application --bind 0.0.0.0:$PORT --workers 3
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.10
@@ -26,3 +26,13 @@ services:
         value: "True"
       - key: DATABASE_URL
         sync: false
+      - key: BOOTSTRAP_TENANT_NAME
+        sync: false
+      - key: BOOTSTRAP_TENANT_DOMAIN
+        sync: false
+      - key: BOOTSTRAP_TENANT_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_TENANT_ADMIN_PASSWORD
+        sync: false
+      - key: BOOTSTRAP_TENANT_CURRENCY
+        value: "NPR"

@@ -3,13 +3,15 @@ services:
     name: hotelmgmt
     env: python
     plan: free
-    
-    rootDir: backend   # 👈 IMPORTANT FIX
-    
+
+    rootDir: backend
+
     buildCommand: |
+      pip install --upgrade pip setuptools wheel
+      apt-get update && apt-get install -y libjpeg-dev zlib1g-dev libpng-dev
       pip install -r requirements.txt
+      python manage.py migrate --noinput
       python manage.py collectstatic --noinput
-      python manage.py migrate
 
     startCommand: gunicorn hotelmgmt.wsgi:application --bind 0.0.0.0:$PORT
 

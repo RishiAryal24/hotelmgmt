@@ -1,8 +1,13 @@
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { useRooms, useBookings, useGuestFolios } from '../hooks/bookings';
+import { useHousekeepingTasks } from '../hooks/housekeeping';
+import { useInventoryItems, useStockMovements } from '../hooks/inventory';
+import { useRestaurantOrders } from '../hooks/restaurant';
 import { getCurrentUser } from '../services/auth';
 import { canAccess } from '../services/permissions';
+import { formatMoney, getTenantSettings } from '../services/tenantSettings';
 
 const tenantModules = [
   {
@@ -70,39 +75,6 @@ const tenantModules = [
   },
 ];
 
-const insightTabs = [
-  {
-    id: 'operations',
-    label: 'Operations',
-    metrics: [
-      { title: 'Occupancy Signal', value: '86%', detail: '12 rooms available', tone: 'green' },
-      { title: 'Arrivals Today', value: '18', detail: '6 early check-ins', tone: 'slate' },
-      { title: 'Departures Today', value: '14', detail: 'Checkout cleaning queued', tone: 'amber' },
-      { title: 'Guest Requests', value: '9', detail: '3 high priority', tone: 'red' },
-    ],
-  },
-  {
-    id: 'revenue',
-    label: 'Revenue',
-    metrics: [
-      { title: 'Room Revenue', value: 'NPR 284K', detail: 'Projected daily total', tone: 'green' },
-      { title: 'Restaurant Sales', value: 'NPR 76K', detail: 'POS settled today', tone: 'slate' },
-      { title: 'Open Folios', value: '21', detail: 'Includes room posting', tone: 'amber' },
-      { title: 'Journal Health', value: 'Balanced', detail: 'Auto-posting active', tone: 'green' },
-    ],
-  },
-  {
-    id: 'inventory',
-    label: 'Inventory',
-    metrics: [
-      { title: 'Low Stock Items', value: '5', detail: 'Review reorder levels', tone: 'amber' },
-      { title: 'Purchase Receipts', value: '12', detail: 'This week', tone: 'green' },
-      { title: 'POS Deductions', value: 'Live', detail: 'Restaurant sales reduce stock', tone: 'green' },
-      { title: 'Stock Adjustments', value: '3', detail: 'Manual corrections', tone: 'slate' },
-    ],
-  },
-];
-
 const toneClass = {
   green: 'bg-emerald-50 text-[#1F5E3B] border-emerald-100',
   amber: 'bg-amber-50 text-amber-700 border-amber-100',
@@ -111,15 +83,88 @@ const toneClass = {
 } as const;
 
 const Dashboard = () => {
-  const [activeTab, setActiveTab] = useState(insightTabs[0].id);
+  const [activeTab, setActiveTab] = useState('operations');
   const { data: user } = useQuery({
     queryKey: ['current-user'],
     queryFn: getCurrentUser,
   });
+  const { data: settings } = useQuery({ queryKey: ['tenant-settings'], queryFn: getTenantSettings });
+  const { data: rooms, isLoading: roomsLoading } = useRooms();
+  const { data: bookings, isLoading: bookingsLoading } = useBookings();
+  const { data: folios, isLoading: foliosLoading } = useGuestFolios();
+  const { data: housekeepingTasks, isLoading: housekeepingLoading } = useHousekeepingTasks();
+  const { data: restaurantOrders, isLoading: restaurantLoading } = useRestaurantOrders();
+  const { data: inventoryItems, isLoading: inventoryLoading } = useInventoryItems();
+  const { data: stockMovements, isLoading: movementsLoading } = useStockMovements();
+
+  const today = new Date().toISOString().slice(0, 10);
+  const totalRooms = rooms?.length || 0;
+  const occupiedRooms = rooms?.filter((room) => room.status === 'occupied').length || 0;
+  const availableRooms = rooms?.filter((room) => room.status === 'available').length || 0;
+  const occupancyRate = totalRooms ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
+  const arrivalsToday = bookings?.filter((booking) => booking.check_in_date === today && booking.status === 'confirmed').length || 0;
+  const departuresToday = bookings?.filter((booking) => booking.check_out_date === today && booking.status === 'checked_in').length || 0;
+  const openTasks = housekeepingTasks?.filter((task) => task.status !== 'done').length || 0;
+  const urgentTasks = housekeepingTasks?.filter((task) => task.priority === 'urgent' && task.status !== 'done').length || 0;
+  const openFolios = folios?.filter((folio) => folio.status === 'open').length || 0;
+  const paidFolios = folios?.filter((folio) => folio.status === 'paid') || [];
+  const roomRevenue = paidFolios.reduce((total, folio) => total + Number(folio.paid_amount || folio.grand_total || 0), 0);
+  const paidRestaurantOrders = restaurantOrders?.filter((order) => order.status === 'paid') || [];
+  const restaurantRevenue = paidRestaurantOrders.reduce((total, order) => total + Number(order.paid_amount || order.grand_total || 0), 0);
+  const lowStockItems = inventoryItems?.filter((item) => item.is_low_stock) || [];
+  const purchaseReceipts = stockMovements?.filter((movement) => movement.movement_type === 'purchase').length || 0;
+  const saleDeductions = stockMovements?.filter((movement) => movement.movement_type === 'sale').length || 0;
+  const stockAdjustments =
+    stockMovements?.filter((movement) => ['waste', 'adjustment_in', 'adjustment_out'].includes(movement.movement_type)).length || 0;
+  const journalReady = Number(roomRevenue + restaurantRevenue) > 0 ? 'Active' : 'No postings';
+  const hasLoadedCore = !roomsLoading && !bookingsLoading;
+
+  const insightTabs = [
+    {
+      id: 'operations',
+      label: 'Operations',
+      metrics: [
+        { title: 'Occupancy Signal', value: totalRooms ? `${occupancyRate}%` : 'No rooms', detail: `${availableRooms} rooms available`, tone: 'green' },
+        { title: 'Arrivals Today', value: arrivalsToday, detail: 'Confirmed check-ins', tone: 'slate' },
+        { title: 'Departures Today', value: departuresToday, detail: 'Checked-in bookings due out', tone: departuresToday ? 'amber' : 'green' },
+        { title: 'Housekeeping Queue', value: openTasks, detail: `${urgentTasks} urgent tasks`, tone: urgentTasks ? 'red' : openTasks ? 'amber' : 'green' },
+      ],
+    },
+    {
+      id: 'revenue',
+      label: 'Revenue',
+      metrics: [
+        { title: 'Room Revenue', value: formatMoney(roomRevenue, settings?.currency), detail: 'Paid folios', tone: 'green' },
+        { title: 'Restaurant Sales', value: formatMoney(restaurantRevenue, settings?.currency), detail: 'Paid POS orders', tone: 'slate' },
+        { title: 'Open Folios', value: openFolios, detail: 'Awaiting settlement', tone: openFolios ? 'amber' : 'green' },
+        { title: 'Journal Activity', value: journalReady, detail: 'Based on settled flows', tone: journalReady === 'Active' ? 'green' : 'slate' },
+      ],
+    },
+    {
+      id: 'inventory',
+      label: 'Inventory',
+      metrics: [
+        { title: 'Low Stock Items', value: lowStockItems.length, detail: 'At or below reorder level', tone: lowStockItems.length ? 'amber' : 'green' },
+        { title: 'Purchase Receipts', value: purchaseReceipts, detail: 'All recorded receipts', tone: 'green' },
+        { title: 'POS Deductions', value: saleDeductions, detail: 'Restaurant sale movements', tone: saleDeductions ? 'green' : 'slate' },
+        { title: 'Stock Adjustments', value: stockAdjustments, detail: 'Manual corrections/waste', tone: stockAdjustments ? 'amber' : 'slate' },
+      ],
+    },
+  ];
+
   const selectedTab = insightTabs.find((tab) => tab.id === activeTab) || insightTabs[0];
   const visibleModules = tenantModules
     .filter((module) => !module.tenantAdminOnly || user?.is_tenant_admin)
     .filter((module) => canAccess(user, module.permissions));
+
+  const watchlist = [
+    openTasks ? ['Rooms pending cleaning', `${openTasks} housekeeping tasks are still open`] : null,
+    lowStockItems.length ? ['Inventory reorder', `${lowStockItems.length} items are at or below reorder level`] : null,
+    openFolios ? ['Open folios', `${openFolios} folios are awaiting settlement`] : null,
+    restaurantOrders?.some((order) => ['sent_to_kitchen', 'preparing'].includes(order.status))
+      ? ['Kitchen queue', `${restaurantOrders.filter((order) => ['sent_to_kitchen', 'preparing'].includes(order.status)).length} orders are in kitchen workflow`]
+      : null,
+  ].filter(Boolean) as string[][];
 
   return (
     <div className="space-y-6">
@@ -149,10 +194,10 @@ const Dashboard = () => {
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {[
-          { title: 'Occupancy Rate', value: '86%', subtitle: '+12%', detail: 'Week over week' },
-          { title: 'New Reservations', value: '126', subtitle: '+8%', detail: 'Last 7 days' },
-          { title: 'Revenue Today', value: 'NPR 360K', subtitle: '+18%', detail: 'Rooms + POS' },
-          { title: 'Available Rooms', value: '48', subtitle: 'Live', detail: 'Ready to sell' },
+          { title: 'Occupancy Rate', value: hasLoadedCore && totalRooms ? `${occupancyRate}%` : 'No data', subtitle: `${occupiedRooms}/${totalRooms}`, detail: 'Occupied rooms' },
+          { title: 'New Reservations', value: bookings?.filter((booking) => booking.status === 'confirmed').length ?? '...', subtitle: 'Open', detail: 'Confirmed bookings' },
+          { title: 'Settled Revenue', value: formatMoney(roomRevenue + restaurantRevenue, settings?.currency), subtitle: 'Live', detail: 'Paid folios + POS' },
+          { title: 'Available Rooms', value: hasLoadedCore ? availableRooms : '...', subtitle: 'Live', detail: 'Ready to sell' },
         ].map((metric) => (
           <article key={metric.title} className="rounded-3xl bg-white p-5 shadow-sm">
             <h3 className="text-sm text-slate-500">{metric.title}</h3>
@@ -204,20 +249,23 @@ const Dashboard = () => {
               <h2 className="text-xl font-bold text-[#1F5E3B]">Priority Watchlist</h2>
               <p className="mt-1 text-sm text-slate-500">Operational items that need attention.</p>
             </div>
-            <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">4 signals</span>
+            <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">{watchlist.length} signals</span>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
-            {[
-              ['Rooms pending cleaning', '12 rooms need turnover before evening arrivals'],
-              ['Inventory reorder', '5 items are at or below reorder level'],
-              ['Open folios', '21 active folios include restaurant room posting'],
-              ['Kitchen queue', '7 tickets are not marked ready yet'],
-            ].map(([title, detail]) => (
+            {watchlist.map(([title, detail]) => (
               <div key={title} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
                 <p className="font-semibold text-slate-900">{title}</p>
                 <p className="mt-1 text-sm text-slate-500">{detail}</p>
               </div>
             ))}
+            {watchlist.length === 0 && (
+              <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 md:col-span-2">
+                <p className="font-semibold text-[#1F5E3B]">No priority signals</p>
+                <p className="mt-1 text-sm text-emerald-700">
+                  Live data does not currently show open housekeeping, low stock, open folios, or kitchen queue issues.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 

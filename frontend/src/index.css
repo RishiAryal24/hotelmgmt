@@ -3,7 +3,10 @@
 @tailwind utilities;
 
 body {
-  @apply bg-slate-50 text-slate-900;
+  margin: 0;
+  background: #edf7f1;
+  color: #1f2937;
+  font-family: Arial, sans-serif;
 }
 
 button {

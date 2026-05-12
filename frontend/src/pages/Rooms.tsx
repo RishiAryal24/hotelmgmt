@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import CompactTabs from '../components/CompactTabs';
 import { useCreateRoom, useCreateRoomType, useRoomTypes, useRooms } from '../hooks/bookings';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
 import { Room, RoomType } from '../types/bookings';
@@ -28,13 +29,10 @@ const emptyRoomType = {
 const Rooms: React.FC = () => {
   const { data: rooms, isLoading, error } = useRooms();
   const { data: roomTypes, isLoading: roomTypesLoading } = useRoomTypes();
-  const { data: settings } = useQuery({
-    queryKey: ['tenant-settings'],
-    queryFn: getTenantSettings,
-  });
+  const { data: settings } = useQuery({ queryKey: ['tenant-settings'], queryFn: getTenantSettings });
   const createRoom = useCreateRoom();
   const createRoomType = useCreateRoomType();
-  const [activeForm, setActiveForm] = useState<'room' | 'type' | null>(null);
+  const [activeTab, setActiveTab] = useState('rooms');
   const [roomForm, setRoomForm] = useState<Partial<Room>>(emptyRoom);
   const [roomTypeForm, setRoomTypeForm] = useState<Omit<RoomType, 'id'>>(emptyRoomType);
 
@@ -50,221 +48,140 @@ const Rooms: React.FC = () => {
 
   const handleCreateRoom = (e: React.FormEvent) => {
     e.preventDefault();
-    createRoom.mutate(roomForm as Omit<Room, 'id' | 'room_type_name' | 'room_type_details'>, {
-      onSuccess: () => {
-        setActiveForm(null);
-        setRoomForm(emptyRoom);
-      },
-    });
+    createRoom.mutate(roomForm as Omit<Room, 'id' | 'room_type_name' | 'room_type_details'>, { onSuccess: () => setRoomForm(emptyRoom) });
   };
 
   const handleCreateRoomType = (e: React.FormEvent) => {
     e.preventDefault();
-    createRoomType.mutate(roomTypeForm, {
-      onSuccess: () => {
-        setActiveForm(null);
-        setRoomTypeForm(emptyRoomType);
-      },
-    });
+    createRoomType.mutate(roomTypeForm, { onSuccess: () => setRoomTypeForm(emptyRoomType) });
   };
 
   if (isLoading) return <div className="p-6 text-slate-600">Loading rooms...</div>;
   if (error) return <div className="p-6 text-red-600">Error loading rooms</div>;
 
+  const tabs = [
+    { id: 'rooms', label: 'Rooms', count: rooms?.length || 0 },
+    { id: 'types', label: 'Room Types', count: roomTypes?.length || 0 },
+    { id: 'create-room', label: 'Add Room' },
+    { id: 'create-type', label: 'Add Type' },
+  ];
+  const roomStatusCounts = {
+    available: rooms?.filter((room) => room.status === 'available').length || 0,
+    occupied: rooms?.filter((room) => room.status === 'occupied').length || 0,
+    cleaning: rooms?.filter((room) => room.status === 'cleaning').length || 0,
+    maintenance: rooms?.filter((room) => room.status === 'maintenance').length || 0,
+  };
+
   return (
-    <div className="mx-auto max-w-6xl p-6">
-      <div className="mb-6 flex flex-col gap-4 rounded-3xl bg-white p-8 shadow-sm md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Rooms Management</h1>
-          <p className="mt-2 text-slate-600">Set up room types, room inventory, rates, and operational status.</p>
-        </div>
-        <div className="flex flex-wrap gap-3">
-          <button
-            onClick={() => setActiveForm(activeForm === 'type' ? null : 'type')}
-            className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            {activeForm === 'type' ? 'Cancel' : 'Add Type'}
-          </button>
-          <button
-            onClick={() => setActiveForm(activeForm === 'room' ? null : 'room')}
-            className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-          >
-            {activeForm === 'room' ? 'Cancel' : 'Add Room'}
-          </button>
-        </div>
-      </div>
-
-      {activeForm === 'type' && (
-        <form onSubmit={handleCreateRoomType} className="mb-6 rounded-3xl bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">Create Room Type</h2>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <input
-              type="text"
-              placeholder="Type Name"
-              value={roomTypeForm.name}
-              onChange={(e) => setRoomTypeForm({ ...roomTypeForm, name: e.target.value })}
-              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
-              required
-            />
-            <input
-              type="text"
-              placeholder="Code"
-              value={roomTypeForm.code}
-              onChange={(e) => setRoomTypeForm({ ...roomTypeForm, code: e.target.value.toLowerCase().replace(/\s+/g, '_') })}
-              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
-              required
-            />
-            <input
-              type="number"
-              placeholder="Base Occupancy"
-              value={roomTypeForm.base_occupancy}
-              onChange={(e) => setRoomTypeForm({ ...roomTypeForm, base_occupancy: Number(e.target.value) })}
-              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
-              min="1"
-              required
-            />
-            <input
-              type="number"
-              placeholder="Max Occupancy"
-              value={roomTypeForm.max_occupancy}
-              onChange={(e) => setRoomTypeForm({ ...roomTypeForm, max_occupancy: Number(e.target.value) })}
-              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
-              min="1"
-              required
-            />
-            <input
-              type="number"
-              step="0.01"
-              placeholder="Base Rate"
-              value={roomTypeForm.base_rate}
-              onChange={(e) => setRoomTypeForm({ ...roomTypeForm, base_rate: e.target.value })}
-              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
-              required
-            />
-            <textarea
-              placeholder="Description"
-              value={roomTypeForm.description}
-              onChange={(e) => setRoomTypeForm({ ...roomTypeForm, description: e.target.value })}
-              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
-            />
+    <div className="space-y-5">
+      <section className="rounded-3xl bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Rooms Management</h1>
+            <p className="mt-1 text-sm text-slate-500">Room inventory, rates, status, and room type setup in compact rows.</p>
           </div>
-          {createRoomType.isError && <p className="mt-4 text-sm text-red-600">Could not create room type.</p>}
-          <button type="submit" className="mt-4 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
-            Create Type
-          </button>
-        </form>
-      )}
+          <CompactTabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
+        </div>
+      </section>
 
-      {activeForm === 'room' && (
-        <form onSubmit={handleCreateRoom} className="mb-6 rounded-3xl bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">Create Room</h2>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <input
-              type="text"
-              placeholder="Room Number"
-              value={roomForm.room_number}
-              onChange={(e) => setRoomForm({ ...roomForm, room_number: e.target.value })}
-              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
-              required
-            />
-            <select
-              value={roomForm.room_type}
-              onChange={(e) => handleRoomTypeChange(e.target.value)}
-              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
-              required
-            >
-              <option value="">{roomTypesLoading ? 'Loading room types...' : 'Select Room Type'}</option>
-              {roomTypes?.map((roomType) => (
-                <option key={roomType.id} value={roomType.id}>
-                  {roomType.name} - {formatMoney(roomType.base_rate, settings?.currency)}
-                </option>
-              ))}
-            </select>
-            <input
-              type="number"
-              placeholder="Capacity"
-              value={roomForm.capacity}
-              onChange={(e) => setRoomForm({ ...roomForm, capacity: Number(e.target.value) })}
-              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
-              min="1"
-              required
-            />
-            <input
-              type="number"
-              step="0.01"
-              placeholder="Price per Night"
-              value={roomForm.price_per_night}
-              onChange={(e) => setRoomForm({ ...roomForm, price_per_night: e.target.value })}
-              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
-              required
-            />
-            <select
-              value={roomForm.status}
-              onChange={(e) => setRoomForm({ ...roomForm, status: e.target.value as Room['status'] })}
-              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
-            >
-              <option value="available">Available</option>
-              <option value="occupied">Occupied</option>
-              <option value="maintenance">Maintenance</option>
-              <option value="cleaning">Cleaning</option>
-            </select>
-            <textarea
-              placeholder="Description"
-              value={roomForm.description}
-              onChange={(e) => setRoomForm({ ...roomForm, description: e.target.value })}
-              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
-            />
-          </div>
-          {createRoom.isError && <p className="mt-4 text-sm text-red-600">Could not create room.</p>}
-          <button type="submit" className="mt-4 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
-            Create Room
-          </button>
-        </form>
-      )}
-
-      <section className="mb-6 grid gap-4 md:grid-cols-3">
-        {roomTypes?.map((roomType) => (
-          <article key={roomType.id} className="rounded-3xl bg-white p-5 shadow-sm">
-            <h3 className="font-semibold text-slate-900">{roomType.name}</h3>
-            <p className="mt-1 text-sm text-slate-500">{roomType.code}</p>
-            <p className="mt-3 text-sm text-slate-700">
-              Occupancy {roomType.base_occupancy}-{roomType.max_occupancy} | {formatMoney(roomType.base_rate, settings?.currency)}
-            </p>
+      <section className="grid gap-4 md:grid-cols-4">
+        {Object.entries(roomStatusCounts).map(([status, count]) => (
+          <article key={status} className="rounded-3xl bg-white p-5 shadow-sm">
+            <p className="text-sm capitalize text-slate-500">{status}</p>
+            <p className="mt-2 text-2xl font-bold text-[#1F5E3B]">{count}</p>
           </article>
         ))}
       </section>
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {rooms?.map((room) => (
-          <article key={room.id} className="rounded-3xl bg-white p-5 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-900">Room {room.room_number}</h3>
-                <p className="text-sm text-slate-500">{room.room_type_name}</p>
-              </div>
-              <span
-                className={`rounded-full px-3 py-1 text-xs font-medium ${
-                  room.status === 'available'
-                    ? 'bg-green-100 text-green-800'
-                    : room.status === 'occupied'
-                      ? 'bg-red-100 text-red-800'
-                      : 'bg-yellow-100 text-yellow-800'
-                }`}
-              >
-                {room.status}
-              </span>
-            </div>
-            <div className="mt-4 space-y-1 text-sm text-slate-700">
-              <p>Capacity: {room.capacity}</p>
-              <p>Rate: {formatMoney(room.price_per_night, settings?.currency)}/night</p>
-              {room.description && <p>{room.description}</p>}
-            </div>
-          </article>
-        ))}
-        {rooms?.length === 0 && <p className="text-slate-600">No rooms created yet.</p>}
-      </section>
+      {activeTab === 'rooms' && (
+        <section className="rounded-3xl bg-white p-5 shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[860px] text-left text-sm">
+              <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
+                <tr><th className="py-3 pr-4">Room</th><th className="py-3 pr-4">Type</th><th className="py-3 pr-4">Capacity</th><th className="py-3 pr-4">Rate</th><th className="py-3 pr-4">Status</th><th className="py-3 pr-4">Description</th></tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {rooms?.map((room) => (
+                  <tr key={room.id}>
+                    <td className="py-3 pr-4 font-medium text-slate-900">Room {room.room_number}</td>
+                    <td className="py-3 pr-4">{room.room_type_name}</td>
+                    <td className="py-3 pr-4">{room.capacity}</td>
+                    <td className="py-3 pr-4">{formatMoney(room.price_per_night, settings?.currency)}</td>
+                    <td className="py-3 pr-4">
+                      <span className={`rounded-full px-2 py-1 text-xs font-medium ${room.status === 'available' ? 'bg-emerald-50 text-emerald-700' : room.status === 'occupied' ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>{room.status}</span>
+                    </td>
+                    <td className="max-w-xs truncate py-3 pr-4 text-slate-500">{room.description || '-'}</td>
+                  </tr>
+                ))}
+                {rooms?.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No rooms created yet.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {activeTab === 'types' && (
+        <section className="rounded-3xl bg-white p-5 shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
+                <tr><th className="py-3 pr-4">Type</th><th className="py-3 pr-4">Code</th><th className="py-3 pr-4">Occupancy</th><th className="py-3 pr-4">Base Rate</th><th className="py-3 pr-4">Active</th></tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {roomTypes?.map((roomType) => (
+                  <tr key={roomType.id}>
+                    <td className="py-3 pr-4 font-medium text-slate-900">{roomType.name}</td>
+                    <td className="py-3 pr-4">{roomType.code}</td>
+                    <td className="py-3 pr-4">{roomType.base_occupancy}-{roomType.max_occupancy}</td>
+                    <td className="py-3 pr-4">{formatMoney(roomType.base_rate, settings?.currency)}</td>
+                    <td className="py-3 pr-4">{roomType.is_active ? 'Yes' : 'No'}</td>
+                  </tr>
+                ))}
+                {roomTypes?.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-slate-500">No room types yet.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {activeTab === 'create-room' && (
+        <FormPanel title="Create Room" onSubmit={handleCreateRoom}>
+          <input placeholder="Room Number" value={roomForm.room_number} onChange={(e) => setRoomForm({ ...roomForm, room_number: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+          <select value={roomForm.room_type} onChange={(e) => handleRoomTypeChange(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required>
+            <option value="">{roomTypesLoading ? 'Loading room types...' : 'Select Room Type'}</option>
+            {roomTypes?.map((roomType) => <option key={roomType.id} value={roomType.id}>{roomType.name} - {formatMoney(roomType.base_rate, settings?.currency)}</option>)}
+          </select>
+          <input type="number" placeholder="Capacity" value={roomForm.capacity} onChange={(e) => setRoomForm({ ...roomForm, capacity: Number(e.target.value) })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" min="1" required />
+          <input type="number" step="0.01" placeholder="Price per Night" value={roomForm.price_per_night} onChange={(e) => setRoomForm({ ...roomForm, price_per_night: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+          <select value={roomForm.status} onChange={(e) => setRoomForm({ ...roomForm, status: e.target.value as Room['status'] })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <option value="available">Available</option><option value="occupied">Occupied</option><option value="maintenance">Maintenance</option><option value="cleaning">Cleaning</option>
+          </select>
+          <textarea placeholder="Description" value={roomForm.description} onChange={(e) => setRoomForm({ ...roomForm, description: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+        </FormPanel>
+      )}
+
+      {activeTab === 'create-type' && (
+        <FormPanel title="Create Room Type" onSubmit={handleCreateRoomType}>
+          <input placeholder="Type Name" value={roomTypeForm.name} onChange={(e) => setRoomTypeForm({ ...roomTypeForm, name: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+          <input placeholder="Code" value={roomTypeForm.code} onChange={(e) => setRoomTypeForm({ ...roomTypeForm, code: e.target.value.toLowerCase().replace(/\s+/g, '_') })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+          <input type="number" placeholder="Base Occupancy" value={roomTypeForm.base_occupancy} onChange={(e) => setRoomTypeForm({ ...roomTypeForm, base_occupancy: Number(e.target.value) })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" min="1" required />
+          <input type="number" placeholder="Max Occupancy" value={roomTypeForm.max_occupancy} onChange={(e) => setRoomTypeForm({ ...roomTypeForm, max_occupancy: Number(e.target.value) })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" min="1" required />
+          <input type="number" step="0.01" placeholder="Base Rate" value={roomTypeForm.base_rate} onChange={(e) => setRoomTypeForm({ ...roomTypeForm, base_rate: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+          <textarea placeholder="Description" value={roomTypeForm.description} onChange={(e) => setRoomTypeForm({ ...roomTypeForm, description: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+        </FormPanel>
+      )}
     </div>
   );
 };
+
+const FormPanel = ({ title, onSubmit, children }: { title: string; onSubmit: (e: React.FormEvent) => void; children: React.ReactNode }) => (
+  <section className="rounded-3xl bg-white p-5 shadow-sm">
+    <form onSubmit={onSubmit}>
+      <h2 className="font-bold text-slate-900">{title}</h2>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">{children}</div>
+      <button className="mt-4 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">Save</button>
+    </form>
+  </section>
+);
 
 export default Rooms;

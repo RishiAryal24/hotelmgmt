@@ -168,16 +168,13 @@ const Dashboard = () => {
 
   return (
     <div className="space-y-6">
-      <section className="flex flex-col gap-4 rounded-3xl bg-white p-5 shadow-sm md:flex-row md:items-center md:justify-between">
+      <section className="flex flex-col gap-4 rounded-3xl bg-white p-5 shadow-sm md:flex-row md:items-start md:justify-between">
         <div>
-          <p className="inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[#1F5E3B]">
-            Green Hospitality
-          </p>
-          <h1 className="mt-3 text-2xl font-bold text-slate-900 md:text-3xl">
-            {user?.is_platform_admin ? 'Platform performance overview' : 'Hotel performance overview'}
+          <h1 className="text-2xl font-bold text-slate-900 md:text-3xl">
+            {user?.is_platform_admin ? 'Platform Dashboard' : 'Operations Dashboard'}
           </h1>
           <p className="mt-2 max-w-3xl text-sm text-slate-500">
-            Analytical signals for reservations, rooms, housekeeping, restaurant, inventory, POS, and accounting.
+            Live signals from reservations, rooms, housekeeping, restaurant, inventory, POS, and accounting.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-3 text-sm sm:flex">

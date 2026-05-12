@@ -33,7 +33,7 @@ const Login = () => {
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-lg">
-        <h1 className="mb-6 text-2xl font-semibold text-slate-900">Hotel ERP Login</h1>
+        <h1 className="mb-6 text-2xl font-semibold text-slate-900">PyLoom Hospitality Login</h1>
         <form onSubmit={formik.handleSubmit} className="space-y-4">
           <label className="block text-sm font-medium text-slate-700">
             Email

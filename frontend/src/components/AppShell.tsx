@@ -58,8 +58,8 @@ const AppShell = () => {
             <Sparkles size={22} />
           </div>
           <div>
-            <h1 className="text-xl font-bold">GreenStay ERP</h1>
-            <p className="text-sm text-green-100">Hospitality Platform</p>
+            <h1 className="text-xl font-bold">PyLoom</h1>
+            <p className="text-sm text-green-100">Hospitality Management System</p>
           </div>
         </div>
 

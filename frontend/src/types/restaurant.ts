@@ -1,3 +1,5 @@
+import { InventoryItem } from './inventory';
+
 export interface MenuCategory {
   id: string;
   name: string;
@@ -11,6 +13,9 @@ export interface MenuItem {
   id: string;
   category: string;
   category_details?: MenuCategory;
+  inventory_item: string | null;
+  inventory_item_details?: InventoryItem | null;
+  inventory_quantity_per_unit: string;
   name: string;
   sku: string;
   description: string;

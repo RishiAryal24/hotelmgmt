@@ -12,6 +12,7 @@ import {
   useRestaurantOrders,
   useRestaurantTables,
 } from '../hooks/restaurant';
+import { useInventoryItems } from '../hooks/inventory';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
 import { MenuCategory, MenuItem, RestaurantTable } from '../types/restaurant';
 import { useQuery } from '@tanstack/react-query';
@@ -26,6 +27,8 @@ const emptyCategory = {
 
 const emptyItem = {
   category: '',
+  inventory_item: '',
+  inventory_quantity_per_unit: '0',
   name: '',
   sku: '',
   description: '',
@@ -60,6 +63,7 @@ const Restaurant: React.FC = () => {
   const { data: settings } = useQuery({ queryKey: ['tenant-settings'], queryFn: getTenantSettings });
   const { data: categories, isLoading: categoriesLoading } = useMenuCategories();
   const { data: items, isLoading: itemsLoading } = useMenuItems();
+  const { data: inventoryItems, isLoading: inventoryLoading } = useInventoryItems();
   const { data: tables, isLoading: tablesLoading } = useRestaurantTables();
   const { data: orders } = useRestaurantOrders();
   const { data: tickets } = useKitchenTickets();
@@ -71,7 +75,7 @@ const Restaurant: React.FC = () => {
   const ticketAction = useKitchenTicketAction();
   const [activeForm, setActiveForm] = useState<'category' | 'item' | 'table' | 'order' | null>(null);
   const [categoryForm, setCategoryForm] = useState<Omit<MenuCategory, 'id'>>(emptyCategory);
-  const [itemForm, setItemForm] = useState<Omit<MenuItem, 'id' | 'category_details'>>(emptyItem);
+  const [itemForm, setItemForm] = useState<Omit<MenuItem, 'id' | 'category_details' | 'inventory_item_details'>>(emptyItem);
   const [tableForm, setTableForm] = useState<Omit<RestaurantTable, 'id'>>(emptyTable);
   const [orderForm, setOrderForm] = useState(emptyOrder);
   const [lineForms, setLineForms] = useState<Record<string, typeof emptyOrderLine>>({});
@@ -88,12 +92,18 @@ const Restaurant: React.FC = () => {
 
   const handleCreateItem = (e: React.FormEvent) => {
     e.preventDefault();
-    createItem.mutate(itemForm, {
+    createItem.mutate(
+      {
+        ...itemForm,
+        inventory_item: itemForm.inventory_item || null,
+      },
+      {
       onSuccess: () => {
         setActiveForm(null);
         setItemForm(emptyItem);
       },
-    });
+      },
+    );
   };
 
   const handleCreateTable = (e: React.FormEvent) => {
@@ -269,6 +279,26 @@ const Restaurant: React.FC = () => {
               className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
               min="1"
             />
+            <select
+              value={itemForm.inventory_item || ''}
+              onChange={(e) => setItemForm({ ...itemForm, inventory_item: e.target.value })}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
+            >
+              <option value="">{inventoryLoading ? 'Loading inventory...' : 'No inventory deduction'}</option>
+              {inventoryItems?.map((inventoryItem) => (
+                <option key={inventoryItem.id} value={inventoryItem.id}>
+                  {inventoryItem.sku} - {inventoryItem.name} ({inventoryItem.unit})
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              step="0.001"
+              placeholder="Inventory Qty per Sale"
+              value={itemForm.inventory_quantity_per_unit}
+              onChange={(e) => setItemForm({ ...itemForm, inventory_quantity_per_unit: e.target.value })}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
+            />
             <textarea
               placeholder="Description"
               value={itemForm.description}
@@ -395,6 +425,11 @@ const Restaurant: React.FC = () => {
                   <span className="text-sm font-semibold text-slate-900">{formatMoney(item.price, settings?.currency)}</span>
                 </div>
                 <p className="mt-2 text-sm text-slate-600">{item.preparation_station} | {item.preparation_time_minutes} min</p>
+                {item.inventory_item_details && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Deducts {Number(item.inventory_quantity_per_unit).toLocaleString()} {item.inventory_item_details.unit} {item.inventory_item_details.name}
+                  </p>
+                )}
               </div>
             ))}
             {items?.length === 0 && <p className="text-sm text-slate-600">No menu items yet.</p>}

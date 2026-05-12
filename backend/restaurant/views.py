@@ -198,7 +198,9 @@ class RestaurantOrderViewSet(viewsets.ModelViewSet):
                 )
 
             from accounting.services import post_restaurant_settlement
+            from inventory.services import deduct_restaurant_order_inventory
 
+            deduct_restaurant_order_inventory(order, posted_by=request.user)
             post_restaurant_settlement(order, posted_by=request.user)
 
         return Response(RestaurantOrderSerializer(order).data)

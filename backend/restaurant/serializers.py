@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from inventory.serializers import InventoryItemSerializer
 from restaurant.models import (
     KitchenTicket,
     KitchenTicketLine,
@@ -19,6 +20,7 @@ class MenuCategorySerializer(serializers.ModelSerializer):
 
 class MenuItemSerializer(serializers.ModelSerializer):
     category_details = MenuCategorySerializer(source='category', read_only=True)
+    inventory_item_details = InventoryItemSerializer(source='inventory_item', read_only=True)
 
     class Meta:
         model = MenuItem

@@ -19,6 +19,14 @@ class MenuCategory(UUIDModel):
 
 class MenuItem(UUIDModel):
     category = models.ForeignKey(MenuCategory, on_delete=models.PROTECT, related_name='items')
+    inventory_item = models.ForeignKey(
+        'inventory.InventoryItem',
+        on_delete=models.PROTECT,
+        related_name='menu_items',
+        null=True,
+        blank=True,
+    )
+    inventory_quantity_per_unit = models.DecimalField(max_digits=12, decimal_places=3, default=0)
     name = models.CharField(max_length=150)
     sku = models.CharField(max_length=50, unique=True)
     description = models.TextField(blank=True)

@@ -150,6 +150,8 @@ export const useSettleRestaurantOrder = () => {
       queryClient.invalidateQueries({ queryKey: ['restaurant-tables'] });
       queryClient.invalidateQueries({ queryKey: ['guest-folios'] });
       queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-items'] });
+      queryClient.invalidateQueries({ queryKey: ['stock-movements'] });
     },
   });
 };

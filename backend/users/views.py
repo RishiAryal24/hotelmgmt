@@ -4,6 +4,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 from users.models import Permission, PlatformUser, Role
+from users.permissions import HasActionPermission
 from users.serializers import PermissionSerializer, RoleSerializer, StaffUserCreateSerializer, UserSerializer
 
 
@@ -16,7 +17,11 @@ class CurrentUserView(APIView):
 
 class PlatformUserListView(generics.ListCreateAPIView):
     queryset = PlatformUser.objects.all()
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'get': 'users.staff.read',
+        'post': 'users.staff.create',
+    }
 
     def get_serializer_class(self):
         if self.request.method == 'POST':
@@ -47,7 +52,10 @@ class PlatformUserListView(generics.ListCreateAPIView):
 
 class PlatformUserDetailView(generics.RetrieveAPIView):
     serializer_class = UserSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'get': 'users.staff.read',
+    }
 
     def get_queryset(self):
         user = self.request.user
@@ -63,12 +71,19 @@ class PlatformTokenObtainPairView(TokenObtainPairView):
 class PermissionListView(generics.ListAPIView):
     queryset = Permission.objects.all().order_by('module', 'name')
     serializer_class = PermissionSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'get': 'users.staff.read',
+    }
 
 
 class RoleListCreateView(generics.ListCreateAPIView):
     serializer_class = RoleSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'get': 'users.staff.read',
+        'post': 'users.staff.create',
+    }
 
     def get_queryset(self):
         user = self.request.user

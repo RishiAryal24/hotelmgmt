@@ -6,13 +6,24 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+from rest_framework.permissions import IsAuthenticated
 from bookings.models import Room, RoomType, Guest, Booking, GuestFolio
 from bookings.serializers import RoomSerializer, RoomTypeSerializer, GuestSerializer, BookingSerializer, GuestFolioSerializer
+from users.permissions import HasActionPermission
 
 
 class RoomTypeViewSet(viewsets.ModelViewSet):
     queryset = RoomType.objects.all()
     serializer_class = RoomTypeSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'rooms.room.read',
+        'retrieve': 'rooms.room.read',
+        'create': 'rooms.room.update',
+        'update': 'rooms.room.update',
+        'partial_update': 'rooms.room.update',
+        'destroy': 'rooms.room.update',
+    }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['is_active']
     search_fields = ['name', 'code']
@@ -22,6 +33,16 @@ class RoomTypeViewSet(viewsets.ModelViewSet):
 class RoomViewSet(viewsets.ModelViewSet):
     queryset = Room.objects.select_related('room_type').all()
     serializer_class = RoomSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'rooms.room.read',
+        'retrieve': 'rooms.room.read',
+        'create': 'rooms.room.update',
+        'update': 'rooms.room.update',
+        'partial_update': 'rooms.room.update',
+        'destroy': 'rooms.room.update',
+        'update_status': 'rooms.room.update',
+    }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'room_type']
     search_fields = ['room_number', 'room_type__name', 'room_type__code']
@@ -41,6 +62,15 @@ class RoomViewSet(viewsets.ModelViewSet):
 class GuestViewSet(viewsets.ModelViewSet):
     queryset = Guest.objects.all()
     serializer_class = GuestSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'bookings.reservation.read',
+        'retrieve': 'bookings.reservation.read',
+        'create': 'bookings.reservation.create',
+        'update': 'bookings.reservation.create',
+        'partial_update': 'bookings.reservation.create',
+        'destroy': 'bookings.reservation.create',
+    }
     filter_backends = [SearchFilter, OrderingFilter]
     search_fields = ['first_name', 'last_name', 'email', 'phone']
     ordering_fields = ['last_name', 'first_name', 'email']
@@ -49,6 +79,19 @@ class GuestViewSet(viewsets.ModelViewSet):
 class BookingViewSet(viewsets.ModelViewSet):
     queryset = Booking.objects.all()
     serializer_class = BookingSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'bookings.reservation.read',
+        'retrieve': 'bookings.reservation.read',
+        'availability': 'bookings.reservation.read',
+        'create': 'bookings.reservation.create',
+        'update': 'bookings.reservation.create',
+        'partial_update': 'bookings.reservation.create',
+        'destroy': 'bookings.reservation.create',
+        'cancel': 'bookings.reservation.create',
+        'check_in': 'bookings.reservation.check_in',
+        'check_out': 'bookings.reservation.check_out',
+    }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'room', 'guest']
     search_fields = ['guest__first_name', 'guest__last_name', 'guest__email']
@@ -144,6 +187,12 @@ class BookingViewSet(viewsets.ModelViewSet):
 class GuestFolioViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = GuestFolio.objects.select_related('booking', 'booking__guest', 'booking__room').all()
     serializer_class = GuestFolioSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'bookings.reservation.read',
+        'retrieve': 'bookings.reservation.read',
+        'settle': 'bookings.reservation.check_out',
+    }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'booking']
     search_fields = ['folio_number', 'booking__guest__first_name', 'booking__guest__last_name', 'booking__room__room_number']

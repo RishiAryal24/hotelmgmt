@@ -52,7 +52,6 @@ const tenantModules = [
     description: 'Track stock, vendors, purchase orders, and food costing.',
     path: '/inventory',
     permissions: ['inventory.stock.read', 'inventory.purchase.create'],
-    disabled: true,
   },
   {
     title: 'HRMS',

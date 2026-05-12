@@ -12,7 +12,7 @@ apiClient.interceptors.request.use((config) => {
   const accessToken = localStorage.getItem('access_token');
   const tenantDomain = localStorage.getItem('tenant_domain');
   const requestUrl = config.url || '';
-  const tenantScopedPrefixes = ['/bookings/', '/housekeeping/', '/restaurant/', '/accounting/'];
+  const tenantScopedPrefixes = ['/bookings/', '/housekeeping/', '/restaurant/', '/accounting/', '/inventory/'];
   const isTenantScopedApi = tenantScopedPrefixes.some((prefix) => requestUrl.startsWith(prefix));
 
   if (accessToken) {

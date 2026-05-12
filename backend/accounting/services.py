@@ -9,6 +9,7 @@ DEFAULT_ACCOUNTS = [
     ('1000', 'Cash', 'asset'),
     ('1010', 'Bank', 'asset'),
     ('1100', 'Accounts Receivable', 'asset'),
+    ('1200', 'Inventory Asset', 'asset'),
     ('2000', 'Accounts Payable', 'liability'),
     ('2100', 'Tax Payable', 'liability'),
     ('3000', 'Owner Equity', 'equity'),
@@ -139,4 +140,32 @@ def post_room_payment(folio, posted_by=None):
         source_id=str(folio.id),
         posted_by=posted_by,
         lines=lines,
+    )
+
+
+def post_inventory_purchase(movement, payment_account='2000', posted_by=None):
+    if JournalEntry.objects.filter(source_module='inventory_purchase', source_id=str(movement.id), status='posted').exists():
+        return None
+
+    seed_default_accounts()
+    total_cost = movement.total_cost
+    return post_journal_entry(
+        description=f'Inventory purchase {movement.reference or movement.item.sku}',
+        source_module='inventory_purchase',
+        source_id=str(movement.id),
+        posted_by=posted_by,
+        lines=[
+            {
+                'account': '1200',
+                'description': f'Inventory received: {movement.item.name}',
+                'debit': total_cost,
+                'credit': 0,
+            },
+            {
+                'account': payment_account,
+                'description': f'Inventory purchase payable: {movement.item.name}',
+                'debit': 0,
+                'credit': total_cost,
+            },
+        ],
     )

@@ -10,6 +10,7 @@ import Housekeeping from './pages/Housekeeping';
 import Restaurant from './pages/Restaurant';
 import POS from './pages/POS';
 import Accounting from './pages/Accounting';
+import Inventory from './pages/Inventory';
 
 function App() {
   return (
@@ -39,6 +40,9 @@ function App() {
         </Route>
         <Route element={<ProtectedRoute permissions={['accounting.ledger.read', 'accounting.journal.create']} />}>
           <Route path="/accounting" element={<Accounting />} />
+        </Route>
+        <Route element={<ProtectedRoute permissions={['inventory.stock.read', 'inventory.purchase.create']} />}>
+          <Route path="/inventory" element={<Inventory />} />
         </Route>
         <Route element={<ProtectedRoute permissions={['platform.tenants.create']} />}>
           <Route path="/onboarding" element={<TenantOnboarding />} />

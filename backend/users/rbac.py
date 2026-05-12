@@ -69,7 +69,7 @@ DEFAULT_ROLES = [
         'cashier',
         'Cashier',
         'POS settlement and billing',
-        ['pos.sale.create', 'restaurant.order.update'],
+        ['pos.sale.create', 'restaurant.order.update', 'bookings.reservation.read'],
     ),
     (
         'inventory_manager',

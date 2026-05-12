@@ -3,16 +3,32 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter, SearchFilter
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from bookings.models import Room
 from housekeeping.models import HousekeepingTask
 from housekeeping.serializers import HousekeepingTaskSerializer
+from users.permissions import HasActionPermission
 
 
 class HousekeepingTaskViewSet(viewsets.ModelViewSet):
     queryset = HousekeepingTask.objects.select_related('room', 'room__room_type', 'assigned_to').all()
     serializer_class = HousekeepingTaskSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'housekeeping.task.update',
+        'retrieve': 'housekeeping.task.update',
+        'create': 'housekeeping.task.update',
+        'update': 'housekeeping.task.update',
+        'partial_update': 'housekeeping.task.update',
+        'destroy': 'housekeeping.task.update',
+        'start': 'housekeeping.task.update',
+        'complete': 'housekeeping.task.update',
+        'block': 'housekeeping.task.update',
+        'escalate_maintenance': 'housekeeping.task.update',
+        'create_for_room': 'housekeeping.task.update',
+    }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'task_type', 'priority', 'room', 'assigned_to']
     search_fields = ['room__room_number', 'notes']
@@ -73,4 +89,3 @@ class HousekeepingTaskViewSet(viewsets.ModelViewSet):
         room.status = 'cleaning'
         room.save(update_fields=['status', 'updated_at'])
         return Response(HousekeepingTaskSerializer(task).data, status=status.HTTP_201_CREATED)
-

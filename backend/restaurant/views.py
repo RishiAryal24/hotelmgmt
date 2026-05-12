@@ -5,6 +5,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.filters import OrderingFilter, SearchFilter
+from rest_framework.permissions import IsAuthenticated
 
 from restaurant.models import KitchenTicket, KitchenTicketLine, MenuCategory, MenuItem, RestaurantOrder, RestaurantOrderLine, RestaurantTable
 from restaurant.serializers import (
@@ -15,11 +16,21 @@ from restaurant.serializers import (
     RestaurantOrderSerializer,
     RestaurantTableSerializer,
 )
+from users.permissions import HasActionPermission
 
 
 class MenuCategoryViewSet(viewsets.ModelViewSet):
     queryset = MenuCategory.objects.all()
     serializer_class = MenuCategorySerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': ['restaurant.order.create', 'restaurant.order.update', 'restaurant.kitchen.update', 'pos.sale.create'],
+        'retrieve': ['restaurant.order.create', 'restaurant.order.update', 'restaurant.kitchen.update', 'pos.sale.create'],
+        'create': 'restaurant.order.update',
+        'update': 'restaurant.order.update',
+        'partial_update': 'restaurant.order.update',
+        'destroy': 'restaurant.order.update',
+    }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['is_active']
     search_fields = ['name', 'code']
@@ -29,6 +40,15 @@ class MenuCategoryViewSet(viewsets.ModelViewSet):
 class MenuItemViewSet(viewsets.ModelViewSet):
     queryset = MenuItem.objects.select_related('category').all()
     serializer_class = MenuItemSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': ['restaurant.order.create', 'restaurant.order.update', 'restaurant.kitchen.update', 'pos.sale.create'],
+        'retrieve': ['restaurant.order.create', 'restaurant.order.update', 'restaurant.kitchen.update', 'pos.sale.create'],
+        'create': 'restaurant.order.update',
+        'update': 'restaurant.order.update',
+        'partial_update': 'restaurant.order.update',
+        'destroy': 'restaurant.order.update',
+    }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['category', 'preparation_station', 'is_available', 'is_active']
     search_fields = ['name', 'sku', 'description']
@@ -38,6 +58,15 @@ class MenuItemViewSet(viewsets.ModelViewSet):
 class RestaurantTableViewSet(viewsets.ModelViewSet):
     queryset = RestaurantTable.objects.all()
     serializer_class = RestaurantTableSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': ['restaurant.order.create', 'restaurant.order.update', 'restaurant.kitchen.update', 'pos.sale.create'],
+        'retrieve': ['restaurant.order.create', 'restaurant.order.update', 'restaurant.kitchen.update', 'pos.sale.create'],
+        'create': 'restaurant.order.update',
+        'update': 'restaurant.order.update',
+        'partial_update': 'restaurant.order.update',
+        'destroy': 'restaurant.order.update',
+    }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'section', 'is_active']
     search_fields = ['table_number', 'section']
@@ -47,6 +76,19 @@ class RestaurantTableViewSet(viewsets.ModelViewSet):
 class RestaurantOrderViewSet(viewsets.ModelViewSet):
     queryset = RestaurantOrder.objects.select_related('table', 'waiter').prefetch_related('lines', 'lines__menu_item').all()
     serializer_class = RestaurantOrderSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': ['restaurant.order.create', 'restaurant.order.update', 'restaurant.kitchen.update', 'pos.sale.create'],
+        'retrieve': ['restaurant.order.create', 'restaurant.order.update', 'restaurant.kitchen.update', 'pos.sale.create'],
+        'create': 'restaurant.order.create',
+        'update': 'restaurant.order.update',
+        'partial_update': 'restaurant.order.update',
+        'destroy': 'restaurant.order.update',
+        'add_line': 'restaurant.order.update',
+        'send_to_kitchen': 'restaurant.order.update',
+        'mark_served': 'restaurant.order.update',
+        'settle': 'pos.sale.create',
+    }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'order_type', 'table', 'waiter']
     search_fields = ['order_number', 'table__table_number', 'notes']
@@ -165,6 +207,17 @@ class RestaurantOrderViewSet(viewsets.ModelViewSet):
 class KitchenTicketViewSet(viewsets.ModelViewSet):
     queryset = KitchenTicket.objects.select_related('order', 'order__table').prefetch_related('lines', 'lines__order_line__menu_item').all()
     serializer_class = KitchenTicketSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'restaurant.kitchen.update',
+        'retrieve': 'restaurant.kitchen.update',
+        'create': 'restaurant.kitchen.update',
+        'update': 'restaurant.kitchen.update',
+        'partial_update': 'restaurant.kitchen.update',
+        'destroy': 'restaurant.kitchen.update',
+        'start': 'restaurant.kitchen.update',
+        'mark_ready': 'restaurant.kitchen.update',
+    }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'station', 'order']
     search_fields = ['ticket_number', 'order__order_number']

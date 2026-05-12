@@ -19,6 +19,7 @@ export interface MenuItem {
   name: string;
   sku: string;
   description: string;
+  image: string | null;
   price: string;
   preparation_station: 'kitchen' | 'bar' | 'pastry' | 'counter';
   preparation_time_minutes: number;

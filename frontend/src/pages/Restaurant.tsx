@@ -26,6 +26,7 @@ const emptyItem = {
   name: '',
   sku: '',
   description: '',
+  image: null,
   price: '',
   preparation_station: 'kitchen' as MenuItem['preparation_station'],
   preparation_time_minutes: 15,
@@ -53,6 +54,7 @@ const Restaurant: React.FC = () => {
   const [activeTab, setActiveTab] = useState('orders');
   const [categoryForm, setCategoryForm] = useState<Omit<MenuCategory, 'id'>>(emptyCategory);
   const [itemForm, setItemForm] = useState<Omit<MenuItem, 'id' | 'category_details' | 'inventory_item_details'>>(emptyItem);
+  const [itemImage, setItemImage] = useState<File | null>(null);
   const [tableForm, setTableForm] = useState<Omit<RestaurantTable, 'id'>>(emptyTable);
   const [orderForm, setOrderForm] = useState(emptyOrder);
   const [lineForms, setLineForms] = useState<Record<string, typeof emptyOrderLine>>({});
@@ -73,7 +75,21 @@ const Restaurant: React.FC = () => {
 
   const handleCreateItem = (e: React.FormEvent) => {
     e.preventDefault();
-    createItem.mutate({ ...itemForm, inventory_item: itemForm.inventory_item || null }, { onSuccess: () => setItemForm(emptyItem) });
+    const payload = new FormData();
+    Object.entries({ ...itemForm, inventory_item: itemForm.inventory_item || '' }).forEach(([key, value]) => {
+      if (value !== null && value !== undefined) {
+        payload.append(key, String(value));
+      }
+    });
+    if (itemImage) {
+      payload.append('image', itemImage);
+    }
+    createItem.mutate(payload, {
+      onSuccess: () => {
+        setItemForm(emptyItem);
+        setItemImage(null);
+      },
+    });
   };
 
   const handleCreateTable = (e: React.FormEvent) => {
@@ -182,12 +198,30 @@ const Restaurant: React.FC = () => {
               <option value="">{inventoryLoading ? 'Loading inventory...' : 'No inventory deduction'}</option>{inventoryItems?.map((inventoryItem) => <option key={inventoryItem.id} value={inventoryItem.id}>{inventoryItem.sku} - {inventoryItem.name}</option>)}
             </select>
             <input type="number" step="0.001" placeholder="Inventory Qty per Sale" value={itemForm.inventory_quantity_per_unit} onChange={(e) => setItemForm({ ...itemForm, inventory_quantity_per_unit: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+            <label className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-600 md:col-span-2">
+              <span className="block font-medium text-slate-700">Menu Picture</span>
+              <input type="file" accept="image/*" onChange={(e) => setItemImage(e.target.files?.[0] || null)} className="mt-2 w-full text-xs" />
+              {itemImage && <span className="mt-1 block text-xs text-[#1F5E3B]">{itemImage.name}</span>}
+            </label>
           </FormPanel>
-          <RowsTable headers={['Item', 'Category', 'Price', 'Station', 'Inventory Deduction']}>
+          <RowsTable headers={['Picture', 'Item', 'Category', 'Price', 'Station', 'Inventory Deduction']}>
             {items?.map((item) => (
-              <tr key={item.id}><td className="py-3 pr-4 font-medium text-slate-900">{item.name}<p className="text-xs text-slate-500">{item.sku}</p></td><td className="py-3 pr-4">{item.category_details?.name}</td><td className="py-3 pr-4">{formatMoney(item.price, settings?.currency)}</td><td className="py-3 pr-4">{item.preparation_station}</td><td className="py-3 pr-4">{item.inventory_item_details ? `${item.inventory_quantity_per_unit} ${item.inventory_item_details.unit} ${item.inventory_item_details.name}` : '-'}</td></tr>
+              <tr key={item.id}>
+                <td className="py-3 pr-4">
+                  {item.image ? (
+                    <img src={item.image} alt={item.name} className="h-12 w-16 rounded-xl object-cover" />
+                  ) : (
+                    <div className="flex h-12 w-16 items-center justify-center rounded-xl bg-slate-100 text-xs text-slate-400">No image</div>
+                  )}
+                </td>
+                <td className="py-3 pr-4 font-medium text-slate-900">{item.name}<p className="text-xs text-slate-500">{item.sku}</p></td>
+                <td className="py-3 pr-4">{item.category_details?.name}</td>
+                <td className="py-3 pr-4">{formatMoney(item.price, settings?.currency)}</td>
+                <td className="py-3 pr-4">{item.preparation_station}</td>
+                <td className="py-3 pr-4">{item.inventory_item_details ? `${item.inventory_quantity_per_unit} ${item.inventory_item_details.unit} ${item.inventory_item_details.name}` : '-'}</td>
+              </tr>
             ))}
-            {items?.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-slate-500">No menu items yet.</td></tr>}
+            {items?.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No menu items yet.</td></tr>}
           </RowsTable>
         </section>
       )}

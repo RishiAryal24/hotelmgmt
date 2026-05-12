@@ -30,6 +30,7 @@ class MenuItem(UUIDModel):
     name = models.CharField(max_length=150)
     sku = models.CharField(max_length=50, unique=True)
     description = models.TextField(blank=True)
+    image = models.ImageField(upload_to='menu-items/', null=True, blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     preparation_station = models.CharField(
         max_length=40,

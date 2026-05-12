@@ -68,7 +68,7 @@ export const useCreateMenuCategory = () => {
 export const useCreateMenuItem = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: Omit<MenuItem, 'id' | 'category_details'>): Promise<MenuItem> => {
+    mutationFn: async (payload: Omit<MenuItem, 'id' | 'category_details' | 'inventory_item_details'> | FormData): Promise<MenuItem> => {
       const response = await apiClient.post('/restaurant/items/', payload);
       return response.data;
     },

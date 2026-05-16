@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from bookings.models import Room, RoomType, Guest, Booking, GuestFolio, GuestFolioLine
+from bookings.models import Room, RoomType, Guest, Booking, GuestFolio, GuestFolioLine, RatePlan, Package, LoyaltyProgram, GuestPoints
 
 
 class RoomTypeSerializer(serializers.ModelSerializer):
@@ -18,9 +18,14 @@ class RoomSerializer(serializers.ModelSerializer):
 
 
 class GuestSerializer(serializers.ModelSerializer):
+    full_name = serializers.SerializerMethodField()
+
     class Meta:
         model = Guest
         fields = '__all__'
+
+    def get_full_name(self, obj):
+        return str(obj)
 
 
 class BookingSerializer(serializers.ModelSerializer):
@@ -89,3 +94,31 @@ class GuestFolioSerializer(serializers.ModelSerializer):
 
     def get_guest_name(self, obj):
         return str(obj.booking.guest)
+
+
+class RatePlanSerializer(serializers.ModelSerializer):
+    room_type_name = serializers.CharField(source='room_type.name', read_only=True)
+
+    class Meta:
+        model = RatePlan
+        fields = '__all__'
+
+
+class PackageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Package
+        fields = '__all__'
+
+
+class LoyaltyProgramSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LoyaltyProgram
+        fields = '__all__'
+
+
+class GuestPointsSerializer(serializers.ModelSerializer):
+    guest_name = serializers.CharField(source='guest.__str__', read_only=True)
+
+    class Meta:
+        model = GuestPoints
+        fields = '__all__'

@@ -43,3 +43,12 @@ class UserPermissionTests(TestCase):
         )
 
         self.assertTrue(user_has_permission(user, 'rooms.room.update'))
+
+    def test_staff_without_roles_gets_admin_fallback(self):
+        user = PlatformUser.objects.create_user(
+            email='staff-admin@example.com',
+            password='testpass123456',
+            is_staff=True,
+        )
+
+        self.assertTrue(user_has_permission(user, 'rooms.room.update'))

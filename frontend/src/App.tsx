@@ -12,6 +12,10 @@ import Restaurant from './pages/Restaurant';
 import POS from './pages/POS';
 import Accounting from './pages/Accounting';
 import Inventory from './pages/Inventory';
+import Reports from './pages/Reports';
+import HRMS from './pages/HRMS';
+import Maintenance from './pages/Maintenance';
+import AuditLogs from './pages/AuditLogs';
 
 function App() {
   return (
@@ -33,6 +37,9 @@ function App() {
             <Route element={<ProtectedRoute permissions={['housekeeping.task.update']} />}>
               <Route path="/housekeeping" element={<Housekeeping />} />
             </Route>
+            <Route element={<ProtectedRoute permissions={['maintenance.ticket.update']} />}>
+              <Route path="/maintenance" element={<Maintenance />} />
+            </Route>
             <Route element={<ProtectedRoute permissions={['restaurant.order.create', 'restaurant.order.update', 'restaurant.kitchen.update']} />}>
               <Route path="/restaurant" element={<Restaurant />} />
             </Route>
@@ -44,6 +51,15 @@ function App() {
             </Route>
             <Route element={<ProtectedRoute permissions={['inventory.stock.read', 'inventory.purchase.create']} />}>
               <Route path="/inventory" element={<Inventory />} />
+            </Route>
+            <Route element={<ProtectedRoute permissions={['reports.operational.read']} />}>
+              <Route path="/reports" element={<Reports />} />
+            </Route>
+            <Route element={<ProtectedRoute permissions={['hrms.employee.read', 'hrms.employee.create', 'hrms.attendance.read', 'hrms.payroll.read']} />}>
+              <Route path="/hrms" element={<HRMS />} />
+            </Route>
+            <Route element={<ProtectedRoute permissions={['audit.log.read']} />}>
+              <Route path="/audit-logs" element={<AuditLogs />} />
             </Route>
             <Route element={<ProtectedRoute permissions={['platform.tenants.create']} />}>
               <Route path="/onboarding" element={<TenantOnboarding />} />

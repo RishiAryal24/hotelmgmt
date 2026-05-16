@@ -168,6 +168,21 @@ Automated posting examples:
 
 Posting should happen through accounting services, not directly in views.
 
+Current automated postings:
+
+- Guest checkout posts room folio settlement.
+- Restaurant cash/card/wallet/bank settlement posts restaurant revenue.
+- Restaurant room posting debits receivables and adds a guest folio line.
+- Inventory receiving debits inventory asset and credits payable/cash/bank.
+
+Current cross-module automations:
+
+- Guest checkout creates a checkout-clean housekeeping task and sets the room to cleaning.
+- Completing the last active housekeeping task for a room sets the room to available.
+- Restaurant settlement can post served orders to checked-in guest folios.
+- Settled restaurant orders deduct linked inventory items.
+- Inventory receiving updates current stock, cost price, stock movement history, and accounting.
+
 ## API Shape
 
 Base path:

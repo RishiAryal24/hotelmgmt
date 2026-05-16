@@ -5,9 +5,15 @@ export const userPermissionCodes = (user?: AuthUser) => {
   return new Set(user.roles.flatMap((role) => role.permissions.map((permission) => permission.code)));
 };
 
-export const canAccess = (user: AuthUser | undefined, permissions: string | string[]) => {
+export const hasAdminAccessFallback = (user?: AuthUser) => {
   if (!user) return false;
   if (user.is_platform_admin || user.is_tenant_admin) return true;
+  return user.is_staff && user.roles.length === 0;
+};
+
+export const canAccess = (user: AuthUser | undefined, permissions: string | string[]) => {
+  if (!user) return false;
+  if (hasAdminAccessFallback(user)) return true;
 
   const requiredPermissions = Array.isArray(permissions) ? permissions : [permissions];
   const permissionCodes = userPermissionCodes(user);

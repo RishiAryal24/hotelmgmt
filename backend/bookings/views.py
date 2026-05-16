@@ -1,15 +1,18 @@
 from decimal import Decimal
 
 from django.db import transaction
+from django.utils.dateparse import parse_date
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.permissions import IsAuthenticated
-from bookings.models import Room, RoomType, Guest, Booking, GuestFolio
-from bookings.serializers import RoomSerializer, RoomTypeSerializer, GuestSerializer, BookingSerializer, GuestFolioSerializer
+from bookings.models import Room, RoomType, Guest, Booking, GuestFolio, RatePlan, Package, LoyaltyProgram, GuestPoints
+from bookings.serializers import RoomSerializer, RoomTypeSerializer, GuestSerializer, BookingSerializer, GuestFolioSerializer, RatePlanSerializer, PackageSerializer, LoyaltyProgramSerializer, GuestPointsSerializer
+from bookings.services import extend_booking_stay, get_guest_history, transfer_booking_room
 from users.permissions import HasActionPermission
+from .tasks import send_booking_confirmation_email
 
 
 class RoomTypeViewSet(viewsets.ModelViewSet):
@@ -75,6 +78,19 @@ class GuestViewSet(viewsets.ModelViewSet):
     search_fields = ['first_name', 'last_name', 'email', 'phone']
     ordering_fields = ['last_name', 'first_name', 'email']
 
+    @action(detail=True, methods=['get'])
+    def history(self, request, pk=None):
+        guest = self.get_object()
+        history = get_guest_history(guest)
+        return Response(
+            {
+                'guest': self.get_serializer(guest).data,
+                'summary': history['summary'],
+                'bookings': BookingSerializer(history['bookings'], many=True).data,
+                'folios': GuestFolioSerializer(history['folios'], many=True).data,
+            },
+        )
+
 
 class BookingViewSet(viewsets.ModelViewSet):
     queryset = Booking.objects.all()
@@ -89,6 +105,8 @@ class BookingViewSet(viewsets.ModelViewSet):
         'partial_update': 'bookings.reservation.create',
         'destroy': 'bookings.reservation.create',
         'cancel': 'bookings.reservation.create',
+        'extend_stay': 'bookings.reservation.create',
+        'transfer_room': 'bookings.reservation.create',
         'check_in': 'bookings.reservation.check_in',
         'check_out': 'bookings.reservation.check_out',
     }
@@ -136,20 +154,14 @@ class BookingViewSet(viewsets.ModelViewSet):
                 post_room_payment(folio, posted_by=request.user)
 
                 booking.status = 'checked_out'
-                booking.room.status = 'cleaning'
                 booking.save()
-                booking.room.save()
-                from housekeeping.models import HousekeepingTask
 
-                HousekeepingTask.objects.get_or_create(
-                    room=booking.room,
-                    status='open',
-                    task_type='checkout_clean',
-                    defaults={
-                        'priority': 'normal',
-                        'notes': f'Checkout cleaning for booking {booking.id}',
-                    },
-                )
+                from housekeeping.services import create_checkout_cleaning_task
+
+                create_checkout_cleaning_task(booking)
+
+                # Send checkout confirmation email asynchronously
+                send_booking_confirmation_email.delay(booking.id, booking.guest.email)
             return Response({
                 'status': 'Checked out and settled successfully',
                 'folio': GuestFolioSerializer(folio).data,
@@ -165,6 +177,50 @@ class BookingViewSet(viewsets.ModelViewSet):
         booking.status = 'cancelled'
         booking.save()
         return Response({'status': 'Reservation cancelled successfully'})
+
+    @action(detail=True, methods=['post'], url_path='extend-stay')
+    def extend_stay(self, request, pk=None):
+        booking = self.get_object()
+        new_check_out_date = parse_date(request.data.get('check_out_date') or '')
+        if not new_check_out_date:
+            return Response({'check_out_date': 'Valid checkout date is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            booking, folio = extend_booking_stay(booking, new_check_out_date)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            {
+                'status': 'Stay extended successfully',
+                'booking': self.get_serializer(booking).data,
+                'folio': GuestFolioSerializer(folio).data,
+            },
+        )
+
+    @action(detail=True, methods=['post'], url_path='transfer-room')
+    def transfer_room(self, request, pk=None):
+        booking = self.get_object()
+        room_id = request.data.get('room')
+        if not room_id:
+            return Response({'room': 'Target room is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            new_room = Room.objects.get(id=room_id)
+        except Room.DoesNotExist:
+            return Response({'room': 'Target room was not found.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            booking, folio = transfer_booking_room(booking, new_room)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            {
+                'status': 'Room transferred successfully',
+                'booking': self.get_serializer(booking).data,
+                'folio': GuestFolioSerializer(folio).data,
+            },
+        )
 
     @action(detail=False, methods=['get'])
     def availability(self, request):
@@ -219,3 +275,70 @@ class GuestFolioViewSet(viewsets.ReadOnlyModelViewSet):
             post_room_payment(folio, posted_by=request.user)
 
         return Response(GuestFolioSerializer(folio).data)
+
+
+class RatePlanViewSet(viewsets.ModelViewSet):
+    queryset = RatePlan.objects.select_related('room_type').all()
+    serializer_class = RatePlanSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'bookings.reservation.read',
+        'retrieve': 'bookings.reservation.read',
+        'create': 'bookings.reservation.create',
+        'update': 'bookings.reservation.create',
+        'partial_update': 'bookings.reservation.create',
+        'destroy': 'bookings.reservation.create',
+    }
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['room_type', 'is_active']
+    search_fields = ['name', 'room_type__name']
+    ordering_fields = ['name', 'base_rate']
+
+
+class PackageViewSet(viewsets.ModelViewSet):
+    queryset = Package.objects.all()
+    serializer_class = PackageSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'bookings.reservation.read',
+        'retrieve': 'bookings.reservation.read',
+        'create': 'bookings.reservation.create',
+        'update': 'bookings.reservation.create',
+        'partial_update': 'bookings.reservation.create',
+        'destroy': 'bookings.reservation.create',
+    }
+    filter_backends = [SearchFilter, OrderingFilter]
+    search_fields = ['name', 'description']
+    ordering_fields = ['name', 'total_price']
+
+
+class LoyaltyProgramViewSet(viewsets.ModelViewSet):
+    queryset = LoyaltyProgram.objects.all()
+    serializer_class = LoyaltyProgramSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'bookings.reservation.read',
+        'retrieve': 'bookings.reservation.read',
+        'create': 'bookings.reservation.create',
+        'update': 'bookings.reservation.create',
+        'partial_update': 'bookings.reservation.create',
+        'destroy': 'bookings.reservation.create',
+    }
+
+
+class GuestPointsViewSet(viewsets.ModelViewSet):
+    queryset = GuestPoints.objects.select_related('guest', 'program').all()
+    serializer_class = GuestPointsSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'bookings.reservation.read',
+        'retrieve': 'bookings.reservation.read',
+        'create': 'bookings.reservation.create',
+        'update': 'bookings.reservation.create',
+        'partial_update': 'bookings.reservation.create',
+        'destroy': 'bookings.reservation.create',
+    }
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['program']
+    search_fields = ['guest__first_name', 'guest__last_name', 'guest__email']
+    ordering_fields = ['total_points', 'available_points']

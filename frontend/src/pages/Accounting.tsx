@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import CompactTabs from '../components/CompactTabs';
 import { useAccounts, useCreateJournalEntry, useJournalEntries, useSeedAccounts } from '../hooks/accounting';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
+import { JournalEntry } from '../types/accounting';
 
 type JournalLineInput = {
   account: string;
@@ -19,7 +20,9 @@ type JournalEntryForm = {
   lines: JournalLineInput[];
 };
 
-type AccountingTab = 'accounts' | 'journals' | 'create';
+type AccountingTab = 'summary' | 'accounts' | 'journals' | 'create';
+type JournalSourceFilter = 'all' | 'guest_folio' | 'restaurant_order' | 'inventory_purchase' | 'manual';
+type JournalStatusFilter = 'all' | JournalEntry['status'];
 
 const emptyJournalEntry = {
   description: '',
@@ -32,23 +35,93 @@ const emptyJournalEntry = {
   ],
 };
 
+const sourceLabels: Record<string, string> = {
+  guest_folio: 'Room Folio',
+  restaurant_order: 'Restaurant',
+  inventory_purchase: 'Inventory Purchase',
+  manual: 'Manual',
+};
+
+const accountBalance = (entries: JournalEntry[] | undefined, code: string, normalSide: 'debit' | 'credit') => {
+  const total =
+    entries
+      ?.filter((entry) => entry.status === 'posted')
+      .flatMap((entry) => entry.lines)
+      .filter((line) => line.account_details?.code === code)
+      .reduce((sum, line) => {
+        const debit = Number(line.debit || 0);
+        const credit = Number(line.credit || 0);
+        return sum + (normalSide === 'debit' ? debit - credit : credit - debit);
+      }, 0) || 0;
+  return total;
+};
+
+const accountTypeBalance = (entries: JournalEntry[] | undefined, accountType: string) => {
+  return (
+    entries
+      ?.filter((entry) => entry.status === 'posted')
+      .flatMap((entry) => entry.lines)
+      .filter((line) => line.account_details?.account_type === accountType)
+      .reduce((sum, line) => sum + Number(line.debit || 0) - Number(line.credit || 0), 0) || 0
+  );
+};
+
 const Accounting = () => {
   const { data: settings } = useQuery({ queryKey: ['tenant-settings'], queryFn: getTenantSettings });
   const { data: accounts, isLoading: accountsLoading } = useAccounts();
   const { data: journalEntries, isLoading: entriesLoading } = useJournalEntries();
   const seedAccounts = useSeedAccounts();
   const createJournalEntry = useCreateJournalEntry();
-  const [activeTab, setActiveTab] = useState<AccountingTab>('journals');
+  const [activeTab, setActiveTab] = useState<AccountingTab>('summary');
   const [journalEntryForm, setJournalEntryForm] = useState<JournalEntryForm>(emptyJournalEntry);
+  const [sourceFilter, setSourceFilter] = useState<JournalSourceFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<JournalStatusFilter>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [expandedEntry, setExpandedEntry] = useState<string | null>(null);
 
   const totals = useMemo(
     () => ({
       activeAccounts: accounts?.filter((account) => account.is_active).length || 0,
       postedEntries: journalEntries?.filter((entry) => entry.status === 'posted').length || 0,
       draftEntries: journalEntries?.filter((entry) => entry.status === 'draft').length || 0,
+      roomRevenue: accountBalance(journalEntries, '4000', 'credit'),
+      restaurantRevenue: accountBalance(journalEntries, '4100', 'credit'),
+      accountsReceivable: accountBalance(journalEntries, '1100', 'debit'),
+      inventoryAsset: accountBalance(journalEntries, '1200', 'debit'),
+      payables: accountBalance(journalEntries, '2000', 'credit'),
+      expenses: accountTypeBalance(journalEntries, 'expense'),
     }),
     [accounts, journalEntries],
   );
+
+  const filteredJournalEntries = useMemo(
+    () =>
+      journalEntries?.filter((entry) => {
+        const source = entry.source_module || 'manual';
+        const matchesSource = sourceFilter === 'all' || source === sourceFilter;
+        const matchesStatus = statusFilter === 'all' || entry.status === statusFilter;
+        const matchesFrom = !dateFrom || entry.entry_date >= dateFrom;
+        const matchesTo = !dateTo || entry.entry_date <= dateTo;
+        return matchesSource && matchesStatus && matchesFrom && matchesTo;
+      }) || [],
+    [dateFrom, dateTo, journalEntries, sourceFilter, statusFilter],
+  );
+
+  const sourceSummary = useMemo(() => {
+    const buckets = new Map<string, { count: number; debit: number; credit: number }>();
+    journalEntries
+      ?.filter((entry) => entry.status === 'posted')
+      .forEach((entry) => {
+        const source = entry.source_module || 'manual';
+        const current = buckets.get(source) || { count: 0, debit: 0, credit: 0 };
+        current.count += 1;
+        current.debit += Number(entry.total_debit || 0);
+        current.credit += Number(entry.total_credit || 0);
+        buckets.set(source, current);
+      });
+    return Array.from(buckets.entries()).map(([source, value]) => ({ source, ...value }));
+  }, [journalEntries]);
 
   const updateLine = (index: number, nextLine: Partial<JournalLineInput>) => {
     const nextLines = [...journalEntryForm.lines];
@@ -89,6 +162,7 @@ const Accounting = () => {
 
       <CompactTabs
         tabs={[
+          { id: 'summary', label: 'Summary' },
           { id: 'journals', label: 'Journals', count: journalEntries?.length || 0 },
           { id: 'accounts', label: 'Accounts', count: totals.activeAccounts },
           { id: 'create', label: 'Create Entry' },
@@ -97,8 +171,90 @@ const Accounting = () => {
         onChange={(tabId) => setActiveTab(tabId as AccountingTab)}
       />
 
+      {activeTab === 'summary' && (
+        <section className="space-y-5">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {[
+              ['Room Revenue', totals.roomRevenue, '4000 Room Revenue'],
+              ['Restaurant Revenue', totals.restaurantRevenue, '4100 Restaurant Revenue'],
+              ['Accounts Receivable', totals.accountsReceivable, '1100 room-posted charges'],
+              ['Inventory Asset', totals.inventoryAsset, '1200 stock on hand'],
+              ['Payables', totals.payables, '2000 inventory payable'],
+              ['Expenses', totals.expenses, 'Expense account activity'],
+            ].map(([title, value, detail]) => (
+              <article key={title} className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="text-sm text-slate-500">{title}</p>
+                <p className="mt-2 text-2xl font-semibold text-[#1F5E3B]">{formatMoney(Number(value), settings?.currency)}</p>
+                <p className="mt-1 text-xs text-slate-500">{detail}</p>
+              </article>
+            ))}
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <div className="border-b border-slate-100 px-4 py-3">
+              <h2 className="font-semibold text-slate-900">Journal Sources</h2>
+              <p className="text-sm text-slate-500">Posted activity grouped by operating flow.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[680px] text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Source</th>
+                    <th className="px-4 py-3 text-right">Entries</th>
+                    <th className="px-4 py-3 text-right">Debits</th>
+                    <th className="px-4 py-3 text-right">Credits</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {sourceSummary.map((row) => (
+                    <tr key={row.source} className="hover:bg-slate-50/70">
+                      <td className="px-4 py-3 font-medium text-slate-900">{sourceLabels[row.source] || row.source}</td>
+                      <td className="px-4 py-3 text-right">{row.count}</td>
+                      <td className="px-4 py-3 text-right">{formatMoney(row.debit, settings?.currency)}</td>
+                      <td className="px-4 py-3 text-right">{formatMoney(row.credit, settings?.currency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {sourceSummary.length === 0 && <p className="p-4 text-sm text-slate-600">No posted journal activity yet.</p>}
+          </div>
+        </section>
+      )}
+
       {activeTab === 'journals' && (
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <section className="space-y-4">
+          <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-5">
+            <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value as JournalSourceFilter)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+              <option value="all">All sources</option>
+              <option value="guest_folio">Room folio</option>
+              <option value="restaurant_order">Restaurant</option>
+              <option value="inventory_purchase">Inventory purchase</option>
+              <option value="manual">Manual</option>
+            </select>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as JournalStatusFilter)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+              <option value="all">All statuses</option>
+              <option value="posted">Posted</option>
+              <option value="draft">Draft</option>
+              <option value="void">Void</option>
+            </select>
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+            <button
+              type="button"
+              onClick={() => {
+                setSourceFilter('all');
+                setStatusFilter('all');
+                setDateFrom('');
+                setDateTo('');
+              }}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Clear filters
+            </button>
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[880px] text-left text-sm">
               <thead className="bg-slate-50 text-xs uppercase text-slate-500">
@@ -112,37 +268,74 @@ const Accounting = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {journalEntries?.map((entry) => (
-                  <tr key={entry.id} className="align-top hover:bg-slate-50/70">
-                    <td className="px-4 py-3 font-medium text-slate-900">
-                      {entry.entry_number}
-                      <span className="block text-xs font-normal text-slate-500">{entry.description}</span>
-                      <span className="block text-xs font-normal text-slate-500">{entry.entry_date}</span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-700">
-                      {entry.source_module || 'manual'}
-                      {entry.source_id && <span className="block text-xs text-slate-500">{entry.source_id}</span>}
-                    </td>
-                    <td className="px-4 py-3 text-right font-medium text-slate-900">{formatMoney(entry.total_debit, settings?.currency)}</td>
-                    <td className="px-4 py-3 text-right font-medium text-slate-900">{formatMoney(entry.total_credit, settings?.currency)}</td>
-                    <td className="px-4 py-3">
-                      <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">{entry.status}</span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-700">
-                      {entry.lines.slice(0, 2).map((line) => (
-                        <span key={line.id} className="block max-w-sm truncate text-xs">
-                          {line.account_details?.code} - {line.description || line.account_details?.name}
-                        </span>
-                      ))}
-                      {entry.lines.length > 2 && <span className="text-xs text-slate-500">+{entry.lines.length - 2} more</span>}
-                    </td>
-                  </tr>
+                {filteredJournalEntries.map((entry) => (
+                  <Fragment key={entry.id}>
+                    <tr className="align-top hover:bg-slate-50/70">
+                      <td className="px-4 py-3 font-medium text-slate-900">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedEntry(expandedEntry === entry.id ? null : entry.id)}
+                          className="font-medium text-slate-900 hover:text-[#1F5E3B]"
+                        >
+                          {entry.entry_number}
+                        </button>
+                        <span className="block text-xs font-normal text-slate-500">{entry.description}</span>
+                        <span className="block text-xs font-normal text-slate-500">{entry.entry_date}</span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {sourceLabels[entry.source_module || 'manual'] || entry.source_module || 'Manual'}
+                        {entry.source_id && <span className="block max-w-[180px] truncate text-xs text-slate-500">{entry.source_id}</span>}
+                      </td>
+                      <td className="px-4 py-3 text-right font-medium text-slate-900">{formatMoney(entry.total_debit, settings?.currency)}</td>
+                      <td className="px-4 py-3 text-right font-medium text-slate-900">{formatMoney(entry.total_credit, settings?.currency)}</td>
+                      <td className="px-4 py-3">
+                        <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">{entry.status}</span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {entry.lines.slice(0, 2).map((line) => (
+                          <span key={line.id} className="block max-w-sm truncate text-xs">
+                            {line.account_details?.code} - {line.description || line.account_details?.name}
+                          </span>
+                        ))}
+                        {entry.lines.length > 2 && <span className="text-xs text-slate-500">+{entry.lines.length - 2} more</span>}
+                      </td>
+                    </tr>
+                    {expandedEntry === entry.id && (
+                      <tr className="bg-slate-50/80">
+                        <td colSpan={6} className="px-4 py-3">
+                          <table className="w-full text-left text-xs">
+                            <thead className="uppercase text-slate-500">
+                              <tr>
+                                <th className="py-2 pr-4">Account</th>
+                                <th className="py-2 pr-4">Description</th>
+                                <th className="py-2 pr-4 text-right">Debit</th>
+                                <th className="py-2 pr-4 text-right">Credit</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-200">
+                              {entry.lines.map((line) => (
+                                <tr key={line.id}>
+                                  <td className="py-2 pr-4 font-medium text-slate-800">
+                                    {line.account_details?.code} - {line.account_details?.name}
+                                  </td>
+                                  <td className="py-2 pr-4 text-slate-600">{line.description || '-'}</td>
+                                  <td className="py-2 pr-4 text-right">{Number(line.debit) ? formatMoney(line.debit, settings?.currency) : '-'}</td>
+                                  <td className="py-2 pr-4 text-right">{Number(line.credit) ? formatMoney(line.credit, settings?.currency) : '-'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
           </div>
           {entriesLoading && <p className="p-4 text-sm text-slate-600">Loading journal entries...</p>}
-          {journalEntries?.length === 0 && <p className="p-4 text-sm text-slate-600">No journal entries yet.</p>}
+          {filteredJournalEntries.length === 0 && <p className="p-4 text-sm text-slate-600">No journal entries match these filters.</p>}
+          </div>
         </section>
       )}
 

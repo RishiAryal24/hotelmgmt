@@ -4,14 +4,18 @@ import CompactTabs from '../components/CompactTabs';
 import {
   useAdjustStock,
   useCreateInventoryItem,
+  useCreatePurchaseOrder,
   useCreateVendor,
   useInventoryItems,
+  useLowStockItems,
+  usePurchaseOrderAction,
+  usePurchaseOrders,
   useReceiveStock,
   useStockMovements,
   useVendors,
 } from '../hooks/inventory';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
-import { InventoryItem, Vendor } from '../types/inventory';
+import { InventoryItem, PurchaseOrder, Vendor } from '../types/inventory';
 
 const emptyVendor = { name: '', email: '', phone: '', address: '', tax_number: '', is_active: true };
 const emptyItem = {
@@ -25,6 +29,13 @@ const emptyItem = {
 };
 const emptyReceive = { item: '', vendor: '', quantity: '', unit_cost: '', reference: '', notes: '', payment_account: '2000' as const };
 const emptyAdjustment = { item: '', movement_type: 'adjustment_in' as const, quantity: '', unit_cost: '', reference: '', notes: '' };
+const emptyPurchaseOrder = {
+  vendor: '',
+  expected_date: '',
+  reference: '',
+  notes: '',
+  lines: [{ item: '', quantity: '', unit_cost: '', notes: '' }],
+};
 
 const unitLabels: Record<InventoryItem['unit'], string> = {
   pcs: 'Pieces',
@@ -41,26 +52,42 @@ const Inventory: React.FC = () => {
   const { data: settings } = useQuery({ queryKey: ['tenant-settings'], queryFn: getTenantSettings });
   const { data: vendors, isLoading: vendorsLoading } = useVendors();
   const { data: items, isLoading: itemsLoading, error } = useInventoryItems();
+  const { data: lowStockApiItems } = useLowStockItems();
   const { data: movements } = useStockMovements();
+  const { data: purchaseOrders } = usePurchaseOrders();
   const createVendor = useCreateVendor();
   const createItem = useCreateInventoryItem();
   const receiveStock = useReceiveStock();
   const adjustStock = useAdjustStock();
+  const createPurchaseOrder = useCreatePurchaseOrder();
+  const purchaseOrderAction = usePurchaseOrderAction();
   const [activeTab, setActiveTab] = useState('overview');
   const [vendorForm, setVendorForm] = useState<Omit<Vendor, 'id'>>(emptyVendor);
   const [itemForm, setItemForm] = useState<Omit<InventoryItem, 'id' | 'current_stock' | 'is_low_stock'>>(emptyItem);
   const [receiveForm, setReceiveForm] = useState(emptyReceive);
   const [adjustmentForm, setAdjustmentForm] = useState(emptyAdjustment);
+  const [purchaseOrderForm, setPurchaseOrderForm] = useState(emptyPurchaseOrder);
+  const [movementFilter, setMovementFilter] = useState<'all' | 'purchase' | 'sale' | 'adjustment'>('all');
 
-  const lowStockItems = items?.filter((item) => item.is_low_stock) || [];
+  const lowStockItems = lowStockApiItems || items?.filter((item) => item.is_low_stock) || [];
   const totalStockValue = items?.reduce((total, item) => total + Number(item.current_stock || 0) * Number(item.cost_price || 0), 0) || 0;
   const purchaseCount = movements?.filter((movement) => movement.movement_type === 'purchase').length || 0;
+  const openPurchaseOrders = purchaseOrders?.filter((order) => ['draft', 'ordered'].includes(order.status)).length || 0;
+  const unpaidPurchaseOrders = purchaseOrders?.filter((order) => order.status === 'received' && order.payment_status === 'unpaid').length || 0;
   const saleCount = movements?.filter((movement) => movement.movement_type === 'sale').length || 0;
+  const filteredMovements =
+    movements?.filter((movement) => {
+      if (movementFilter === 'all') return true;
+      if (movementFilter === 'adjustment') return ['waste', 'adjustment_in', 'adjustment_out'].includes(movement.movement_type);
+      return movement.movement_type === movementFilter;
+    }) || [];
 
   const tabs = [
     { id: 'overview', label: 'Overview' },
+    { id: 'low-stock', label: 'Low Stock', count: lowStockItems.length },
     { id: 'items', label: 'Items', count: items?.length || 0 },
     { id: 'vendors', label: 'Vendors', count: vendors?.length || 0 },
+    { id: 'purchase-orders', label: 'Purchase Orders', count: openPurchaseOrders + unpaidPurchaseOrders },
     { id: 'receive', label: 'Receive' },
     { id: 'movements', label: 'Movements', count: movements?.length || 0 },
     { id: 'adjust', label: 'Adjust' },
@@ -84,6 +111,18 @@ const Inventory: React.FC = () => {
   const handleAdjustStock = (e: React.FormEvent) => {
     e.preventDefault();
     adjustStock.mutate({ ...adjustmentForm, unit_cost: adjustmentForm.unit_cost || undefined }, { onSuccess: () => setAdjustmentForm(emptyAdjustment) });
+  };
+
+  const handleCreatePurchaseOrder = (e: React.FormEvent) => {
+    e.preventDefault();
+    createPurchaseOrder.mutate(
+      {
+        ...purchaseOrderForm,
+        expected_date: purchaseOrderForm.expected_date || undefined,
+        lines: purchaseOrderForm.lines.filter((line) => line.item && line.quantity && line.unit_cost),
+      },
+      { onSuccess: () => setPurchaseOrderForm(emptyPurchaseOrder) },
+    );
   };
 
   if (itemsLoading) return <div className="p-6 text-slate-600">Loading inventory...</div>;
@@ -144,6 +183,41 @@ const Inventory: React.FC = () => {
         </section>
       )}
 
+      {activeTab === 'low-stock' && (
+        <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="rounded-3xl bg-white p-5 shadow-sm">
+            <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Reorder Alerts</h2>
+                <p className="text-sm text-slate-500">Items at or below reorder level, ready for purchase receiving.</p>
+              </div>
+              <button
+                onClick={() => {
+                  const firstItem = lowStockItems[0];
+                  if (firstItem) {
+                    setReceiveForm({ ...emptyReceive, item: firstItem.id, unit_cost: firstItem.cost_price });
+                  }
+                  setActiveTab('receive');
+                }}
+                className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                disabled={!lowStockItems.length}
+              >
+                Receive selected
+              </button>
+            </div>
+            <InventoryItemsTable items={lowStockItems} currency={settings?.currency} />
+          </div>
+          <aside className="rounded-3xl bg-white p-5 shadow-sm">
+            <h2 className="font-bold text-slate-900">Buying Notes</h2>
+            <div className="mt-4 space-y-3 text-sm text-slate-600">
+              <p>Use the Receive tab to record actual purchase quantities and invoice/reference numbers.</p>
+              <p>Receiving stock updates the item cost price and creates the accounting purchase journal automatically.</p>
+              <p>Restaurant sales deduct linked inventory after POS settlement.</p>
+            </div>
+          </aside>
+        </section>
+      )}
+
       {activeTab === 'items' && (
         <section className="rounded-3xl bg-white p-5 shadow-sm">
           <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
@@ -196,6 +270,150 @@ const Inventory: React.FC = () => {
         </section>
       )}
 
+      {activeTab === 'purchase-orders' && (
+        <section className="grid gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
+          <form onSubmit={handleCreatePurchaseOrder} className="rounded-3xl bg-white p-5 shadow-sm">
+            <h2 className="font-bold text-slate-900">Create Purchase Order</h2>
+            <div className="mt-4 grid gap-3">
+              <select value={purchaseOrderForm.vendor} onChange={(e) => setPurchaseOrderForm({ ...purchaseOrderForm, vendor: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required>
+                <option value="">Select vendor</option>
+                {vendors?.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
+              </select>
+              <input type="date" value={purchaseOrderForm.expected_date} onChange={(e) => setPurchaseOrderForm({ ...purchaseOrderForm, expected_date: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+              <input placeholder="Reference" value={purchaseOrderForm.reference} onChange={(e) => setPurchaseOrderForm({ ...purchaseOrderForm, reference: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+              <textarea placeholder="Notes" value={purchaseOrderForm.notes} onChange={(e) => setPurchaseOrderForm({ ...purchaseOrderForm, notes: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+              <div className="space-y-3">
+                {purchaseOrderForm.lines.map((line, index) => (
+                  <div key={index} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
+                    <div className="grid gap-2">
+                      <select
+                        value={line.item}
+                        onChange={(e) => {
+                          const item = items?.find((record) => record.id === e.target.value);
+                          const nextLines = [...purchaseOrderForm.lines];
+                          nextLines[index] = { ...line, item: e.target.value, unit_cost: line.unit_cost || item?.cost_price || '' };
+                          setPurchaseOrderForm({ ...purchaseOrderForm, lines: nextLines });
+                        }}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                        required
+                      >
+                        <option value="">Select item</option>
+                        {items?.map((item) => <option key={item.id} value={item.id}>{item.sku} - {item.name}</option>)}
+                      </select>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          step="0.001"
+                          placeholder="Quantity"
+                          value={line.quantity}
+                          onChange={(e) => {
+                            const nextLines = [...purchaseOrderForm.lines];
+                            nextLines[index] = { ...line, quantity: e.target.value };
+                            setPurchaseOrderForm({ ...purchaseOrderForm, lines: nextLines });
+                          }}
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                          required
+                        />
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder="Unit cost"
+                          value={line.unit_cost}
+                          onChange={(e) => {
+                            const nextLines = [...purchaseOrderForm.lines];
+                            nextLines[index] = { ...line, unit_cost: e.target.value };
+                            setPurchaseOrderForm({ ...purchaseOrderForm, lines: nextLines });
+                          }}
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                          required
+                        />
+                      </div>
+                      <input
+                        placeholder="Line notes"
+                        value={line.notes}
+                        onChange={(e) => {
+                          const nextLines = [...purchaseOrderForm.lines];
+                          nextLines[index] = { ...line, notes: e.target.value };
+                          setPurchaseOrderForm({ ...purchaseOrderForm, lines: nextLines });
+                        }}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPurchaseOrderForm({ ...purchaseOrderForm, lines: [...purchaseOrderForm.lines, { item: '', quantity: '', unit_cost: '', notes: '' }] })}
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Add line
+                </button>
+                <button type="submit" className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
+                  Save PO
+                </button>
+              </div>
+              {createPurchaseOrder.isError && <p className="text-sm text-red-600">Could not create purchase order.</p>}
+            </div>
+          </form>
+
+          <div className="rounded-3xl bg-white p-5 shadow-sm">
+            <div className="mb-4">
+              <h2 className="font-bold text-slate-900">Purchase Orders</h2>
+              <p className="text-sm text-slate-500">Order, receive stock, then pay vendor bills from one queue.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[940px] text-left text-sm">
+                <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
+                  <tr><th className="py-3 pr-4">PO</th><th className="py-3 pr-4">Vendor</th><th className="py-3 pr-4">Lines</th><th className="py-3 pr-4 text-right">Total</th><th className="py-3 pr-4">Status</th><th className="py-3 pr-4 text-right">Actions</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(purchaseOrders || []).map((order) => (
+                    <tr key={order.id} className="align-top">
+                      <td className="py-3 pr-4 font-medium text-slate-900">
+                        {order.po_number}
+                        <span className="block text-xs font-normal text-slate-500">{order.reference || order.order_date}</span>
+                      </td>
+                      <td className="py-3 pr-4 text-slate-700">{order.vendor_details?.name || '-'}</td>
+                      <td className="py-3 pr-4 text-slate-700">
+                        {order.lines.map((line) => `${line.item_details?.name || 'Item'} x ${Number(line.quantity).toLocaleString()}`).join(', ')}
+                      </td>
+                      <td className="py-3 pr-4 text-right font-medium text-slate-900">{formatMoney(order.total_amount, settings?.currency)}</td>
+                      <td className="py-3 pr-4">
+                        <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{order.status}</span>
+                        <span className={`ml-1 rounded-full px-2 py-1 text-xs font-medium ${order.payment_status === 'paid' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>{order.payment_status}</span>
+                      </td>
+                      <td className="py-3 pr-4">
+                        <div className="flex justify-end gap-2">
+                          {order.status === 'draft' && (
+                            <button onClick={() => purchaseOrderAction.mutate({ purchaseOrderId: order.id, action: 'submit' })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">Order</button>
+                          )}
+                          {['draft', 'ordered'].includes(order.status) && (
+                            <>
+                              <button onClick={() => purchaseOrderAction.mutate({ purchaseOrderId: order.id, action: 'receive' })} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">Receive</button>
+                              <button onClick={() => purchaseOrderAction.mutate({ purchaseOrderId: order.id, action: 'cancel' })} className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50">Cancel</button>
+                            </>
+                          )}
+                          {order.status === 'received' && order.payment_status === 'unpaid' && (
+                            <>
+                              <button onClick={() => purchaseOrderAction.mutate({ purchaseOrderId: order.id, action: 'pay', payload: { payment_method: 'cash' } })} className="rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50">Pay cash</button>
+                              <button onClick={() => purchaseOrderAction.mutate({ purchaseOrderId: order.id, action: 'pay', payload: { payment_method: 'bank' } })} className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900">Pay bank</button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {(purchaseOrders || []).length === 0 && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No purchase orders yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            {purchaseOrderAction.isError && <p className="mt-3 text-sm text-red-600">Purchase order action failed.</p>}
+          </div>
+        </section>
+      )}
+
       {activeTab === 'receive' && (
         <FormPanel title="Receive Stock" onSubmit={handleReceiveStock}>
           <select value={receiveForm.item} onChange={(e) => setReceiveForm({ ...receiveForm, item: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required>
@@ -213,6 +431,7 @@ const Inventory: React.FC = () => {
           </select>
           <input placeholder="Reference" value={receiveForm.reference} onChange={(e) => setReceiveForm({ ...receiveForm, reference: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
           <textarea placeholder="Notes" value={receiveForm.notes} onChange={(e) => setReceiveForm({ ...receiveForm, notes: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2" />
+          {receiveStock.isError && <p className="text-sm text-red-600 md:col-span-2">Could not receive stock. Check item, quantity, and unit cost.</p>}
         </FormPanel>
       )}
 
@@ -234,14 +453,39 @@ const Inventory: React.FC = () => {
 
       {activeTab === 'movements' && (
         <section className="rounded-3xl bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="font-bold text-slate-900">Movement History</h2>
+              <p className="text-sm text-slate-500">Filter purchases, POS deductions, and stock adjustments.</p>
+            </div>
+            <div className="flex overflow-x-auto rounded-2xl bg-emerald-50 p-1 text-sm">
+              {[
+                ['all', 'All'],
+                ['purchase', 'Purchases'],
+                ['sale', 'Sales'],
+                ['adjustment', 'Adjustments'],
+              ].map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setMovementFilter(id as typeof movementFilter)}
+                  className={`shrink-0 rounded-xl px-3 py-2 font-medium ${
+                    movementFilter === id ? 'bg-white text-[#1F5E3B] shadow-sm' : 'text-emerald-700'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[860px] text-left text-sm">
               <thead className="border-b border-slate-200 text-xs uppercase text-slate-500"><tr><th className="py-3 pr-4">Item</th><th className="py-3 pr-4">Type</th><th className="py-3 pr-4">Qty</th><th className="py-3 pr-4">Value</th><th className="py-3 pr-4">Reference</th></tr></thead>
               <tbody className="divide-y divide-slate-100">
-                {movements?.map((movement) => (
+                {filteredMovements.map((movement) => (
                   <tr key={movement.id}><td className="py-3 pr-4 font-medium text-slate-900">{movement.item_details?.name}</td><td className="py-3 pr-4">{movement.movement_type}</td><td className="py-3 pr-4">{Number(movement.quantity).toLocaleString()} {movement.item_details?.unit}</td><td className="py-3 pr-4">{formatMoney(movement.total_cost, settings?.currency)}</td><td className="py-3 pr-4">{movement.reference || '-'}</td></tr>
                 ))}
-                {movements?.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-slate-500">No stock movements yet.</td></tr>}
+                {filteredMovements.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-slate-500">No stock movements match this filter.</td></tr>}
               </tbody>
             </table>
           </div>

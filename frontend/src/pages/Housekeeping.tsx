@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import CompactTabs from '../components/CompactTabs';
 import { useRooms } from '../hooks/bookings';
 import { useCreateHousekeepingTask, useHousekeepingAction, useHousekeepingTasks } from '../hooks/housekeeping';
@@ -36,11 +37,15 @@ const emptyTask = {
 type HousekeepingTab = HousekeepingTask['status'] | 'create';
 
 const Housekeeping: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: tasks, isLoading, error } = useHousekeepingTasks();
   const { data: rooms } = useRooms();
   const createTask = useCreateHousekeepingTask();
   const taskAction = useHousekeepingAction();
-  const [activeTab, setActiveTab] = useState<HousekeepingTab>('open');
+  const [activeTab, setActiveTab] = useState<HousekeepingTab>((searchParams.get('status') as HousekeepingTab | null) || 'open');
+  const [priorityFilter, setPriorityFilter] = useState<HousekeepingTask['priority'] | 'all'>(
+    (searchParams.get('priority') as HousekeepingTask['priority'] | null) || 'all',
+  );
   const [formData, setFormData] = useState(emptyTask);
 
   const counts = useMemo(
@@ -54,9 +59,40 @@ const Housekeeping: React.FC = () => {
   );
 
   const visibleTasks = useMemo(
-    () => tasks?.filter((task) => activeTab !== 'create' && task.status === activeTab) || [],
-    [activeTab, tasks],
+    () =>
+      tasks?.filter((task) => {
+        if (activeTab === 'create' || task.status !== activeTab) return false;
+        return priorityFilter === 'all' || task.priority === priorityFilter;
+      }) || [],
+    [activeTab, priorityFilter, tasks],
   );
+
+  const handleTabChange = (tabId: string) => {
+    setActiveTab(tabId as HousekeepingTab);
+    const nextParams = new URLSearchParams(searchParams);
+    if (tabId === 'create') {
+      nextParams.delete('status');
+      nextParams.delete('priority');
+      setPriorityFilter('all');
+    } else {
+      nextParams.set('status', tabId);
+    }
+    setSearchParams(nextParams);
+  };
+
+  const handlePriorityFilter = (priority: HousekeepingTask['priority'] | 'all') => {
+    setPriorityFilter(priority);
+    const nextParams = new URLSearchParams(searchParams);
+    if (priority === 'all') {
+      nextParams.delete('priority');
+    } else {
+      nextParams.set('priority', priority);
+    }
+    if (activeTab !== 'create') {
+      nextParams.set('status', activeTab);
+    }
+    setSearchParams(nextParams);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -96,7 +132,7 @@ const Housekeeping: React.FC = () => {
           { id: 'create', label: 'New Task' },
         ]}
         activeTab={activeTab}
-        onChange={(tabId) => setActiveTab(tabId as HousekeepingTab)}
+        onChange={handleTabChange}
       />
 
       {activeTab === 'create' ? (
@@ -152,6 +188,21 @@ const Housekeeping: React.FC = () => {
         </form>
       ) : (
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">
+                {activeTab.replace('_', ' ')} tasks{priorityFilter !== 'all' ? ` - ${priorityFilter} priority` : ''}
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">{visibleTasks.length} matching task(s)</p>
+            </div>
+            <select value={priorityFilter} onChange={(e) => handlePriorityFilter(e.target.value as HousekeepingTask['priority'] | 'all')} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+              <option value="all">All priorities</option>
+              <option value="urgent">Urgent</option>
+              <option value="high">High</option>
+              <option value="normal">Normal</option>
+              <option value="low">Low</option>
+            </select>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[780px] text-left text-sm">
               <thead className="bg-slate-50 text-xs uppercase text-slate-500">

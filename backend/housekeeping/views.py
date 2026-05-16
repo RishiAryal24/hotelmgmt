@@ -1,4 +1,3 @@
-from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -9,6 +8,9 @@ from rest_framework.response import Response
 from bookings.models import Room
 from housekeeping.models import HousekeepingTask
 from housekeeping.serializers import HousekeepingTaskSerializer
+from housekeeping.services import complete_housekeeping_task
+from maintenance.serializers import MaintenanceTicketSerializer
+from maintenance.services import create_maintenance_ticket
 from users.permissions import HasActionPermission
 
 
@@ -46,11 +48,7 @@ class HousekeepingTaskViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):
         task = self.get_object()
-        task.status = 'done'
-        task.completed_at = timezone.now()
-        task.save(update_fields=['status', 'completed_at', 'updated_at'])
-        task.room.status = 'available'
-        task.room.save(update_fields=['status', 'updated_at'])
+        complete_housekeeping_task(task)
         return Response({'status': 'Task completed'})
 
     @action(detail=True, methods=['post'])
@@ -64,14 +62,27 @@ class HousekeepingTaskViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def escalate_maintenance(self, request, pk=None):
         task = self.get_object()
+        notes = request.data.get('notes', task.notes)
         task.status = 'blocked'
         task.task_type = 'maintenance_escalation'
         task.priority = 'urgent'
-        task.notes = request.data.get('notes', task.notes)
+        task.notes = notes
         task.save(update_fields=['status', 'task_type', 'priority', 'notes', 'updated_at'])
-        task.room.status = 'maintenance'
-        task.room.save(update_fields=['status', 'updated_at'])
-        return Response({'status': 'Escalated to maintenance'})
+        ticket = create_maintenance_ticket(
+            room=task.room,
+            title=f'Housekeeping escalation - Room {task.room.room_number}',
+            description=notes,
+            category='other',
+            priority='urgent',
+            reported_by=request.user,
+        )
+        return Response(
+            {
+                'status': 'Escalated to maintenance',
+                'ticket': MaintenanceTicketSerializer(ticket, context={'request': request}).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=False, methods=['post'])
     def create_for_room(self, request):

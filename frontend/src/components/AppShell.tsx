@@ -5,6 +5,7 @@ import {
   Calculator,
   CalendarCheck,
   ClipboardList,
+  FileClock,
   LayoutDashboard,
   LogOut,
   Package,
@@ -14,6 +15,7 @@ import {
   Sparkles,
   Utensils,
   Users,
+  Wrench,
 } from 'lucide-react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -27,23 +29,37 @@ const navItems = [
   { title: 'Rooms', path: '/rooms', icon: BedDouble, permissions: ['rooms.room.read', 'rooms.room.update'] },
   { title: 'Reservations', path: '/bookings', icon: CalendarCheck, permissions: ['bookings.reservation.read', 'bookings.reservation.create'] },
   { title: 'Housekeeping', path: '/housekeeping', icon: ClipboardList, permissions: ['housekeeping.task.update'] },
+  { title: 'Maintenance', path: '/maintenance', icon: Wrench, permissions: ['maintenance.ticket.update'] },
   { title: 'Restaurant', path: '/restaurant', icon: Utensils, permissions: ['restaurant.order.create', 'restaurant.order.update', 'restaurant.kitchen.update'] },
   { title: 'POS', path: '/pos', icon: Receipt, permissions: ['pos.sale.create'] },
   { title: 'Inventory', path: '/inventory', icon: Package, permissions: ['inventory.stock.read', 'inventory.purchase.create'] },
   { title: 'Accounting', path: '/accounting', icon: Calculator, permissions: ['accounting.ledger.read', 'accounting.journal.create'] },
-  { title: 'Reports', path: '/reports', icon: BarChart3, permissions: ['reports.operational.read'], disabled: true },
+  { title: 'Reports', path: '/reports', icon: BarChart3, permissions: ['reports.operational.read'] },
+  { title: 'HRMS', path: '/hrms', icon: Users, permissions: ['hrms.employee.read', 'hrms.employee.create', 'hrms.attendance.read', 'hrms.payroll.read'] },
+  { title: 'Audit Logs', path: '/audit-logs', icon: FileClock, permissions: ['audit.log.read'] },
 ];
 
 const AppShell = () => {
   const location = useLocation();
-  const { data: user } = useQuery({
+  const { data: user, isLoading } = useQuery({
     queryKey: ['current-user'],
     queryFn: getCurrentUser,
   });
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#edf7f1] text-slate-800">
+        <div className="rounded-3xl bg-white p-8 shadow-lg">
+          <p className="text-lg font-semibold">Loading account access...</p>
+          <p className="mt-2 text-sm text-slate-500">Please wait while we confirm your permissions.</p>
+        </div>
+      </div>
+    );
+  }
+
   const visibleItems = navItems.filter((item) => {
     if (item.platformOnly && !user?.is_platform_admin) return false;
-    if (item.tenantAdminOnly && !user?.is_tenant_admin) return false;
+    if (item.tenantAdminOnly && !(user?.is_tenant_admin || user?.is_platform_admin)) return false;
     if (!item.permissions) return true;
     return canAccess(user, item.permissions);
   });
@@ -52,7 +68,7 @@ const AppShell = () => {
 
   return (
     <div className="min-h-screen bg-[#edf7f1] text-slate-800 lg:flex">
-      <aside className="bg-[#1F5E3B] p-5 text-white lg:sticky lg:top-0 lg:h-screen lg:w-72 lg:shrink-0">
+      <aside className="flex bg-[#1F5E3B] p-5 text-white lg:sticky lg:top-0 lg:h-screen lg:w-72 lg:shrink-0 lg:flex-col">
         <div className="mb-7 flex items-center gap-3 rounded-3xl bg-white/10 p-4">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-[#1F5E3B]">
             <Sparkles size={22} />
@@ -63,7 +79,7 @@ const AppShell = () => {
           </div>
         </div>
 
-        <nav className="grid gap-2 sm:grid-cols-2 lg:block lg:space-y-2">
+        <nav className="grid gap-2 overflow-y-auto pr-1 sm:grid-cols-2 lg:block lg:min-h-0 lg:flex-1 lg:space-y-2">
           {visibleItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
@@ -71,17 +87,8 @@ const AppShell = () => {
               <>
                 <Icon size={19} />
                 <span>{item.title}</span>
-                {item.disabled && <span className="ml-auto rounded-full bg-white/15 px-2 py-0.5 text-xs">Soon</span>}
               </>
             );
-
-            if (item.disabled) {
-              return (
-                <div key={item.path} className="flex items-center gap-3 rounded-2xl p-3 text-sm text-green-100 opacity-70">
-                  {content}
-                </div>
-              );
-            }
 
             return (
               <Link

@@ -23,7 +23,16 @@ DEFAULT_PERMISSIONS = [
     ('accounting.journal.create', 'Create journal entries', 'accounting'),
     ('hrms.employee.read', 'View employees', 'hrms'),
     ('hrms.employee.create', 'Create employees', 'hrms'),
+    ('hrms.shift.read', 'View shifts', 'hrms'),
+    ('hrms.shift.create', 'Create shifts', 'hrms'),
+    ('hrms.attendance.read', 'View attendance', 'hrms'),
+    ('hrms.attendance.create', 'Create attendance', 'hrms'),
+    ('hrms.payroll.read', 'View payroll', 'hrms'),
+    ('hrms.payroll.create', 'Create payroll', 'hrms'),
+    ('hrms.payroll.approve', 'Approve payroll', 'hrms'),
+    ('hrms.payroll.post', 'Post payroll', 'hrms'),
     ('maintenance.ticket.update', 'Update maintenance tickets', 'maintenance'),
+    ('audit.log.read', 'View audit logs', 'audit'),
     ('reports.operational.read', 'View operational reports', 'reports'),
 ]
 
@@ -77,9 +86,25 @@ DEFAULT_ROLES = [
         'Stock and purchase management',
         ['inventory.stock.read', 'inventory.purchase.create'],
     ),
-    ('hr_officer', 'HR Officer', 'Employee and HR operations', ['hrms.employee.read', 'hrms.employee.create']),
+    (
+        'hr_officer',
+        'HR Officer',
+        'Employee and HR operations',
+        [
+            'hrms.employee.read',
+            'hrms.employee.create',
+            'hrms.shift.read',
+            'hrms.shift.create',
+            'hrms.attendance.read',
+            'hrms.attendance.create',
+            'hrms.payroll.read',
+            'hrms.payroll.create',
+            'hrms.payroll.approve',
+            'hrms.payroll.post',
+        ],
+    ),
     ('maintenance', 'Maintenance', 'Maintenance ticket handling', ['rooms.room.read', 'maintenance.ticket.update']),
-    ('auditor', 'Auditor', 'Read-only operational and accounting review', ['accounting.ledger.read', 'reports.operational.read']),
+    ('auditor', 'Auditor', 'Read-only operational, accounting, and audit review', ['accounting.ledger.read', 'reports.operational.read', 'audit.log.read']),
 ]
 
 

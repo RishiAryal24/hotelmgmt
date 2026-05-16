@@ -90,3 +90,68 @@ class StockMovement(UUIDModel):
     @property
     def total_cost(self):
         return self.quantity * self.unit_cost
+
+
+class PurchaseOrder(UUIDModel):
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('ordered', 'Ordered'),
+        ('received', 'Received'),
+        ('canceled', 'Canceled'),
+    ]
+    PAYMENT_STATUS_CHOICES = [
+        ('unpaid', 'Unpaid'),
+        ('paid', 'Paid'),
+    ]
+    PAYMENT_METHOD_CHOICES = [
+        ('cash', 'Cash'),
+        ('bank', 'Bank'),
+    ]
+
+    po_number = models.CharField(max_length=40, unique=True, blank=True)
+    vendor = models.ForeignKey(Vendor, on_delete=models.PROTECT, related_name='purchase_orders')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='unpaid')
+    order_date = models.DateField(auto_now_add=True)
+    expected_date = models.DateField(null=True, blank=True)
+    received_at = models.DateTimeField(null=True, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, blank=True)
+    reference = models.CharField(max_length=120, blank=True)
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey('users.PlatformUser', on_delete=models.SET_NULL, related_name='purchase_orders', null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.po_number or str(self.id)
+
+    @property
+    def total_amount(self):
+        if not self.pk:
+            return 0
+        return sum((line.total_cost for line in self.lines.all()), 0)
+
+    def save(self, *args, **kwargs):
+        if not self.po_number:
+            self.po_number = f'PO-{self.id.hex[:10].upper()}'
+        super().save(*args, **kwargs)
+
+
+class PurchaseOrderLine(UUIDModel):
+    purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name='lines')
+    item = models.ForeignKey(InventoryItem, on_delete=models.PROTECT, related_name='purchase_order_lines')
+    quantity = models.DecimalField(max_digits=12, decimal_places=3)
+    unit_cost = models.DecimalField(max_digits=12, decimal_places=2)
+    notes = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f'{self.purchase_order.po_number} - {self.item.sku}'
+
+    @property
+    def total_cost(self):
+        return self.quantity * self.unit_cost

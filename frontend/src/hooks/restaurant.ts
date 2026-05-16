@@ -90,7 +90,7 @@ export const useCreateRestaurantTable = () => {
 export const useCreateRestaurantOrder = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: { table?: string; order_type: RestaurantOrder['order_type']; notes?: string }): Promise<RestaurantOrder> => {
+    mutationFn: async (payload: { table?: string; room_booking?: string; order_type: RestaurantOrder['order_type']; notes?: string }): Promise<RestaurantOrder> => {
       const response = await apiClient.post('/restaurant/orders/', payload);
       return response.data;
     },
@@ -148,6 +148,7 @@ export const useSettleRestaurantOrder = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['restaurant-orders'] });
       queryClient.invalidateQueries({ queryKey: ['restaurant-tables'] });
+      queryClient.invalidateQueries({ queryKey: ['bookings'] });
       queryClient.invalidateQueries({ queryKey: ['guest-folios'] });
       queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-items'] });

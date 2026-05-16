@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRooms, useBookings, useGuestFolios } from '../hooks/bookings';
 import { useHousekeepingTasks } from '../hooks/housekeeping';
 import { useInventoryItems, useStockMovements } from '../hooks/inventory';
+import { useMaintenanceTickets } from '../hooks/maintenance';
 import { useRestaurantOrders } from '../hooks/restaurant';
 import { getCurrentUser } from '../services/auth';
 import { canAccess } from '../services/permissions';
@@ -36,6 +37,12 @@ const tenantModules = [
     permissions: ['housekeeping.task.update'],
   },
   {
+    title: 'Maintenance',
+    description: 'Track repairs, blocked rooms, and ticket resolution.',
+    path: '/maintenance',
+    permissions: ['maintenance.ticket.update'],
+  },
+  {
     title: 'Restaurant Management',
     description: 'Set up menus, food items, preparation stations, and dining tables.',
     path: '/restaurant',
@@ -64,14 +71,12 @@ const tenantModules = [
     description: 'Manage employee records, shifts, attendance, and leave.',
     path: '/hrms',
     permissions: ['hrms.employee.read', 'hrms.employee.create'],
-    disabled: true,
   },
   {
     title: 'Reports',
     description: 'View occupancy, revenue, operational, and financial reports.',
     path: '/reports',
     permissions: ['reports.operational.read'],
-    disabled: true,
   },
 ];
 
@@ -93,6 +98,7 @@ const Dashboard = () => {
   const { data: bookings, isLoading: bookingsLoading } = useBookings();
   const { data: folios, isLoading: foliosLoading } = useGuestFolios();
   const { data: housekeepingTasks, isLoading: housekeepingLoading } = useHousekeepingTasks();
+  const { data: maintenanceTickets } = useMaintenanceTickets();
   const { data: restaurantOrders, isLoading: restaurantLoading } = useRestaurantOrders();
   const { data: inventoryItems, isLoading: inventoryLoading } = useInventoryItems();
   const { data: stockMovements, isLoading: movementsLoading } = useStockMovements();
@@ -106,6 +112,8 @@ const Dashboard = () => {
   const departuresToday = bookings?.filter((booking) => booking.check_out_date === today && booking.status === 'checked_in').length || 0;
   const openTasks = housekeepingTasks?.filter((task) => task.status !== 'done').length || 0;
   const urgentTasks = housekeepingTasks?.filter((task) => task.priority === 'urgent' && task.status !== 'done').length || 0;
+  const activeMaintenance = maintenanceTickets?.filter((ticket) => ['open', 'in_progress'].includes(ticket.status)).length || 0;
+  const roomsOffline = rooms?.filter((room) => room.status === 'maintenance').length || 0;
   const openFolios = folios?.filter((folio) => folio.status === 'open').length || 0;
   const paidFolios = folios?.filter((folio) => folio.status === 'paid') || [];
   const roomRevenue = paidFolios.reduce((total, folio) => total + Number(folio.paid_amount || folio.grand_total || 0), 0);
@@ -124,30 +132,31 @@ const Dashboard = () => {
       id: 'operations',
       label: 'Operations',
       metrics: [
-        { title: 'Occupancy Signal', value: totalRooms ? `${occupancyRate}%` : 'No rooms', detail: `${availableRooms} rooms available`, tone: 'green' },
-        { title: 'Arrivals Today', value: arrivalsToday, detail: 'Confirmed check-ins', tone: 'slate' },
-        { title: 'Departures Today', value: departuresToday, detail: 'Checked-in bookings due out', tone: departuresToday ? 'amber' : 'green' },
-        { title: 'Housekeeping Queue', value: openTasks, detail: `${urgentTasks} urgent tasks`, tone: urgentTasks ? 'red' : openTasks ? 'amber' : 'green' },
+        { title: 'Occupancy Signal', value: totalRooms ? `${occupancyRate}%` : 'No rooms', detail: `${availableRooms} rooms available`, tone: 'green', path: '/rooms?status=occupied' },
+        { title: 'Arrivals Today', value: arrivalsToday, detail: 'Confirmed check-ins', tone: 'slate', path: '/bookings?filter=arrivals_today' },
+        { title: 'Departures Today', value: departuresToday, detail: 'Checked-in bookings due out', tone: departuresToday ? 'amber' : 'green', path: '/bookings?filter=departures_today' },
+        { title: 'Housekeeping Queue', value: openTasks, detail: `${urgentTasks} urgent tasks`, tone: urgentTasks ? 'red' : openTasks ? 'amber' : 'green', path: '/housekeeping?status=open' },
+        { title: 'Maintenance Tickets', value: activeMaintenance, detail: `${roomsOffline} rooms offline`, tone: activeMaintenance ? 'amber' : 'green', path: '/maintenance' },
       ],
     },
     {
       id: 'revenue',
       label: 'Revenue',
       metrics: [
-        { title: 'Room Revenue', value: formatMoney(roomRevenue, settings?.currency), detail: 'Paid folios', tone: 'green' },
-        { title: 'Restaurant Sales', value: formatMoney(restaurantRevenue, settings?.currency), detail: 'Paid POS orders', tone: 'slate' },
-        { title: 'Open Folios', value: openFolios, detail: 'Awaiting settlement', tone: openFolios ? 'amber' : 'green' },
-        { title: 'Journal Activity', value: journalReady, detail: 'Based on settled flows', tone: journalReady === 'Active' ? 'green' : 'slate' },
+        { title: 'Room Revenue', value: formatMoney(roomRevenue, settings?.currency), detail: 'Paid folios', tone: 'green', path: '/reports?tab=revenue' },
+        { title: 'Restaurant Sales', value: formatMoney(restaurantRevenue, settings?.currency), detail: 'Paid POS orders', tone: 'slate', path: '/reports?tab=restaurant' },
+        { title: 'Open Folios', value: openFolios, detail: 'Awaiting settlement', tone: openFolios ? 'amber' : 'green', path: '/bookings?tab=folios&filter=open_folios' },
+        { title: 'Journal Activity', value: journalReady, detail: 'Based on settled flows', tone: journalReady === 'Active' ? 'green' : 'slate', path: '/accounting' },
       ],
     },
     {
       id: 'inventory',
       label: 'Inventory',
       metrics: [
-        { title: 'Low Stock Items', value: lowStockItems.length, detail: 'At or below reorder level', tone: lowStockItems.length ? 'amber' : 'green' },
-        { title: 'Purchase Receipts', value: purchaseReceipts, detail: 'All recorded receipts', tone: 'green' },
-        { title: 'POS Deductions', value: saleDeductions, detail: 'Restaurant sale movements', tone: saleDeductions ? 'green' : 'slate' },
-        { title: 'Stock Adjustments', value: stockAdjustments, detail: 'Manual corrections/waste', tone: stockAdjustments ? 'amber' : 'slate' },
+        { title: 'Low Stock Items', value: lowStockItems.length, detail: 'At or below reorder level', tone: lowStockItems.length ? 'amber' : 'green', path: '/inventory' },
+        { title: 'Purchase Receipts', value: purchaseReceipts, detail: 'All recorded receipts', tone: 'green', path: '/inventory' },
+        { title: 'POS Deductions', value: saleDeductions, detail: 'Restaurant sale movements', tone: saleDeductions ? 'green' : 'slate', path: '/inventory' },
+        { title: 'Stock Adjustments', value: stockAdjustments, detail: 'Manual corrections/waste', tone: stockAdjustments ? 'amber' : 'slate', path: '/inventory' },
       ],
     },
   ];
@@ -158,11 +167,11 @@ const Dashboard = () => {
     .filter((module) => canAccess(user, module.permissions));
 
   const watchlist = [
-    openTasks ? ['Rooms pending cleaning', `${openTasks} housekeeping tasks are still open`] : null,
-    lowStockItems.length ? ['Inventory reorder', `${lowStockItems.length} items are at or below reorder level`] : null,
-    openFolios ? ['Open folios', `${openFolios} folios are awaiting settlement`] : null,
+    openTasks ? ['Rooms pending cleaning', `${openTasks} housekeeping tasks are still open`, '/housekeeping?status=open'] : null,
+    lowStockItems.length ? ['Inventory reorder', `${lowStockItems.length} items are at or below reorder level`, '/inventory'] : null,
+    openFolios ? ['Open folios', `${openFolios} folios are awaiting settlement`, '/bookings?tab=folios&filter=open_folios'] : null,
     restaurantOrders?.some((order) => ['sent_to_kitchen', 'preparing'].includes(order.status))
-      ? ['Kitchen queue', `${restaurantOrders.filter((order) => ['sent_to_kitchen', 'preparing'].includes(order.status)).length} orders are in kitchen workflow`]
+      ? ['Kitchen queue', `${restaurantOrders.filter((order) => ['sent_to_kitchen', 'preparing'].includes(order.status)).length} orders are in kitchen workflow`, '/restaurant']
       : null,
   ].filter(Boolean) as string[][];
 
@@ -190,20 +199,20 @@ const Dashboard = () => {
       </section>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {[
-          { title: 'Occupancy Rate', value: hasLoadedCore && totalRooms ? `${occupancyRate}%` : 'No data', subtitle: `${occupiedRooms}/${totalRooms}`, detail: 'Occupied rooms' },
-          { title: 'New Reservations', value: bookings?.filter((booking) => booking.status === 'confirmed').length ?? '...', subtitle: 'Open', detail: 'Confirmed bookings' },
-          { title: 'Settled Revenue', value: formatMoney(roomRevenue + restaurantRevenue, settings?.currency), subtitle: 'Live', detail: 'Paid folios + POS' },
-          { title: 'Available Rooms', value: hasLoadedCore ? availableRooms : '...', subtitle: 'Live', detail: 'Ready to sell' },
+        {[ 
+          { title: 'Occupancy Rate', value: hasLoadedCore && totalRooms ? `${occupancyRate}%` : 'No data', subtitle: `${occupiedRooms}/${totalRooms}`, detail: 'Occupied rooms', path: '/rooms?status=occupied' },
+          { title: 'New Reservations', value: bookings?.filter((booking) => booking.status === 'confirmed').length ?? '...', subtitle: 'Open', detail: 'Confirmed bookings', path: '/bookings?filter=confirmed' },
+          { title: 'Settled Revenue', value: formatMoney(roomRevenue + restaurantRevenue, settings?.currency), subtitle: 'Live', detail: 'Paid folios + POS', path: '/reports?tab=revenue' },
+          { title: 'Available Rooms', value: hasLoadedCore ? availableRooms : '...', subtitle: 'Live', detail: 'Ready to sell', path: '/rooms?status=available' },
         ].map((metric) => (
-          <article key={metric.title} className="rounded-3xl bg-white p-5 shadow-sm">
+          <Link key={metric.title} to={metric.path} className="rounded-3xl bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
             <h3 className="text-sm text-slate-500">{metric.title}</h3>
             <div className="mt-3 flex items-end justify-between gap-3">
               <p className="text-3xl font-bold text-[#1F5E3B]">{metric.value}</p>
               <span className="text-sm font-medium text-green-600">{metric.subtitle}</span>
             </div>
             <p className="mt-2 text-xs text-slate-500">{metric.detail}</p>
-          </article>
+          </Link>
         ))}
       </section>
 
@@ -230,16 +239,16 @@ const Dashboard = () => {
 
         <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {selectedTab.metrics.map((metric) => (
-            <article key={metric.title} className={`rounded-2xl border p-4 ${toneClass[metric.tone as keyof typeof toneClass]}`}>
+            <Link key={metric.title} to={metric.path || '/dashboard'} className={`rounded-2xl border p-4 transition hover:-translate-y-0.5 hover:shadow-sm ${toneClass[metric.tone as keyof typeof toneClass]}`}>
               <p className="text-sm font-medium opacity-80">{metric.title}</p>
               <p className="mt-3 text-2xl font-bold">{metric.value}</p>
               <p className="mt-1 text-xs opacity-75">{metric.detail}</p>
-            </article>
+            </Link>
           ))}
         </div>
       </section>
 
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <section>
         <div className="rounded-3xl bg-white p-5 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
@@ -249,11 +258,11 @@ const Dashboard = () => {
             <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">{watchlist.length} signals</span>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
-            {watchlist.map(([title, detail]) => (
-              <div key={title} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            {watchlist.map(([title, detail, path]) => (
+              <Link key={title} to={path} className="rounded-2xl border border-slate-100 bg-slate-50 p-4 transition hover:border-emerald-200 hover:bg-white hover:shadow-sm">
                 <p className="font-semibold text-slate-900">{title}</p>
                 <p className="mt-1 text-sm text-slate-500">{detail}</p>
-              </div>
+              </Link>
             ))}
             {watchlist.length === 0 && (
               <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 md:col-span-2">
@@ -265,25 +274,6 @@ const Dashboard = () => {
             )}
           </div>
         </div>
-
-        <aside className="rounded-3xl bg-white p-5 shadow-sm">
-          <h2 className="text-xl font-bold text-[#1F5E3B]">Quick Actions</h2>
-          <div className="mt-4 grid gap-2">
-            {visibleModules
-              .filter((module) => !module.disabled)
-              .slice(0, 6)
-              .map((module) => (
-                <Link
-                  key={module.title}
-                  to={module.path}
-                  className="flex items-center justify-between rounded-2xl border border-slate-100 px-4 py-3 text-sm font-medium text-slate-700 hover:border-emerald-200 hover:bg-emerald-50 hover:text-[#1F5E3B]"
-                >
-                  <span>{module.title.replace(' Management', '')}</span>
-                  <span className="text-xs text-slate-400">Open</span>
-                </Link>
-              ))}
-          </div>
-        </aside>
       </section>
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -293,22 +283,12 @@ const Dashboard = () => {
             <p className="mt-2 text-xs text-slate-500">Create isolated workspaces.</p>
           </Link>
         )}
-        {visibleModules.map((module) =>
-            module.disabled ? (
-              <article key={module.title} className="rounded-2xl bg-white p-4 opacity-70 shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <h2 className="text-sm font-bold text-[#1F5E3B]">{module.title}</h2>
-                  <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600">Soon</span>
-                </div>
-                <p className="mt-2 text-xs text-slate-500">{module.description}</p>
-              </article>
-            ) : (
-              <Link key={module.title} to={module.path} className="rounded-2xl bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
-                <h2 className="text-sm font-bold text-[#1F5E3B]">{module.title}</h2>
-                <p className="mt-2 text-xs text-slate-500">{module.description}</p>
-              </Link>
-            ),
-          )}
+        {visibleModules.map((module) => (
+          <Link key={module.title} to={module.path} className="rounded-2xl bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+            <h2 className="text-sm font-bold text-[#1F5E3B]">{module.title}</h2>
+            <p className="mt-2 text-xs text-slate-500">{module.description}</p>
+          </Link>
+        ))}
       </section>
     </div>
   );

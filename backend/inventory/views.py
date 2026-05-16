@@ -6,14 +6,17 @@ from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from inventory.models import InventoryItem, StockMovement, Vendor
+from inventory.models import InventoryItem, PurchaseOrder, StockMovement, Vendor
 from inventory.serializers import (
     AdjustStockSerializer,
     InventoryItemSerializer,
+    PurchaseOrderPaymentSerializer,
+    PurchaseOrderSerializer,
     ReceiveStockSerializer,
     StockMovementSerializer,
     VendorSerializer,
 )
+from inventory.services import cancel_purchase_order, pay_purchase_order, receive_inventory_stock, receive_purchase_order, submit_purchase_order
 from users.permissions import HasActionPermission
 
 
@@ -88,23 +91,16 @@ class StockMovementViewSet(viewsets.ModelViewSet):
         data = serializer.validated_data
 
         with transaction.atomic():
-            movement = StockMovement.objects.create(
+            movement = receive_inventory_stock(
                 item=data['item'],
                 vendor=data.get('vendor'),
-                movement_type='purchase',
                 quantity=data['quantity'],
                 unit_cost=data['unit_cost'],
                 reference=data.get('reference', ''),
                 notes=data.get('notes', ''),
-                source_module='inventory_purchase',
-                created_by=request.user,
+                payment_account=data['payment_account'],
+                posted_by=request.user,
             )
-            data['item'].cost_price = data['unit_cost']
-            data['item'].save(update_fields=['cost_price', 'updated_at'])
-
-            from accounting.services import post_inventory_purchase
-
-            post_inventory_purchase(movement, payment_account=data['payment_account'], posted_by=request.user)
 
         return Response(StockMovementSerializer(movement).data, status=status.HTTP_201_CREATED)
 
@@ -128,3 +124,61 @@ class StockMovementViewSet(viewsets.ModelViewSet):
             created_by=request.user,
         )
         return Response(StockMovementSerializer(movement).data, status=status.HTTP_201_CREATED)
+
+
+class PurchaseOrderViewSet(viewsets.ModelViewSet):
+    queryset = PurchaseOrder.objects.select_related('vendor', 'created_by').prefetch_related('lines', 'lines__item').all()
+    serializer_class = PurchaseOrderSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'inventory.stock.read',
+        'retrieve': 'inventory.stock.read',
+        'create': 'inventory.purchase.create',
+        'update': 'inventory.purchase.create',
+        'partial_update': 'inventory.purchase.create',
+        'destroy': 'inventory.purchase.create',
+        'submit': 'inventory.purchase.create',
+        'receive': 'inventory.purchase.create',
+        'cancel': 'inventory.purchase.create',
+        'pay': 'inventory.purchase.create',
+    }
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['status', 'payment_status', 'vendor']
+    search_fields = ['po_number', 'vendor__name', 'reference', 'notes']
+    ordering_fields = ['created_at', 'order_date', 'expected_date', 'status']
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    def _run_action(self, handler):
+        purchase_order = self.get_object()
+        try:
+            handler(purchase_order)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        purchase_order.refresh_from_db()
+        return Response(self.get_serializer(purchase_order).data)
+
+    @action(detail=True, methods=['post'])
+    def submit(self, request, pk=None):
+        return self._run_action(submit_purchase_order)
+
+    @action(detail=True, methods=['post'])
+    def receive(self, request, pk=None):
+        return self._run_action(lambda purchase_order: receive_purchase_order(purchase_order, posted_by=request.user))
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        return self._run_action(cancel_purchase_order)
+
+    @action(detail=True, methods=['post'])
+    def pay(self, request, pk=None):
+        serializer = PurchaseOrderPaymentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return self._run_action(
+            lambda purchase_order: pay_purchase_order(
+                purchase_order,
+                payment_method=serializer.validated_data['payment_method'],
+                posted_by=request.user,
+            ),
+        )

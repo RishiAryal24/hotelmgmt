@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import CompactTabs from '../components/CompactTabs';
 import { useCreateRoom, useCreateRoomType, useRoomTypes, useRooms } from '../hooks/bookings';
@@ -27,12 +28,16 @@ const emptyRoomType = {
 };
 
 const Rooms: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: rooms, isLoading, error } = useRooms();
   const { data: roomTypes, isLoading: roomTypesLoading } = useRoomTypes();
   const { data: settings } = useQuery({ queryKey: ['tenant-settings'], queryFn: getTenantSettings });
   const createRoom = useCreateRoom();
   const createRoomType = useCreateRoomType();
   const [activeTab, setActiveTab] = useState('rooms');
+  const [statusFilter, setStatusFilter] = useState<Room['status'] | 'all'>(
+    (searchParams.get('status') as Room['status'] | null) || 'all',
+  );
   const [roomForm, setRoomForm] = useState<Partial<Room>>(emptyRoom);
   const [roomTypeForm, setRoomTypeForm] = useState<Omit<RoomType, 'id'>>(emptyRoomType);
 
@@ -71,6 +76,19 @@ const Rooms: React.FC = () => {
     cleaning: rooms?.filter((room) => room.status === 'cleaning').length || 0,
     maintenance: rooms?.filter((room) => room.status === 'maintenance').length || 0,
   };
+  const filteredRooms = statusFilter === 'all' ? rooms || [] : rooms?.filter((room) => room.status === statusFilter) || [];
+
+  const handleStatusFilter = (status: Room['status'] | 'all') => {
+    setStatusFilter(status);
+    const nextParams = new URLSearchParams(searchParams);
+    if (status === 'all') {
+      nextParams.delete('status');
+    } else {
+      nextParams.set('status', status);
+    }
+    setSearchParams(nextParams);
+    setActiveTab('rooms');
+  };
 
   return (
     <div className="space-y-5">
@@ -86,22 +104,42 @@ const Rooms: React.FC = () => {
 
       <section className="grid gap-4 md:grid-cols-4">
         {Object.entries(roomStatusCounts).map(([status, count]) => (
-          <article key={status} className="rounded-3xl bg-white p-5 shadow-sm">
+          <button
+            key={status}
+            type="button"
+            onClick={() => handleStatusFilter(status as Room['status'])}
+            className={`rounded-3xl bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
+              statusFilter === status ? 'ring-2 ring-emerald-500' : ''
+            }`}
+          >
             <p className="text-sm capitalize text-slate-500">{status}</p>
             <p className="mt-2 text-2xl font-bold text-[#1F5E3B]">{count}</p>
-          </article>
+          </button>
         ))}
       </section>
 
       {activeTab === 'rooms' && (
         <section className="rounded-3xl bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-col gap-3 border-b border-slate-100 pb-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">
+                {statusFilter === 'all' ? 'All rooms' : `${statusFilter.charAt(0).toUpperCase()}${statusFilter.slice(1)} rooms`}
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">{filteredRooms.length} matching room(s)</p>
+            </div>
+            {statusFilter !== 'all' && (
+              <button type="button" onClick={() => handleStatusFilter('all')} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Show all
+              </button>
+            )}
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[860px] text-left text-sm">
               <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
                 <tr><th className="py-3 pr-4">Room</th><th className="py-3 pr-4">Type</th><th className="py-3 pr-4">Capacity</th><th className="py-3 pr-4">Rate</th><th className="py-3 pr-4">Status</th><th className="py-3 pr-4">Description</th></tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {rooms?.map((room) => (
+                {filteredRooms.map((room) => (
                   <tr key={room.id}>
                     <td className="py-3 pr-4 font-medium text-slate-900">Room {room.room_number}</td>
                     <td className="py-3 pr-4">{room.room_type_name}</td>
@@ -113,7 +151,7 @@ const Rooms: React.FC = () => {
                     <td className="max-w-xs truncate py-3 pr-4 text-slate-500">{room.description || '-'}</td>
                   </tr>
                 ))}
-                {rooms?.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No rooms created yet.</td></tr>}
+                {filteredRooms.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No matching rooms.</td></tr>}
               </tbody>
             </table>
           </div>

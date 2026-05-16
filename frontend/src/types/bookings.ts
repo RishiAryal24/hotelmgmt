@@ -27,11 +27,16 @@ export interface Guest {
   id: string;
   first_name: string;
   last_name: string;
+  full_name?: string;
   email: string;
   phone: string;
   address: string;
   id_type: string;
   id_number: string;
+  vip_level: 'standard' | 'vip' | 'blacklist';
+  preferences: Record<string, any>;
+  notes: string;
+  marketing_opt_in: boolean;
 }
 
 export interface Booking {
@@ -76,4 +81,20 @@ export interface GuestFolioLine {
   source_id: string;
   description: string;
   amount: string;
+}
+
+export interface GuestHistory {
+  guest: Guest;
+  summary: {
+    total_bookings: number;
+    completed_stays: number;
+    active_bookings: number;
+    canceled_bookings: number;
+    open_folios: number;
+    lifetime_value: string;
+    last_stay?: string | null;
+    next_arrival?: string | null;
+  };
+  bookings: Booking[];
+  folios: GuestFolio[];
 }

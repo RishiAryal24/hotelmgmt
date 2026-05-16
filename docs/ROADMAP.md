@@ -2,218 +2,222 @@
 
 ## Current Project Stage
 
-The repository is currently an early MVP scaffold:
+The project is now a connected development-stage hospitality ERP. It is suitable for local testing and development previews, not production tenant data.
 
-- Django/DRF backend imports successfully.
-- React/Vite frontend builds successfully.
-- Basic tenant, user, room, guest, and booking concepts exist.
-- Restaurant/POS, accounting, inventory, HRMS, reporting, integrations, and advanced RBAC are still mostly placeholders.
-- Frontend authentication is not wired to JWT.
-- Tenant onboarding UI is static.
-- Celery, Redis workflows, testing, CI/CD, and production hardening are not yet implemented.
+Checkpoint note:
+
+- Current checkpoint is stable as of the audit logging foundation slice.
+- Local bootstrap, frontend build, and backend tests are passing.
+- Recommended continuation: restaurant split bills/table transfer or fiscal periods/trial balance.
+
+Working foundations:
+
+- Multi-tenant Django/DRF backend with JWT auth and RBAC.
+- React/Vite frontend with protected routes and permission-aware navigation.
+- Tenant-scoped audit logging for core business records.
+- Local PostgreSQL development setup with bootstrap scripts and seeded demo data.
+- Development deployment shape confirmed: Netlify frontend, Render backend, Supabase Postgres.
+
+Working modules:
+
+- Dashboard with live operational signals.
+- Staff and role management.
+- Rooms and room types.
+- Guests, reservations, check-in, checkout, guest folios.
+- Availability calendar view for room/date planning.
+- Stay extension for in-house guests with availability validation and folio extension charges.
+- Room transfer for in-house guests with target-room availability validation and old-room cleaning task creation.
+- Guest history/CRM profile with stay history, folio value, VIP level, preferences, and internal notes.
+- Checkout-to-housekeeping automation.
+- Housekeeping task workflow and room readiness updates.
+- Maintenance tickets with room downtime status, resolution workflow, and housekeeping escalation.
+- Restaurant menu, tables, order workflow, kitchen tickets, settlement.
+- Restaurant room posting into guest folios.
+- Inventory vendors, items, purchase orders, stock receiving, adjustments, low-stock alerts, movement history.
+- Restaurant inventory deduction on settled orders.
+- Accounting chart of accounts, journal entries, automated postings, summary view, and journal filters.
+- Basic operational Reports for occupancy, revenue, restaurant sales, and inventory.
+- CSV exports for operational reports and payroll.
+- Basic HRMS employee records.
+- HRMS shifts and attendance with clock-in/clock-out workflow.
+- Payroll periods, generated draft payroll runs, approval/posting status, payslip details, and accounting settlement posting.
+- Audit Logs page with action/module filters and field-change summaries.
+
+## Local Testing
+
+Bootstrap local data:
+
+```powershell
+.\scripts\bootstrap-local.cmd
+```
+
+Start the local app:
+
+```powershell
+.\scripts\start-local-all.cmd
+```
+
+Login:
+
+- Email: `admin@local.test`
+- Password: `AdminPass12345`
+- Tenant domain: `local.hotel.test`
+
+Run backend tests:
+
+```powershell
+.\scripts\test-backend.cmd bookings restaurant inventory
+```
+
+Build frontend:
+
+```powershell
+cd frontend
+npm.cmd run build
+```
 
 ## Phase 1: Platform Foundation
 
-Goal: make the SaaS platform secure, tenant-aware, and usable by Super Admin and Hotel Admin.
+Status: mostly complete for development.
 
-Backend:
+Completed:
 
-- Add migrations for tenants and users.
-- Create deterministic tenant onboarding service.
-- Add tenant default data seeding.
-- Implement JWT login, refresh, logout, and current-user API.
-- Implement RBAC models and permission checks.
-- Add audit logging foundation.
-- Add platform-only Super Admin tenant APIs.
-- Add tenant-scoped staff user APIs.
-- Add API tests for tenant isolation and permissions.
+- Tenant models and schema setup.
+- Tenant bootstrap commands.
+- JWT login and current-user flow.
+- RBAC permissions, roles, and permission checks.
+- Protected frontend routes.
+- Staff and role management UI.
+- Local development scripts.
+- Basic tenant isolation tests.
+- Audit logging foundation with create/update/delete capture.
 
-Frontend:
+Remaining:
 
-- Implement real login using JWT.
-- Store tokens securely and refresh access tokens.
-- Add protected routes.
-- Add role-aware navigation.
-- Build Super Admin tenant management screens.
-- Build Tenant Admin staff/RBAC screens.
-
-DevOps:
-
-- Fix Docker Compose startup flow.
-- Add backend migration commands.
-- Add GitHub Actions for backend checks and frontend build.
-- Add `.env.example` for frontend and backend.
-
-Exit criteria:
-
-- Super Admin can create a tenant.
-- Tenant schema is created and migrated.
-- Hotel Admin is generated.
-- Hotel Admin can log in.
-- Tenant Admin can create staff and assign roles.
-- Tenant data is isolated.
+- Stronger token/session hardening.
+- CI workflow.
+- Production-grade environment management.
 
 ## Phase 2: HMS Operations
 
-Goal: deliver working hotel operations.
+Status: functional MVP.
 
-Modules:
+Completed:
 
-- Room types and room inventory.
-- Availability calendar.
-- Reservation creation and modification.
-- Walk-in booking.
+- Room types and rooms.
 - Guest profiles.
-- Check-in/check-out.
-- Housekeeping status and task assignment.
-- Maintenance status.
+- Reservation creation.
+- Availability checks.
+- Check-in and checkout.
+- Guest folios.
+- Checkout creates housekeeping task.
+- Completing housekeeping task returns room to available.
+- Maintenance tickets with open/start/resolve/close/cancel workflow.
+- Housekeeping escalation creates a maintenance ticket and moves the room offline.
 
-Exit criteria:
+Remaining:
 
-- Receptionist can manage guests and reservations.
-- Front desk can check guests in/out.
-- Housekeeping can update room readiness.
-- Availability prevents double booking.
+- Broader booking modification workflow.
+- Walk-in booking polish.
+- Room transfer rate adjustment policy.
 
-## Phase 3: Restaurant ERP, POS, Inventory
+## Phase 3: Restaurant, POS, Inventory
 
-Goal: deliver restaurant operations and connect food/beverage sales to inventory and accounting.
+Status: functional MVP.
 
-Restaurant ERP:
+Completed:
 
 - Menu categories and menu items.
-- Item modifiers and add-ons.
-- Restaurant tables and sections.
-- Dine-in, takeaway, delivery, and room-service orders.
-- Waiter order entry.
-- Kitchen order tickets.
-- Kitchen stations.
-- Order status workflow.
-- Split bills and merged bills.
-- Table transfer.
-- Complimentary/void workflows with approval.
-
-POS:
-
-- Restaurant, bar, banquet, counter, and room-service sales.
-- Tax/service charge handling.
-- Room posting support.
-- Multiple payment methods.
-- Shift/cashier closing.
-
-Inventory:
-
-- Vendors.
-- Items and stock movements.
-- Purchase orders.
-- Goods receipt.
-- Inventory valuation.
-- Recipe/BOM-ready food costing.
+- Menu item image upload.
+- Tables and order workflow.
+- Kitchen tickets.
+- Served order settlement.
+- Room posting to guest folio.
+- Inventory item linkage for menu items.
 - Stock deduction from restaurant sales.
+- Vendors, stock receiving, stock adjustments.
+- Low-stock alerts and purchase movement history.
+- Purchase order workflow with draft/order/receive/cancel/pay actions.
+- Purchase order receiving creates stock movements and accounting payables.
+- Purchase order payment clears accounts payable to cash or bank.
 
-Exit criteria:
+Remaining:
 
-- Waiters can create orders and send items to kitchen.
-- Kitchen can process tickets by station.
-- Cashier can settle restaurant bills or post to room.
-- Restaurant sales can reduce inventory or support recipe-based costing.
-- POS sales and inventory purchases produce balanced journal entries.
+- Split/merged bills.
+- Table transfer.
+- Complimentary/void approvals.
+- Recipe/BOM costing.
 
 ## Phase 4: Accounting ERP
 
-Goal: connect all hotel and restaurant transactions to a double-entry accounting engine.
+Status: functional MVP.
 
-Accounting:
+Completed:
 
 - Chart of accounts.
+- Journal entries and lines.
+- Balanced posting service.
+- Room checkout postings.
+- Restaurant settlement postings.
+- Inventory purchase postings.
+- Purchase order vendor payment postings.
+- Accounting summary dashboard.
+- Journal source/status/date filters.
+- Expandable journal line details.
+
+Remaining:
+
 - Fiscal periods.
-- Journal entries and journal lines.
-- Posting service with debit/credit validation.
-- Accounts receivable.
-- Accounts payable.
+- Trial balance.
+- Profit and loss.
+- Balance sheet.
 - Tax configuration.
-- Guest folios.
 - Vendor bills.
-- Trial balance, P&L, balance sheet.
-- Cash flow.
-
-Exit criteria:
-
-- Booking, checkout, restaurant sale, room-service posting, inventory purchase, payroll, refund, tax, and payment flows produce balanced journal entries.
-- Accountant can view ledgers and financial reports.
 
 ## Phase 5: HRMS, CRM, Reporting
 
-Goal: broaden ERP capabilities.
+Status: reporting and HRMS shift/attendance MVPs started; CRM is pending.
 
-HRMS:
+Completed:
 
+- Basic reports page.
+- Occupancy report.
+- Revenue report.
+- Restaurant sales report.
+- Inventory report.
 - Employee records.
-- Attendance.
-- Shifts.
-- Leave.
-- Payroll posting to accounting.
+- Employee status tracking.
+- Department/designation basics.
+- Shift setup.
+- Attendance scheduling.
+- Clock-in/clock-out tracking.
 
-CRM:
+Next:
 
-- Guest history.
-- Loyalty.
-- Feedback.
-- Campaign segments.
-
-Reporting:
-
-- Occupancy.
-- ADR.
-- RevPAR.
-- Revenue trends.
-- Inventory valuation.
-- Tax summaries.
-- Staff performance.
-
-Exit criteria:
-
-- Tenant Admin has operational and financial dashboards.
-- Reports are exportable and permission controlled.
+- PDF exports for payslips and management summaries.
+- Guest communication timeline and follow-up reminders.
 
 ## Phase 6: Scale And Integrations
 
-Goal: prepare for large-scale SaaS and external ecosystem.
+Status: future.
 
-Features:
+Planned:
 
-- Multi-property hotel chains.
-- Mobile API support.
+- Multi-property support.
 - OTA integrations.
 - Payment gateways.
 - Nepal gateways: Khalti/eSewa.
 - SMS/WhatsApp/email notifications.
-- AI forecasting.
-- Smart pricing.
-- QR check-in.
-- E-signatures.
-
-Infrastructure:
-
-- Kubernetes manifests or Helm chart.
-- NGINX production config.
-- Sentry.
-- Prometheus/Grafana.
-- Structured logging.
-- Backup and restore procedures.
-
-Exit criteria:
-
-- Platform can safely onboard many tenants.
-- Background jobs and reporting workloads are isolated from API latency.
-- Production deployment guide is complete.
+- Object storage for media.
+- Sentry and structured logging.
+- Backups and restore procedure.
 
 ## Recommended Immediate Next Step
 
-Start with Phase 1 in this order:
+Resume with **PDF exports or guest communication timeline**.
 
-1. Fix backend migrations and tenant/user schema setup.
-2. Implement auth endpoints and current-user endpoint.
-3. Add frontend JWT login and protected routes.
-4. Implement Super Admin tenant creation UI.
-5. Add tests for tenant creation and isolation.
+Suggested order:
+
+1. Commit the current connected MVP checkpoint if it has not been committed.
+2. Add PDF payslips and management summaries.
+3. Add guest communication timeline and follow-up reminders.

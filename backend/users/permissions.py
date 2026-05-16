@@ -1,10 +1,18 @@
 from rest_framework.permissions import BasePermission
 
 
-def user_has_permission(user, permission_code: str) -> bool:
+def _has_admin_access_fallback(user) -> bool:
     if not user or not user.is_authenticated:
         return False
     if getattr(user, 'is_platform_admin', False) or getattr(user, 'is_tenant_admin', False):
+        return True
+    return getattr(user, 'is_staff', False) and not user.roles.exists()
+
+
+def user_has_permission(user, permission_code: str) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    if _has_admin_access_fallback(user):
         return True
     return user.roles.filter(permissions__code=permission_code).exists()
 
@@ -14,7 +22,7 @@ def user_has_any_permission(user, permission_codes) -> bool:
         permission_codes = [permission_codes]
     if not user or not user.is_authenticated:
         return False
-    if getattr(user, 'is_platform_admin', False) or getattr(user, 'is_tenant_admin', False):
+    if _has_admin_access_fallback(user):
         return True
     return user.roles.filter(permissions__code__in=permission_codes).exists()
 

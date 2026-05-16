@@ -38,3 +38,33 @@ export interface StockMovement {
   occurred_at: string;
   created_by: string | null;
 }
+
+export interface PurchaseOrderLine {
+  id?: string;
+  purchase_order?: string;
+  item: string;
+  item_details?: InventoryItem;
+  quantity: string;
+  unit_cost: string;
+  total_cost?: string;
+  notes: string;
+}
+
+export interface PurchaseOrder {
+  id: string;
+  po_number: string;
+  vendor: string;
+  vendor_details?: Vendor;
+  status: 'draft' | 'ordered' | 'received' | 'canceled';
+  payment_status: 'unpaid' | 'paid';
+  order_date: string;
+  expected_date?: string | null;
+  received_at?: string | null;
+  paid_at?: string | null;
+  payment_method: '' | 'cash' | 'bank';
+  reference: string;
+  notes: string;
+  created_by: string | null;
+  total_amount: string;
+  lines: PurchaseOrderLine[];
+}

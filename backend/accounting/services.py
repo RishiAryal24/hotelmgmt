@@ -12,6 +12,7 @@ DEFAULT_ACCOUNTS = [
     ('1200', 'Inventory Asset', 'asset'),
     ('2000', 'Accounts Payable', 'liability'),
     ('2100', 'Tax Payable', 'liability'),
+    ('2200', 'Payroll Payable', 'liability'),
     ('3000', 'Owner Equity', 'equity'),
     ('4000', 'Room Revenue', 'revenue'),
     ('4100', 'Restaurant Revenue', 'revenue'),
@@ -76,6 +77,7 @@ def post_restaurant_settlement(order, posted_by=None):
     if JournalEntry.objects.filter(source_module='restaurant_order', source_id=str(order.id), status='posted').exists():
         return None
 
+    seed_default_accounts()
     payment_account = '1100' if order.payment_method == 'room_posting' else '1000'
     return post_journal_entry(
         description=f'Restaurant settlement {order.order_number}',
@@ -164,6 +166,34 @@ def post_inventory_purchase(movement, payment_account='2000', posted_by=None):
             {
                 'account': payment_account,
                 'description': f'Inventory purchase payable: {movement.item.name}',
+                'debit': 0,
+                'credit': total_cost,
+            },
+        ],
+    )
+
+
+def post_purchase_order_payment(purchase_order, payment_account='1000', posted_by=None):
+    if JournalEntry.objects.filter(source_module='purchase_order_payment', source_id=str(purchase_order.id), status='posted').exists():
+        return None
+
+    seed_default_accounts()
+    total_cost = purchase_order.total_amount
+    return post_journal_entry(
+        description=f'Purchase order payment {purchase_order.po_number}',
+        source_module='purchase_order_payment',
+        source_id=str(purchase_order.id),
+        posted_by=posted_by,
+        lines=[
+            {
+                'account': '2000',
+                'description': f'Clear payable for {purchase_order.po_number}',
+                'debit': total_cost,
+                'credit': 0,
+            },
+            {
+                'account': payment_account,
+                'description': f'Payment for {purchase_order.po_number}',
                 'debit': 0,
                 'credit': total_cost,
             },

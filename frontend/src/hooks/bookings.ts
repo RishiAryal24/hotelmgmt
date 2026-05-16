@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Room, RoomType, Guest, Booking, GuestFolio } from '../types/bookings';
+import { Room, RoomType, Guest, Booking, GuestFolio, GuestHistory } from '../types/bookings';
 import apiClient from '../services/api';
 
 const getList = <T,>(data: T[] | { results: T[] }) => (Array.isArray(data) ? data : data.results);
@@ -50,6 +50,17 @@ export const useGuests = () => {
   });
 };
 
+export const useGuestHistory = (guestId?: string) => {
+  return useQuery({
+    queryKey: ['guest-history', guestId],
+    enabled: Boolean(guestId),
+    queryFn: async (): Promise<GuestHistory> => {
+      const response = await apiClient.get<GuestHistory>(`/bookings/guests/${guestId}/history/`);
+      return response.data;
+    },
+  });
+};
+
 export const useBookings = () => {
   return useQuery({
     queryKey: ['bookings'],
@@ -78,6 +89,21 @@ export const useCreateGuest = () => {
       return response.data;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['guests'] }),
+  });
+};
+
+export const useUpdateGuest = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ guestId, payload }: { guestId: string; payload: Partial<Guest> }): Promise<Guest> => {
+      const response = await apiClient.patch(`/bookings/guests/${guestId}/`, payload);
+      return response.data;
+    },
+    onSuccess: (_guest, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['guests'] });
+      queryClient.invalidateQueries({ queryKey: ['bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['guest-history', variables.guestId] });
+    },
   });
 };
 
@@ -112,7 +138,7 @@ export const useBookingAction = () => {
       payload,
     }: {
       bookingId: string;
-      action: 'check_in' | 'check_out' | 'cancel';
+      action: 'check_in' | 'check_out' | 'cancel' | 'extend-stay' | 'transfer-room';
       payload?: Record<string, unknown>;
     }) => {
       const response = await apiClient.post(`/bookings/bookings/${bookingId}/${action}/`, payload || {});

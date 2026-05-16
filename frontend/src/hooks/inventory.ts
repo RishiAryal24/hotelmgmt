@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/api';
-import { InventoryItem, StockMovement, Vendor } from '../types/inventory';
+import { InventoryItem, PurchaseOrder, StockMovement, Vendor } from '../types/inventory';
 
 const getList = <T,>(data: T[] | { results: T[] }) => (Array.isArray(data) ? data : data.results);
 
@@ -24,11 +24,31 @@ export const useInventoryItems = () => {
   });
 };
 
+export const useLowStockItems = () => {
+  return useQuery({
+    queryKey: ['inventory-items', 'low-stock'],
+    queryFn: async (): Promise<InventoryItem[]> => {
+      const response = await apiClient.get<InventoryItem[] | { results: InventoryItem[] }>('/inventory/items/low_stock/');
+      return getList(response.data);
+    },
+  });
+};
+
 export const useStockMovements = () => {
   return useQuery({
     queryKey: ['stock-movements'],
     queryFn: async (): Promise<StockMovement[]> => {
       const response = await apiClient.get<StockMovement[] | { results: StockMovement[] }>('/inventory/movements/');
+      return getList(response.data);
+    },
+  });
+};
+
+export const usePurchaseOrders = () => {
+  return useQuery({
+    queryKey: ['purchase-orders'],
+    queryFn: async (): Promise<PurchaseOrder[]> => {
+      const response = await apiClient.get<PurchaseOrder[] | { results: PurchaseOrder[] }>('/inventory/purchase-orders/');
       return getList(response.data);
     },
   });
@@ -75,6 +95,7 @@ export const useReceiveStock = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['inventory-items'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-items', 'low-stock'] });
       queryClient.invalidateQueries({ queryKey: ['stock-movements'] });
       queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
     },
@@ -97,7 +118,52 @@ export const useAdjustStock = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['inventory-items'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-items', 'low-stock'] });
       queryClient.invalidateQueries({ queryKey: ['stock-movements'] });
+    },
+  });
+};
+
+export const useCreatePurchaseOrder = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: {
+      vendor: string;
+      expected_date?: string;
+      reference?: string;
+      notes?: string;
+      lines: Array<{ item: string; quantity: string; unit_cost: string; notes?: string }>;
+    }): Promise<PurchaseOrder> => {
+      const response = await apiClient.post('/inventory/purchase-orders/', payload);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+    },
+  });
+};
+
+export const usePurchaseOrderAction = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      purchaseOrderId,
+      action,
+      payload,
+    }: {
+      purchaseOrderId: string;
+      action: 'submit' | 'receive' | 'cancel' | 'pay';
+      payload?: { payment_method?: 'cash' | 'bank' };
+    }): Promise<PurchaseOrder> => {
+      const response = await apiClient.post(`/inventory/purchase-orders/${purchaseOrderId}/${action}/`, payload || {});
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-items'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-items', 'low-stock'] });
+      queryClient.invalidateQueries({ queryKey: ['stock-movements'] });
+      queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
     },
   });
 };

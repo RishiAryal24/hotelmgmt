@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import CompactTabs from '../components/CompactTabs';
 import {
@@ -8,7 +9,10 @@ import {
   useCreateBooking,
   useCreateGuest,
   useGuestFolios,
+  useGuestHistory,
   useGuests,
+  useRooms,
+  useUpdateGuest,
 } from '../hooks/bookings';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
 import { Booking, Guest, GuestFolio } from '../types/bookings';
@@ -21,6 +25,10 @@ const emptyGuest = {
   address: '',
   id_type: '',
   id_number: '',
+  vip_level: 'standard' as Guest['vip_level'],
+  preferences: {},
+  notes: '',
+  marketing_opt_in: false,
 };
 
 const emptyBooking = {
@@ -54,21 +62,51 @@ const paymentMethods = [
 type CheckoutPaymentMethod = (typeof paymentMethods)[number]['value'];
 type BookingTab = 'reservations' | 'guests' | 'availability' | 'folios' | 'new';
 
+const addDays = (date: string, days: number) => {
+  const value = new Date(`${date}T00:00:00`);
+  value.setDate(value.getDate() + days);
+  return value.toISOString().slice(0, 10);
+};
+
+const formatDayLabel = (date: string) => {
+  const value = new Date(`${date}T00:00:00`);
+  return value.toLocaleDateString([], { month: 'short', day: 'numeric' });
+};
+
+const formatWeekday = (date: string) => {
+  const value = new Date(`${date}T00:00:00`);
+  return value.toLocaleDateString([], { weekday: 'short' });
+};
+
 const Bookings: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: settings } = useQuery({ queryKey: ['tenant-settings'], queryFn: getTenantSettings });
   const { data: bookings, isLoading, error } = useBookings();
   const { data: guests } = useGuests();
   const { data: folios } = useGuestFolios();
+  const { data: rooms } = useRooms();
   const createGuest = useCreateGuest();
+  const updateGuest = useUpdateGuest();
   const createBooking = useCreateBooking();
   const bookingAction = useBookingAction();
-  const [activeTab, setActiveTab] = useState<BookingTab>('reservations');
+  const [activeTab, setActiveTab] = useState<BookingTab>((searchParams.get('tab') as BookingTab | null) || 'reservations');
+  const [bookingFilter, setBookingFilter] = useState(searchParams.get('filter') || 'all');
   const [checkoutBooking, setCheckoutBooking] = useState<Booking | null>(null);
+  const [extensionBooking, setExtensionBooking] = useState<Booking | null>(null);
+  const [transferBooking, setTransferBooking] = useState<Booking | null>(null);
+  const [selectedGuestId, setSelectedGuestId] = useState(searchParams.get('guest') || '');
+  const [guestSearch, setGuestSearch] = useState('');
+  const [isAddingGuestInBooking, setIsAddingGuestInBooking] = useState(false);
+  const [guestProfileForm, setGuestProfileForm] = useState({ vip_level: 'standard' as Guest['vip_level'], notes: '', preferencesText: '', marketing_opt_in: false });
   const [checkoutPayment, setCheckoutPayment] = useState<{ payment_method: CheckoutPaymentMethod; paid_amount: string }>({
     payment_method: 'cash',
     paid_amount: '',
   });
+  const [extensionForm, setExtensionForm] = useState({ check_out_date: '' });
+  const [transferForm, setTransferForm] = useState({ room: '' });
+  const [calendarStart, setCalendarStart] = useState(new Date().toISOString().slice(0, 10));
   const [guestForm, setGuestForm] = useState<Omit<Guest, 'id'>>(emptyGuest);
+  const [bookingGuestForm, setBookingGuestForm] = useState<Omit<Guest, 'id'>>(emptyGuest);
   const [bookingForm, setBookingForm] = useState<Omit<Booking, 'id' | 'total_amount' | 'room_details' | 'guest_details'>>(
     emptyBooking,
   );
@@ -82,11 +120,55 @@ const Bookings: React.FC = () => {
     availabilityRange.check_in_date,
     availabilityRange.check_out_date,
   );
+  const { data: transferRooms, isFetching: transferRoomsLoading } = useAvailableRooms(
+    transferBooking?.check_in_date,
+    transferBooking?.check_out_date,
+  );
+  const { data: guestHistory, isFetching: guestHistoryLoading } = useGuestHistory(selectedGuestId);
 
   const selectedRoom = useMemo(
     () => bookableRooms?.find((room) => room.id === bookingForm.room),
     [bookableRooms, bookingForm.room],
   );
+
+  const selectedBookingGuest = useMemo(
+    () => guests?.find((guest) => guest.id === bookingForm.guest),
+    [bookingForm.guest, guests],
+  );
+
+  const selectedBookingGuestHistory = useMemo(() => {
+    if (!selectedBookingGuest) return { bookings: [] as Booking[], folios: [] as GuestFolio[] };
+    return {
+      bookings: (bookings || []).filter((booking) => booking.guest === selectedBookingGuest.id),
+      folios: (folios || []).filter((folio) => folio.guest_name === `${selectedBookingGuest.first_name} ${selectedBookingGuest.last_name}`),
+    };
+  }, [bookings, folios, selectedBookingGuest]);
+
+  const filteredGuests = useMemo(() => {
+    const search = guestSearch.trim().toLowerCase();
+    if (!search) return (guests || []).slice(0, 6);
+    return (guests || [])
+      .filter((guest) =>
+        [guest.first_name, guest.last_name, guest.email, guest.phone, guest.id_number]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(search),
+      )
+      .slice(0, 8);
+  }, [guestSearch, guests]);
+
+  useEffect(() => {
+    if (!guestHistory?.guest) return;
+    setGuestProfileForm({
+      vip_level: guestHistory.guest.vip_level,
+      notes: guestHistory.guest.notes || '',
+      preferencesText: Object.entries(guestHistory.guest.preferences || {})
+        .map(([key, value]) => `${key}: ${value}`)
+        .join('\n'),
+      marketing_opt_in: guestHistory.guest.marketing_opt_in,
+    });
+  }, [guestHistory]);
 
   const estimatedTotal = useMemo(() => {
     if (!selectedRoom || !bookingForm.check_in_date || !bookingForm.check_out_date) return 0;
@@ -104,6 +186,87 @@ const Bookings: React.FC = () => {
     }),
     [bookings, folios],
   );
+
+  const today = new Date().toISOString().slice(0, 10);
+  const visibleBookings = useMemo(() => {
+    const records = bookings || [];
+    if (bookingFilter === 'arrivals_today') {
+      return records.filter((booking) => booking.check_in_date === today && booking.status === 'confirmed');
+    }
+    if (bookingFilter === 'departures_today') {
+      return records.filter((booking) => booking.check_out_date === today && booking.status === 'checked_in');
+    }
+    if (bookingFilter === 'confirmed') {
+      return records.filter((booking) => booking.status === 'confirmed');
+    }
+    if (bookingFilter === 'checked_in') {
+      return records.filter((booking) => booking.status === 'checked_in');
+    }
+    return records;
+  }, [bookingFilter, bookings, today]);
+
+  const filterLabel: Record<string, string> = {
+    all: 'All reservations',
+    arrivals_today: 'Arrivals today',
+    departures_today: 'Departures today',
+    confirmed: 'Confirmed reservations',
+    checked_in: 'In-house guests',
+  };
+
+  const calendarDays = useMemo(
+    () => Array.from({ length: 14 }, (_item, index) => addDays(calendarStart, index)),
+    [calendarStart],
+  );
+
+  const getRoomDayBooking = (roomId: string, day: string) => {
+    return (bookings || []).find(
+      (booking) =>
+        booking.room === roomId &&
+        ['confirmed', 'checked_in'].includes(booking.status) &&
+        booking.check_in_date <= day &&
+        booking.check_out_date > day,
+    );
+  };
+
+  const getCalendarCell = (roomId: string, day: string) => {
+    const room = rooms?.find((item) => item.id === roomId);
+    const booking = getRoomDayBooking(roomId, day);
+    if (booking) {
+      return {
+        label: booking.status === 'checked_in' ? 'In house' : 'Reserved',
+        detail: booking.guest_details ? `${booking.guest_details.first_name} ${booking.guest_details.last_name}` : 'Guest',
+        className: booking.status === 'checked_in' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800',
+      };
+    }
+    if (room?.status === 'maintenance') {
+      return { label: 'Maint.', detail: 'Unavailable', className: 'bg-rose-100 text-rose-800' };
+    }
+    if (room?.status === 'cleaning') {
+      return { label: 'Clean', detail: 'Housekeeping', className: 'bg-amber-100 text-amber-800' };
+    }
+    return { label: 'Open', detail: 'Available', className: 'bg-slate-50 text-slate-500' };
+  };
+
+  const handleTabChange = (tabId: string) => {
+    setActiveTab(tabId as BookingTab);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('tab', tabId);
+    if (tabId !== 'reservations' && tabId !== 'folios') {
+      nextParams.delete('filter');
+      setBookingFilter('all');
+    }
+    if (tabId !== 'guests') {
+      nextParams.delete('guest');
+    }
+    setSearchParams(nextParams);
+  };
+
+  const clearBookingFilter = () => {
+    setBookingFilter('all');
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('filter');
+    setSearchParams(nextParams);
+  };
 
   const tabs = [
     { id: 'reservations', label: 'Reservations', count: bookingCounts.active },
@@ -126,10 +289,73 @@ const Bookings: React.FC = () => {
 
   const handleCreateBooking = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!bookingForm.guest) return;
     createBooking.mutate(bookingForm, {
       onSuccess: () => {
         setBookingForm(emptyBooking);
+        setGuestSearch('');
         setActiveTab('reservations');
+      },
+    });
+  };
+
+  const selectGuestForBooking = (guest: Guest) => {
+    const preferences = Object.entries(guest.preferences || {})
+      .map(([key, value]) => `${key}: ${value}`)
+      .join('; ');
+    setBookingForm({
+      ...bookingForm,
+      guest: guest.id,
+      special_requests: bookingForm.special_requests || preferences,
+    });
+    setGuestSearch(`${guest.first_name} ${guest.last_name} ${guest.email}`);
+    setIsAddingGuestInBooking(false);
+  };
+
+  const handleCreateGuestForBooking = () => {
+    if (!bookingGuestForm.first_name || !bookingGuestForm.last_name || !bookingGuestForm.email) return;
+    createGuest.mutate(bookingGuestForm, {
+      onSuccess: (guest) => {
+        setBookingGuestForm(emptyGuest);
+        selectGuestForBooking(guest);
+      },
+    });
+  };
+
+  const openGuestProfile = (guestId?: string) => {
+    if (!guestId) return;
+    setSelectedGuestId(guestId);
+    setActiveTab('guests');
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('tab', 'guests');
+    nextParams.set('guest', guestId);
+    nextParams.delete('filter');
+    setSearchParams(nextParams);
+  };
+
+  const parsePreferences = (value: string) =>
+    value
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .reduce<Record<string, string>>((result, line) => {
+        const [key, ...rest] = line.split(':');
+        if (key && rest.length) {
+          result[key.trim()] = rest.join(':').trim();
+        }
+        return result;
+      }, {});
+
+  const handleUpdateGuestProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedGuestId) return;
+    updateGuest.mutate({
+      guestId: selectedGuestId,
+      payload: {
+        vip_level: guestProfileForm.vip_level,
+        notes: guestProfileForm.notes,
+        preferences: parsePreferences(guestProfileForm.preferencesText),
+        marketing_opt_in: guestProfileForm.marketing_opt_in,
       },
     });
   };
@@ -138,6 +364,16 @@ const Bookings: React.FC = () => {
     const amountDue = booking.folio_details?.grand_total || booking.total_amount;
     setCheckoutBooking(booking);
     setCheckoutPayment({ payment_method: 'cash', paid_amount: amountDue });
+  };
+
+  const openExtension = (booking: Booking) => {
+    setExtensionBooking(booking);
+    setExtensionForm({ check_out_date: booking.check_out_date });
+  };
+
+  const openTransfer = (booking: Booking) => {
+    setTransferBooking(booking);
+    setTransferForm({ room: '' });
   };
 
   const handleCheckout = (e: React.FormEvent) => {
@@ -151,6 +387,36 @@ const Bookings: React.FC = () => {
       },
       {
         onSuccess: () => setCheckoutBooking(null),
+      },
+    );
+  };
+
+  const handleExtendStay = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!extensionBooking) return;
+    bookingAction.mutate(
+      {
+        bookingId: extensionBooking.id,
+        action: 'extend-stay',
+        payload: extensionForm,
+      },
+      {
+        onSuccess: () => setExtensionBooking(null),
+      },
+    );
+  };
+
+  const handleTransferRoom = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!transferBooking) return;
+    bookingAction.mutate(
+      {
+        bookingId: transferBooking.id,
+        action: 'transfer-room',
+        payload: transferForm,
+      },
+      {
+        onSuccess: () => setTransferBooking(null),
       },
     );
   };
@@ -182,10 +448,21 @@ const Bookings: React.FC = () => {
         </div>
       </div>
 
-      <CompactTabs tabs={tabs} activeTab={activeTab} onChange={(tabId) => setActiveTab(tabId as BookingTab)} />
+      <CompactTabs tabs={tabs} activeTab={activeTab} onChange={handleTabChange} />
 
       {activeTab === 'reservations' && (
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+          <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">{filterLabel[bookingFilter] || 'Reservations'}</h2>
+              <p className="mt-1 text-sm text-slate-500">{visibleBookings.length} matching booking(s)</p>
+            </div>
+            {bookingFilter !== 'all' && (
+              <button type="button" onClick={clearBookingFilter} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Show all
+              </button>
+            )}
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[860px] text-left text-sm">
               <thead className="bg-slate-50 text-xs uppercase text-slate-500">
@@ -199,14 +476,20 @@ const Bookings: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {bookings?.map((booking) => (
+                {visibleBookings.map((booking) => (
                   <tr key={booking.id} className="align-top hover:bg-slate-50/70">
                     <td className="px-4 py-3 font-medium text-slate-900">
                       #{booking.id.slice(-8)}
                       <span className="block text-xs font-normal text-slate-500">Room {booking.room_details?.room_number || '-'}</span>
                     </td>
                     <td className="px-4 py-3 text-slate-700">
-                      {booking.guest_details?.first_name} {booking.guest_details?.last_name}
+                      <button
+                        type="button"
+                        onClick={() => openGuestProfile(booking.guest)}
+                        className="font-medium text-emerald-700 hover:text-emerald-800"
+                      >
+                        {booking.guest_details?.first_name} {booking.guest_details?.last_name}
+                      </button>
                       <span className="block text-xs text-slate-500">{booking.guest_details?.email}</span>
                     </td>
                     <td className="px-4 py-3 text-slate-700">
@@ -240,12 +523,26 @@ const Bookings: React.FC = () => {
                           </>
                         )}
                         {booking.status === 'checked_in' && (
-                          <button
-                            onClick={() => openCheckout(booking)}
-                            className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900"
-                          >
-                            Check out
-                          </button>
+                          <>
+                            <button
+                              onClick={() => openExtension(booking)}
+                              className="rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+                            >
+                              Extend
+                            </button>
+                            <button
+                              onClick={() => openTransfer(booking)}
+                              className="rounded-lg border border-sky-200 px-3 py-1.5 text-xs font-medium text-sky-700 hover:bg-sky-50"
+                            >
+                              Transfer
+                            </button>
+                            <button
+                              onClick={() => openCheckout(booking)}
+                              className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900"
+                            >
+                              Check out
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>
@@ -254,7 +551,7 @@ const Bookings: React.FC = () => {
               </tbody>
             </table>
           </div>
-          {bookings?.length === 0 && <p className="p-4 text-sm text-slate-600">No reservations created yet.</p>}
+          {visibleBookings.length === 0 && <p className="p-4 text-sm text-slate-600">No matching reservations.</p>}
         </section>
       )}
 
@@ -271,7 +568,17 @@ const Bookings: React.FC = () => {
                 <input placeholder="ID type" value={guestForm.id_type} onChange={(e) => setGuestForm({ ...guestForm, id_type: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
                 <input placeholder="ID number" value={guestForm.id_number} onChange={(e) => setGuestForm({ ...guestForm, id_number: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
               </div>
+              <select value={guestForm.vip_level} onChange={(e) => setGuestForm({ ...guestForm, vip_level: e.target.value as Guest['vip_level'] })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                <option value="standard">Standard</option>
+                <option value="vip">VIP</option>
+                <option value="blacklist">Do not book</option>
+              </select>
               <textarea placeholder="Address" value={guestForm.address} onChange={(e) => setGuestForm({ ...guestForm, address: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+              <textarea placeholder="Guest notes" value={guestForm.notes} onChange={(e) => setGuestForm({ ...guestForm, notes: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={guestForm.marketing_opt_in} onChange={(e) => setGuestForm({ ...guestForm, marketing_opt_in: e.target.checked })} />
+                Marketing opt-in
+              </label>
             </div>
             {createGuest.isError && <p className="mt-3 text-sm text-red-600">Could not create guest.</p>}
             <button type="submit" className="mt-3 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
@@ -286,11 +593,13 @@ const Bookings: React.FC = () => {
                   <th className="px-4 py-3">Guest</th>
                   <th className="px-4 py-3">Phone</th>
                   <th className="px-4 py-3">ID</th>
+                  <th className="px-4 py-3">Level</th>
+                  <th className="px-4 py-3 text-right">Profile</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {guests?.map((guest) => (
-                  <tr key={guest.id} className="hover:bg-slate-50/70">
+                  <tr key={guest.id} className={`hover:bg-slate-50/70 ${selectedGuestId === guest.id ? 'bg-emerald-50/70' : ''}`}>
                     <td className="px-4 py-3 font-medium text-slate-900">
                       {guest.first_name} {guest.last_name}
                       <span className="block text-xs font-normal text-slate-500">{guest.email}</span>
@@ -299,17 +608,154 @@ const Bookings: React.FC = () => {
                     <td className="px-4 py-3 text-slate-700">
                       {guest.id_type || '-'} {guest.id_number}
                     </td>
+                    <td className="px-4 py-3 text-slate-700">{guest.vip_level.replace('_', ' ')}</td>
+                    <td className="px-4 py-3 text-right">
+                      <button type="button" onClick={() => openGuestProfile(guest.id)} className="rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50">
+                        View
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
             {guests?.length === 0 && <p className="p-4 text-sm text-slate-600">No guests yet.</p>}
           </div>
+
+          {selectedGuestId && (
+            <section className="rounded-2xl border border-slate-200 bg-white p-4 lg:col-span-2">
+              {guestHistoryLoading || !guestHistory ? (
+                <p className="text-sm text-slate-600">Loading guest profile...</p>
+              ) : (
+                <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+                  <form onSubmit={handleUpdateGuestProfile} className="space-y-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Guest profile</p>
+                      <h2 className="mt-1 text-xl font-semibold text-slate-900">
+                        {guestHistory.guest.first_name} {guestHistory.guest.last_name}
+                      </h2>
+                      <p className="text-sm text-slate-500">{guestHistory.guest.email}</p>
+                    </div>
+                    <select value={guestProfileForm.vip_level} onChange={(e) => setGuestProfileForm({ ...guestProfileForm, vip_level: e.target.value as Guest['vip_level'] })} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                      <option value="standard">Standard</option>
+                      <option value="vip">VIP</option>
+                      <option value="blacklist">Do not book</option>
+                    </select>
+                    <textarea placeholder="Preferences, one per line: pillow: soft" value={guestProfileForm.preferencesText} onChange={(e) => setGuestProfileForm({ ...guestProfileForm, preferencesText: e.target.value })} className="min-h-28 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                    <textarea placeholder="Internal notes" value={guestProfileForm.notes} onChange={(e) => setGuestProfileForm({ ...guestProfileForm, notes: e.target.value })} className="min-h-28 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                      <input type="checkbox" checked={guestProfileForm.marketing_opt_in} onChange={(e) => setGuestProfileForm({ ...guestProfileForm, marketing_opt_in: e.target.checked })} />
+                      Marketing opt-in
+                    </label>
+                    <button type="submit" className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
+                      Save profile
+                    </button>
+                    {updateGuest.isError && <p className="text-sm text-red-600">Could not update guest profile.</p>}
+                  </form>
+
+                  <div className="space-y-4">
+                    <div className="grid gap-3 md:grid-cols-4">
+                      {[
+                        ['Bookings', guestHistory.summary.total_bookings],
+                        ['Completed stays', guestHistory.summary.completed_stays],
+                        ['Open folios', guestHistory.summary.open_folios],
+                        ['Lifetime value', formatMoney(guestHistory.summary.lifetime_value, settings?.currency)],
+                      ].map(([label, value]) => (
+                        <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+                          <p className="mt-1 text-lg font-semibold text-slate-900">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="overflow-hidden rounded-xl border border-slate-100">
+                      <table className="w-full min-w-[720px] text-left text-sm">
+                        <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                          <tr>
+                            <th className="px-3 py-2">Stay</th>
+                            <th className="px-3 py-2">Room</th>
+                            <th className="px-3 py-2 text-right">Total</th>
+                            <th className="px-3 py-2">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {guestHistory.bookings.map((booking) => (
+                            <tr key={booking.id}>
+                              <td className="px-3 py-2 text-slate-700">{booking.check_in_date} to {booking.check_out_date}</td>
+                              <td className="px-3 py-2 text-slate-700">Room {booking.room_details?.room_number || '-'}</td>
+                              <td className="px-3 py-2 text-right font-medium text-slate-900">{formatMoney(booking.total_amount, settings?.currency)}</td>
+                              <td className="px-3 py-2">
+                                <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusClass[booking.status]}`}>{booking.status.replace('_', ' ')}</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {guestHistory.bookings.length === 0 && <p className="p-3 text-sm text-slate-600">No stay history yet.</p>}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
         </section>
       )}
 
       {activeTab === 'availability' && (
         <section className="space-y-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="flex flex-col gap-3 border-b border-slate-100 pb-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">Availability calendar</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {formatDayLabel(calendarDays[0])} to {formatDayLabel(calendarDays[calendarDays.length - 1])}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => setCalendarStart(addDays(calendarStart, -14))} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                  Previous
+                </button>
+                <button type="button" onClick={() => setCalendarStart(new Date().toISOString().slice(0, 10))} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                  Today
+                </button>
+                <button type="button" onClick={() => setCalendarStart(addDays(calendarStart, 14))} className="rounded-xl bg-slate-800 px-3 py-2 text-sm font-medium text-white hover:bg-slate-900">
+                  Next
+                </button>
+              </div>
+            </div>
+            <div className="mt-4 overflow-x-auto">
+              <div className="min-w-[1120px]">
+                <div className="grid grid-cols-[150px_repeat(14,minmax(68px,1fr))] border-b border-slate-100 text-xs font-semibold uppercase text-slate-500">
+                  <div className="sticky left-0 z-10 bg-white px-3 py-2">Room</div>
+                  {calendarDays.map((day) => (
+                    <div key={day} className="px-2 py-2 text-center">
+                      <span className="block">{formatWeekday(day)}</span>
+                      <span className="block font-normal normal-case text-slate-400">{formatDayLabel(day)}</span>
+                    </div>
+                  ))}
+                </div>
+                {(rooms || []).map((room) => (
+                  <div key={room.id} className="grid grid-cols-[150px_repeat(14,minmax(68px,1fr))] border-b border-slate-100 last:border-b-0">
+                    <div className="sticky left-0 z-10 bg-white px-3 py-2">
+                      <p className="text-sm font-semibold text-slate-900">Room {room.room_number}</p>
+                      <p className="text-xs text-slate-500">{room.room_type_name}</p>
+                    </div>
+                    {calendarDays.map((day) => {
+                      const cell = getCalendarCell(room.id, day);
+                      return (
+                        <div key={`${room.id}-${day}`} className="p-1">
+                          <div className={`h-12 rounded-lg px-2 py-1 text-center text-[11px] font-medium ${cell.className}`}>
+                            <span className="block truncate">{cell.label}</span>
+                            <span className="block truncate text-[10px] font-normal opacity-75">{cell.detail}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+                {(rooms || []).length === 0 && <p className="p-4 text-sm text-slate-600">No rooms available for calendar display.</p>}
+              </div>
+            </div>
+          </div>
+
           <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-[1fr_1fr_auto]">
             <input type="date" value={availabilityRange.check_in_date} onChange={(e) => setAvailabilityRange({ ...availabilityRange, check_in_date: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
             <input type="date" value={availabilityRange.check_out_date} onChange={(e) => setAvailabilityRange({ ...availabilityRange, check_out_date: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
@@ -362,7 +808,7 @@ const Bookings: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {folios?.map((folio) => (
+                {(searchParams.get('filter') === 'open_folios' ? folios?.filter((folio) => folio.status === 'open') : folios)?.map((folio) => (
                   <tr key={folio.id} className="hover:bg-slate-50/70">
                     <td className="px-4 py-3 font-medium text-slate-900">
                       {folio.folio_number}
@@ -381,21 +827,184 @@ const Bookings: React.FC = () => {
               </tbody>
             </table>
           </div>
-          {folios?.length === 0 && <p className="p-4 text-sm text-slate-600">No folios yet.</p>}
+          {(searchParams.get('filter') === 'open_folios' ? folios?.filter((folio) => folio.status === 'open') : folios)?.length === 0 && <p className="p-4 text-sm text-slate-600">No matching folios.</p>}
         </section>
       )}
 
       {activeTab === 'new' && (
         <form onSubmit={handleCreateBooking} className="rounded-2xl border border-slate-200 bg-white p-4">
           <div className="grid gap-3 md:grid-cols-2">
-            <select value={bookingForm.guest} onChange={(e) => setBookingForm({ ...bookingForm, guest: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required>
-              <option value="">Select guest</option>
-              {guests?.map((guest) => (
-                <option key={guest.id} value={guest.id}>
-                  {guest.first_name} {guest.last_name} - {guest.email}
-                </option>
-              ))}
-            </select>
+            <div className="space-y-3 md:col-span-2">
+              <div>
+                <input
+                  value={guestSearch}
+                  onChange={(e) => {
+                    setGuestSearch(e.target.value);
+                    setBookingForm({ ...bookingForm, guest: '' });
+                  }}
+                  placeholder="Search guest by name, email, phone, or ID"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
+              <div className="grid gap-2 md:grid-cols-2">
+                {filteredGuests.map((guest) => {
+                  const guestBookings = (bookings || []).filter((booking) => booking.guest === guest.id);
+                  const isRegular = guestBookings.filter((booking) => booking.status === 'checked_out').length > 0 || guestBookings.length > 1;
+                  return (
+                    <button
+                      key={guest.id}
+                      type="button"
+                      onClick={() => selectGuestForBooking(guest)}
+                      className={`rounded-xl border px-3 py-2 text-left text-sm transition ${
+                        bookingForm.guest === guest.id ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-slate-900">
+                          {guest.first_name} {guest.last_name}
+                        </span>
+                        {isRegular && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Regular</span>}
+                      </span>
+                      <span className="mt-1 block text-xs text-slate-500">{guest.email || guest.phone || 'No contact saved'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {selectedBookingGuest && (
+                <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-sm">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <p className="font-semibold text-slate-900">
+                        {selectedBookingGuest.first_name} {selectedBookingGuest.last_name}
+                        {selectedBookingGuest.vip_level !== 'standard' && (
+                          <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs text-emerald-700">{selectedBookingGuest.vip_level.replace('_', ' ')}</span>
+                        )}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-600">{selectedBookingGuest.email} {selectedBookingGuest.phone ? `- ${selectedBookingGuest.phone}` : ''}</p>
+                    </div>
+                    <button type="button" onClick={() => openGuestProfile(selectedBookingGuest.id)} className="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100">
+                      Open profile
+                    </button>
+                  </div>
+                  <div className="mt-3 grid gap-2 md:grid-cols-4">
+                    <span className="rounded-lg bg-white px-3 py-2">
+                      <strong className="block text-slate-900">{selectedBookingGuestHistory.bookings.length}</strong>
+                      prior booking(s)
+                    </span>
+                    <span className="rounded-lg bg-white px-3 py-2">
+                      <strong className="block text-slate-900">{selectedBookingGuestHistory.bookings.filter((booking) => booking.status === 'checked_out').length}</strong>
+                      completed stay(s)
+                    </span>
+                    <span className="rounded-lg bg-white px-3 py-2">
+                      <strong className="block text-slate-900">{selectedBookingGuestHistory.folios.filter((folio) => folio.status === 'open').length}</strong>
+                      open folio(s)
+                    </span>
+                    <span className="rounded-lg bg-white px-3 py-2">
+                      <strong className="block text-slate-900">
+                        {selectedBookingGuestHistory.bookings[0]?.check_out_date || '-'}
+                      </strong>
+                      last checkout
+                    </span>
+                  </div>
+                  {(selectedBookingGuest.notes || Object.keys(selectedBookingGuest.preferences || {}).length > 0) && (
+                    <p className="mt-3 text-xs text-slate-600">
+                      {selectedBookingGuest.notes || Object.entries(selectedBookingGuest.preferences).map(([key, value]) => `${key}: ${value}`).join('; ')}
+                    </p>
+                  )}
+                </div>
+              )}
+              {!bookingForm.guest && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <p className="text-xs text-slate-600">No matching guest? Add the guest here and continue this booking.</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAddingGuestInBooking(!isAddingGuestInBooking);
+                        const [firstName = '', ...rest] = guestSearch.trim().split(' ');
+                        if (!isAddingGuestInBooking && guestSearch.trim()) {
+                          setBookingGuestForm({
+                            ...bookingGuestForm,
+                            first_name: bookingGuestForm.first_name || firstName,
+                            last_name: bookingGuestForm.last_name || rest.join(' '),
+                          });
+                        }
+                      }}
+                      className="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+                    >
+                      {isAddingGuestInBooking ? 'Hide new guest' : 'Add new guest'}
+                    </button>
+                  </div>
+                  {isAddingGuestInBooking && (
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <input
+                        placeholder="First name"
+                        value={bookingGuestForm.first_name}
+                        onChange={(e) => setBookingGuestForm({ ...bookingGuestForm, first_name: e.target.value })}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                      />
+                      <input
+                        placeholder="Last name"
+                        value={bookingGuestForm.last_name}
+                        onChange={(e) => setBookingGuestForm({ ...bookingGuestForm, last_name: e.target.value })}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                      />
+                      <input
+                        type="email"
+                        placeholder="Email"
+                        value={bookingGuestForm.email}
+                        onChange={(e) => setBookingGuestForm({ ...bookingGuestForm, email: e.target.value })}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                      />
+                      <input
+                        placeholder="Phone"
+                        value={bookingGuestForm.phone}
+                        onChange={(e) => setBookingGuestForm({ ...bookingGuestForm, phone: e.target.value })}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                      />
+                      <div className="grid grid-cols-2 gap-3 md:col-span-2">
+                        <input
+                          placeholder="ID type"
+                          value={bookingGuestForm.id_type}
+                          onChange={(e) => setBookingGuestForm({ ...bookingGuestForm, id_type: e.target.value })}
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                        />
+                        <input
+                          placeholder="ID number"
+                          value={bookingGuestForm.id_number}
+                          onChange={(e) => setBookingGuestForm({ ...bookingGuestForm, id_number: e.target.value })}
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <textarea
+                        placeholder="Address"
+                        value={bookingGuestForm.address}
+                        onChange={(e) => setBookingGuestForm({ ...bookingGuestForm, address: e.target.value })}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm md:col-span-2"
+                      />
+                      <div className="flex flex-wrap items-center justify-between gap-3 md:col-span-2">
+                        <label className="flex items-center gap-2 text-sm text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={bookingGuestForm.marketing_opt_in}
+                            onChange={(e) => setBookingGuestForm({ ...bookingGuestForm, marketing_opt_in: e.target.checked })}
+                          />
+                          Marketing opt-in
+                        </label>
+                        <button
+                          type="button"
+                          onClick={handleCreateGuestForBooking}
+                          disabled={!bookingGuestForm.first_name || !bookingGuestForm.last_name || !bookingGuestForm.email || createGuest.isPending}
+                          className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                        >
+                          Save and select guest
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
             <input type="number" value={bookingForm.number_of_guests} onChange={(e) => setBookingForm({ ...bookingForm, number_of_guests: Number(e.target.value) })} min="1" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
             <input type="date" value={bookingForm.check_in_date} onChange={(e) => setBookingForm({ ...bookingForm, check_in_date: e.target.value, room: '' })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
             <input type="date" value={bookingForm.check_out_date} onChange={(e) => setBookingForm({ ...bookingForm, check_out_date: e.target.value, room: '' })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
@@ -417,11 +1026,76 @@ const Bookings: React.FC = () => {
             <p className="text-sm text-slate-600">
               Estimated total: <span className="font-semibold text-slate-900">{formatMoney(estimatedTotal, settings?.currency)}</span>
             </p>
-            <button type="submit" className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
+            <button type="submit" disabled={!bookingForm.guest} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">
               Create reservation
             </button>
           </div>
           {createBooking.isError && <p className="mt-3 text-sm text-red-600">Could not create reservation.</p>}
+        </form>
+      )}
+
+      {transferBooking && (
+        <form onSubmit={handleTransferRoom} className="rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="grid gap-3 md:grid-cols-[1fr_260px_auto] md:items-end">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Transfer room #{transferBooking.id.slice(-8)}</p>
+              <p className="text-xs text-slate-500">
+                Current room {transferBooking.room_details?.room_number || '-'} - Stay {transferBooking.check_in_date} to {transferBooking.check_out_date}
+              </p>
+            </div>
+            <select
+              value={transferForm.room}
+              onChange={(e) => setTransferForm({ room: e.target.value })}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              required
+            >
+              <option value="">{transferRoomsLoading ? 'Checking rooms...' : 'Select available room'}</option>
+              {transferRooms?.map((room) => (
+                <option key={room.id} value={room.id}>
+                  Room {room.room_number} - {room.room_type_name} - {formatMoney(room.price_per_night, settings?.currency)}
+                </option>
+              ))}
+            </select>
+            <div className="flex gap-2">
+              <button type="submit" className="rounded-xl bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800">
+                Confirm
+              </button>
+              <button type="button" onClick={() => setTransferBooking(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Close
+              </button>
+            </div>
+          </div>
+          {bookingAction.isError && <p className="mt-3 text-sm text-red-600">Could not transfer room. The target room may no longer be available.</p>}
+        </form>
+      )}
+
+      {extensionBooking && (
+        <form onSubmit={handleExtendStay} className="rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="grid gap-3 md:grid-cols-[1fr_180px_auto] md:items-end">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Extend stay #{extensionBooking.id.slice(-8)}</p>
+              <p className="text-xs text-slate-500">
+                Current checkout {extensionBooking.check_out_date} - Room {extensionBooking.room_details?.room_number || '-'}
+              </p>
+            </div>
+            <input
+              type="date"
+              min={extensionBooking.check_out_date}
+              value={extensionForm.check_out_date}
+              onChange={(e) => setExtensionForm({ check_out_date: e.target.value })}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              required
+            />
+            <div className="flex gap-2">
+              <button type="submit" className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
+                Confirm
+              </button>
+              <button type="button" onClick={() => setExtensionBooking(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Close
+              </button>
+            </div>
+          </div>
+          {bookingAction.isError && <p className="mt-3 text-sm text-red-600">Could not extend stay. The room may be unavailable for the requested dates.</p>}
         </form>
       )}
 

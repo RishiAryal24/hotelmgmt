@@ -113,12 +113,23 @@ Use this path:
 
 ### Local
 
-- Docker Compose
-- Full Postgres
-- Redis
-- Django backend
-- React frontend
-- Celery worker once configured
+Current local development uses the installed Windows PostgreSQL service and helper scripts. Docker Compose remains available as a future/containerized option, but the current low-friction path is:
+
+```powershell
+.\scripts\bootstrap-local.cmd
+.\scripts\start-local-all.cmd
+```
+
+Local app URLs:
+
+- Frontend: `http://127.0.0.1:5173/`
+- Backend health: `http://127.0.0.1:8000/healthz/`
+
+Demo login:
+
+- Email: `admin@local.test`
+- Password: `AdminPass12345`
+- Tenant domain: `local.hotel.test`
 
 Purpose:
 
@@ -189,4 +200,3 @@ Recommended production V1:
 - Managed Redis/Valkey.
 - S3-compatible object storage.
 - NGINX or platform-managed routing.
-

@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models
 from django.utils import timezone
 
@@ -47,6 +49,12 @@ class Room(UUIDModel):
 
 
 class Guest(UUIDModel):
+    VIP_LEVEL_CHOICES = [
+        ('standard', 'Standard'),
+        ('vip', 'VIP'),
+        ('blacklist', 'Do Not Book'),
+    ]
+
     first_name = models.CharField(max_length=100)
     last_name = models.CharField(max_length=100)
     email = models.EmailField(unique=True)
@@ -54,6 +62,10 @@ class Guest(UUIDModel):
     address = models.TextField(blank=True)
     id_type = models.CharField(max_length=50, blank=True)  # e.g., Passport, ID Card
     id_number = models.CharField(max_length=50, blank=True)
+    vip_level = models.CharField(max_length=20, choices=VIP_LEVEL_CHOICES, default='standard')
+    preferences = models.JSONField(default=dict, blank=True)
+    notes = models.TextField(blank=True)
+    marketing_opt_in = models.BooleanField(default=False)
 
     class Meta:
         ordering = ['last_name', 'first_name']
@@ -65,6 +77,8 @@ class Guest(UUIDModel):
 class Booking(UUIDModel):
     room = models.ForeignKey(Room, on_delete=models.CASCADE, related_name='bookings')
     guest = models.ForeignKey(Guest, on_delete=models.CASCADE, related_name='bookings')
+    rate_plan = models.ForeignKey('RatePlan', on_delete=models.SET_NULL, null=True, blank=True)
+    package = models.ForeignKey('Package', on_delete=models.SET_NULL, null=True, blank=True)
     check_in_date = models.DateField()
     check_out_date = models.DateField()
     number_of_guests = models.PositiveIntegerField(default=1)
@@ -91,10 +105,11 @@ class Booking(UUIDModel):
         return f"Booking {self.id} - Room {self.room.room_number} - {self.guest}"
 
     def save(self, *args, **kwargs):
-        # Calculate total amount based on nights and room price
+        # Calculate total amount based on nights and room price or rate plan
         if self.check_in_date and self.check_out_date and self.room:
             nights = (self.check_out_date - self.check_in_date).days
-            self.total_amount = nights * self.room.price_per_night
+            rate = self.rate_plan.base_rate if self.rate_plan else self.room.price_per_night
+            self.total_amount = Decimal(nights) * Decimal(str(rate))
         super().save(*args, **kwargs)
 
 
@@ -174,3 +189,53 @@ class GuestFolioLine(UUIDModel):
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
         self.folio.recalculate_totals()
+
+
+class RatePlan(UUIDModel):
+    name = models.CharField(max_length=100)
+    room_type = models.ForeignKey(RoomType, on_delete=models.CASCADE, related_name='rate_plans')
+    base_rate = models.DecimalField(max_digits=10, decimal_places=2)
+    is_active = models.BooleanField(default=True)
+    valid_from = models.DateField()
+    valid_to = models.DateField()
+    conditions = models.JSONField(default=dict, blank=True)  # e.g., {"min_stay": 2, "max_stay": 7}
+
+    def __str__(self):
+        return self.name
+
+
+class Package(UUIDModel):
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    total_price = models.DecimalField(max_digits=10, decimal_places=2)
+    includes = models.JSONField(default=list)  # List of included services/items
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.name
+
+
+class LoyaltyProgram(UUIDModel):
+    name = models.CharField(max_length=100)
+    points_per_dollar = models.DecimalField(max_digits=5, decimal_places=2, default=1.00)
+    redemption_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0.01)  # $ per point
+    tiers = models.JSONField(default=list)  # e.g., [{"name": "Gold", "min_points": 1000}]
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return self.name
+
+
+class GuestPoints(UUIDModel):
+    guest = models.OneToOneField(Guest, on_delete=models.CASCADE, related_name='loyalty')
+    program = models.ForeignKey(LoyaltyProgram, on_delete=models.CASCADE)
+    total_points = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    redeemed_points = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    tier = models.CharField(max_length=50, blank=True)
+
+    @property
+    def available_points(self):
+        return self.total_points - self.redeemed_points
+
+    def __str__(self):
+        return f"{self.guest} - {self.available_points} points"

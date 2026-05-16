@@ -34,6 +34,11 @@ A production-ready starter architecture for a cloud-ready multi-tenant Hotel Man
 
 ## Local Development
 
+### Native Windows scripts with Docker Postgres
+
+These scripts run Django and Vite directly on Windows while using Docker for
+Postgres and Redis.
+
 1. Install backend and frontend dependencies:
 
    ```bash
@@ -43,7 +48,62 @@ A production-ready starter architecture for a cloud-ready multi-tenant Hotel Man
    npm install
    ```
 
-2. Start Docker services:
+2. Start local Postgres and Redis:
+
+   ```cmd
+   scripts\start-local-db.cmd
+   ```
+
+   If Docker is installed, this starts the `db` and `redis` Compose services.
+   If Docker is not installed, the script checks for an existing PostgreSQL
+   instance on `127.0.0.1:5432`.
+
+   Postgres is exposed on `127.0.0.1:5432` with:
+
+   - Database: `hotelmgmt`
+   - User: `hotelmgmt_user`
+   - Password: `hotelmgmt_pass`
+
+   To create that local database/user on a fresh PostgreSQL install:
+
+   ```cmd
+   scripts\setup-local-postgres.cmd
+   ```
+
+3. Bootstrap schemas and demo data:
+
+   ```cmd
+   scripts\bootstrap-local.cmd
+   ```
+
+   Local tenant login:
+
+   - Tenant domain: `local.hotel.test`
+   - Email: `admin@local.test`
+   - Password: `AdminPass12345`
+
+4. Start the backend and frontend:
+
+   ```cmd
+   scripts\start-local-all.cmd
+   ```
+
+   You can also start them separately with:
+
+   ```cmd
+   scripts\start-local-backend.cmd
+   scripts\start-local-frontend.cmd
+   ```
+
+5. Open:
+
+   - Backend health check: `http://127.0.0.1:8000/healthz/`
+   - Swagger docs: `http://127.0.0.1:8000/api/v1/docs/`
+   - Frontend: `http://127.0.0.1:5173/`
+
+### Full Docker stack
+
+Start all services in Docker:
 
    ```bash
    docker compose up --build
@@ -90,12 +150,6 @@ A production-ready starter architecture for a cloud-ready multi-tenant Hotel Man
 - `DJANGO_DEBUG`: True for dev, False for prod
 - `DJANGO_ALLOWED_HOSTS`: Comma-separated host list
 - `VITE_API_BASE_URL`: Frontend API base URL
-
-3. Open:
-
-   - Backend API: `http://localhost:8000/api/v1/`
-   - Swagger docs: `http://localhost:8000/api/v1/docs/`
-   - Frontend: `http://localhost:5173/`
 
 ## VS Code Tasks
 

@@ -101,6 +101,18 @@ Postgres and Redis.
    - Swagger docs: `http://127.0.0.1:8000/api/v1/docs/`
    - Frontend: `http://127.0.0.1:5173/`
 
+6. Verify the local checkpoint before starting new work:
+
+   ```cmd
+   scripts\verify-local.cmd
+   ```
+
+   To skip the frontend production build:
+
+   ```cmd
+   scripts\verify-local.cmd -SkipFrontendBuild
+   ```
+
 ### Full Docker stack
 
 Start all services in Docker:

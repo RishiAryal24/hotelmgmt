@@ -335,6 +335,18 @@ Run backend tests:
 scripts\test-backend.cmd
 ```
 
+Run the full local verification gate:
+
+```cmd
+scripts\verify-local.cmd
+```
+
+Skip the frontend production build when only checking backend health:
+
+```cmd
+scripts\verify-local.cmd -SkipFrontendBuild
+```
+
 Build frontend:
 
 ```cmd

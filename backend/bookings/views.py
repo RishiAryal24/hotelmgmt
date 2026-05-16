@@ -8,8 +8,19 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.permissions import IsAuthenticated
-from bookings.models import Room, RoomType, Guest, Booking, GuestFolio, RatePlan, Package, LoyaltyProgram, GuestPoints
-from bookings.serializers import RoomSerializer, RoomTypeSerializer, GuestSerializer, BookingSerializer, GuestFolioSerializer, RatePlanSerializer, PackageSerializer, LoyaltyProgramSerializer, GuestPointsSerializer
+from bookings.models import Booking, Guest, GuestCommunication, GuestFolio, GuestPoints, LoyaltyProgram, Package, RatePlan, Room, RoomType
+from bookings.serializers import (
+    BookingSerializer,
+    GuestCommunicationSerializer,
+    GuestFolioSerializer,
+    GuestPointsSerializer,
+    GuestSerializer,
+    LoyaltyProgramSerializer,
+    PackageSerializer,
+    RatePlanSerializer,
+    RoomSerializer,
+    RoomTypeSerializer,
+)
 from bookings.services import extend_booking_stay, get_guest_history, transfer_booking_room
 from users.permissions import HasActionPermission
 from .tasks import send_booking_confirmation_email
@@ -342,3 +353,24 @@ class GuestPointsViewSet(viewsets.ModelViewSet):
     filterset_fields = ['program']
     search_fields = ['guest__first_name', 'guest__last_name', 'guest__email']
     ordering_fields = ['total_points', 'available_points']
+
+
+class GuestCommunicationViewSet(viewsets.ModelViewSet):
+    queryset = GuestCommunication.objects.select_related('guest', 'booking', 'booking__room', 'created_by').all()
+    serializer_class = GuestCommunicationSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'bookings.reservation.read',
+        'retrieve': 'bookings.reservation.read',
+        'create': 'bookings.reservation.create',
+        'update': 'bookings.reservation.create',
+        'partial_update': 'bookings.reservation.create',
+        'destroy': 'bookings.reservation.create',
+    }
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['guest', 'booking', 'channel', 'direction', 'status']
+    search_fields = ['guest__first_name', 'guest__last_name', 'guest__email', 'subject', 'message']
+    ordering_fields = ['occurred_at', 'created_at', 'status']
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)

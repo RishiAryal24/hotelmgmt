@@ -1,5 +1,17 @@
 from rest_framework import serializers
-from bookings.models import Room, RoomType, Guest, Booking, GuestFolio, GuestFolioLine, RatePlan, Package, LoyaltyProgram, GuestPoints
+from bookings.models import (
+    Booking,
+    Guest,
+    GuestCommunication,
+    GuestFolio,
+    GuestFolioLine,
+    GuestPoints,
+    LoyaltyProgram,
+    Package,
+    RatePlan,
+    Room,
+    RoomType,
+)
 
 
 class RoomTypeSerializer(serializers.ModelSerializer):
@@ -122,3 +134,20 @@ class GuestPointsSerializer(serializers.ModelSerializer):
     class Meta:
         model = GuestPoints
         fields = '__all__'
+
+
+class GuestCommunicationSerializer(serializers.ModelSerializer):
+    guest_name = serializers.CharField(source='guest.__str__', read_only=True)
+    booking_reference = serializers.SerializerMethodField()
+    created_by_email = serializers.EmailField(source='created_by.email', read_only=True)
+
+    class Meta:
+        model = GuestCommunication
+        fields = '__all__'
+        read_only_fields = ['created_by']
+
+    def get_booking_reference(self, obj):
+        if not obj.booking_id:
+            return ''
+        room_number = getattr(getattr(obj.booking, 'room', None), 'room_number', '')
+        return f"{obj.booking.check_in_date} - Room {room_number}" if room_number else str(obj.booking_id)

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Room, RoomType, Guest, Booking, GuestFolio, GuestHistory } from '../types/bookings';
+import { Room, RoomType, Guest, Booking, GuestCommunication, GuestFolio, GuestHistory } from '../types/bookings';
 import apiClient from '../services/api';
 
 const getList = <T,>(data: T[] | { results: T[] }) => (Array.isArray(data) ? data : data.results);
@@ -61,6 +61,19 @@ export const useGuestHistory = (guestId?: string) => {
   });
 };
 
+export const useGuestCommunications = (guestId?: string) => {
+  return useQuery({
+    queryKey: ['guest-communications', guestId],
+    enabled: Boolean(guestId),
+    queryFn: async (): Promise<GuestCommunication[]> => {
+      const response = await apiClient.get<GuestCommunication[] | { results: GuestCommunication[] }>('/bookings/guest-communications/', {
+        params: { guest: guestId },
+      });
+      return getList(response.data);
+    },
+  });
+};
+
 export const useBookings = () => {
   return useQuery({
     queryKey: ['bookings'],
@@ -103,6 +116,24 @@ export const useUpdateGuest = () => {
       queryClient.invalidateQueries({ queryKey: ['guests'] });
       queryClient.invalidateQueries({ queryKey: ['bookings'] });
       queryClient.invalidateQueries({ queryKey: ['guest-history', variables.guestId] });
+    },
+  });
+};
+
+export const useCreateGuestCommunication = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (
+      communication: Pick<GuestCommunication, 'guest' | 'channel' | 'direction' | 'subject' | 'message' | 'status'> & {
+        booking?: string;
+      },
+    ): Promise<GuestCommunication> => {
+      const response = await apiClient.post('/bookings/guest-communications/', communication);
+      return response.data;
+    },
+    onSuccess: (_communication, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['guest-communications', variables.guest] });
+      queryClient.invalidateQueries({ queryKey: ['guest-history', variables.guest] });
     },
   });
 };

@@ -98,3 +98,19 @@ export interface GuestHistory {
   bookings: Booking[];
   folios: GuestFolio[];
 }
+
+export interface GuestCommunication {
+  id: string;
+  guest: string;
+  booking?: string | null;
+  channel: 'email' | 'phone' | 'sms' | 'whatsapp' | 'in_person' | 'note';
+  direction: 'inbound' | 'outbound' | 'internal';
+  subject: string;
+  message: string;
+  status: 'logged' | 'sent' | 'failed' | 'follow_up';
+  occurred_at: string;
+  created_at: string;
+  guest_name?: string;
+  booking_reference?: string;
+  created_by_email?: string;
+}

@@ -112,13 +112,16 @@ Goal: make reservations, rooms, guests, folios, housekeeping, and maintenance de
 
 Status: functional MVP, needs hardening.
 
+Completed:
+
+- Guest communication timeline with tenant-scoped API and guest profile UI.
+
 Next slices:
 
 1. Booking modification workflow.
 2. Walk-in booking polish.
 3. Room transfer rate adjustment policy.
-4. Guest communication timeline.
-5. PDF guest folio or reservation confirmation.
+4. PDF guest folio or reservation confirmation.
 
 Acceptance criteria:
 

@@ -1,13 +1,15 @@
 from datetime import date
 
+from rest_framework.test import APIClient
 from django_tenants.test.cases import TenantTestCase
 from django_tenants.utils import schema_context, tenant_context
 
-from bookings.models import Booking, Guest, GuestFolio, GuestFolioLine, Room, RoomType
+from bookings.models import Booking, Guest, GuestCommunication, GuestFolio, GuestFolioLine, Room, RoomType
 from bookings.services import extend_booking_stay, get_guest_history, transfer_booking_room
 from housekeeping.models import HousekeepingTask
 from housekeeping.services import complete_housekeeping_task, create_checkout_cleaning_task
 from tenants.models import Domain, Tenant
+from users.models import PlatformUser
 
 
 class TenantRoomIsolationTests(TenantTestCase):
@@ -310,3 +312,105 @@ class StayExtensionTests(TenantTestCase):
 
         self.room.refresh_from_db()
         self.assertEqual(self.room.status, 'cleaning')
+
+
+class GuestCommunicationApiTests(TenantTestCase):
+    @classmethod
+    def get_test_schema_name(cls):
+        return 'tenant_comms'
+
+    @classmethod
+    def get_test_tenant_domain(cls):
+        return 'tenant-comms.test.com'
+
+    @classmethod
+    def setup_tenant(cls, tenant):
+        tenant.name = 'Tenant Communications'
+        tenant.created_by = 'test'
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient(HTTP_HOST=self.get_test_tenant_domain())
+        self.user = PlatformUser.objects.create_user(
+            email='frontdesk-comms@example.com',
+            password='testpass123456',
+            tenant=self.tenant,
+            is_tenant_admin=True,
+        )
+        self.client.force_authenticate(self.user)
+        self.room_type = RoomType.objects.create(
+            name='Comms Standard',
+            code='COM-STD',
+            base_rate='100.00',
+        )
+        self.room = Room.objects.create(
+            room_number='601',
+            room_type=self.room_type,
+            capacity=2,
+            price_per_night='100.00',
+        )
+        self.guest = Guest.objects.create(
+            first_name='Care',
+            last_name='Guest',
+            email='care.guest@example.com',
+        )
+        self.booking = Booking.objects.create(
+            room=self.room,
+            guest=self.guest,
+            check_in_date=date(2026, 5, 16),
+            check_out_date=date(2026, 5, 18),
+            number_of_guests=1,
+            status='confirmed',
+        )
+
+    def test_tenant_user_can_log_guest_communication(self):
+        response = self.client.post(
+            '/api/v1/bookings/guest-communications/',
+            {
+                'guest': str(self.guest.id),
+                'booking': str(self.booking.id),
+                'channel': 'phone',
+                'direction': 'outbound',
+                'subject': 'Arrival preference',
+                'message': 'Called guest to confirm late arrival and pillow preference.',
+                'status': 'logged',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        communication = GuestCommunication.objects.get()
+        self.assertEqual(communication.guest_id, self.guest.id)
+        self.assertEqual(communication.booking_id, self.booking.id)
+        self.assertEqual(communication.created_by_id, self.user.id)
+
+    def test_guest_communications_can_be_filtered_by_guest(self):
+        GuestCommunication.objects.create(
+            guest=self.guest,
+            booking=self.booking,
+            channel='email',
+            direction='inbound',
+            subject='Dietary note',
+            message='Guest requested vegetarian breakfast.',
+            created_by=self.user,
+        )
+        other_guest = Guest.objects.create(
+            first_name='Other',
+            last_name='Guest',
+            email='other.comms@example.com',
+        )
+        GuestCommunication.objects.create(
+            guest=other_guest,
+            channel='note',
+            direction='internal',
+            subject='Unrelated note',
+            message='This should not be returned.',
+            created_by=self.user,
+        )
+
+        response = self.client.get('/api/v1/bookings/guest-communications/', {'guest': str(self.guest.id)})
+
+        self.assertEqual(response.status_code, 200)
+        results = response.data['results'] if isinstance(response.data, dict) else response.data
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['subject'], 'Dietary note')

@@ -239,3 +239,47 @@ class GuestPoints(UUIDModel):
 
     def __str__(self):
         return f"{self.guest} - {self.available_points} points"
+
+
+class GuestCommunication(UUIDModel):
+    CHANNEL_CHOICES = [
+        ('email', 'Email'),
+        ('phone', 'Phone'),
+        ('sms', 'SMS'),
+        ('whatsapp', 'WhatsApp'),
+        ('in_person', 'In Person'),
+        ('note', 'Internal Note'),
+    ]
+    DIRECTION_CHOICES = [
+        ('inbound', 'Inbound'),
+        ('outbound', 'Outbound'),
+        ('internal', 'Internal'),
+    ]
+    STATUS_CHOICES = [
+        ('logged', 'Logged'),
+        ('sent', 'Sent'),
+        ('failed', 'Failed'),
+        ('follow_up', 'Follow Up'),
+    ]
+
+    guest = models.ForeignKey(Guest, on_delete=models.CASCADE, related_name='communications')
+    booking = models.ForeignKey(Booking, on_delete=models.SET_NULL, related_name='communications', null=True, blank=True)
+    channel = models.CharField(max_length=30, choices=CHANNEL_CHOICES)
+    direction = models.CharField(max_length=30, choices=DIRECTION_CHOICES, default='internal')
+    subject = models.CharField(max_length=160, blank=True)
+    message = models.TextField()
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='logged')
+    occurred_at = models.DateTimeField(default=timezone.now)
+    created_by = models.ForeignKey('users.PlatformUser', on_delete=models.SET_NULL, related_name='guest_communications', null=True, blank=True)
+
+    class Meta:
+        ordering = ['-occurred_at', '-created_at']
+        indexes = [
+            models.Index(fields=['guest', '-occurred_at']),
+            models.Index(fields=['booking', '-occurred_at']),
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        subject = self.subject or self.get_channel_display()
+        return f"{self.guest} - {subject}"

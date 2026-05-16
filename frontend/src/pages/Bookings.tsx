@@ -7,7 +7,9 @@ import {
   useBookingAction,
   useBookings,
   useCreateBooking,
+  useCreateGuestCommunication,
   useCreateGuest,
+  useGuestCommunications,
   useGuestFolios,
   useGuestHistory,
   useGuests,
@@ -15,7 +17,7 @@ import {
   useUpdateGuest,
 } from '../hooks/bookings';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
-import { Booking, Guest, GuestFolio } from '../types/bookings';
+import { Booking, Guest, GuestCommunication, GuestFolio } from '../types/bookings';
 
 const emptyGuest = {
   first_name: '',
@@ -39,6 +41,15 @@ const emptyBooking = {
   number_of_guests: 1,
   status: 'confirmed' as Booking['status'],
   special_requests: '',
+};
+
+const emptyCommunication = {
+  channel: 'note' as GuestCommunication['channel'],
+  direction: 'internal' as GuestCommunication['direction'],
+  subject: '',
+  message: '',
+  status: 'logged' as GuestCommunication['status'],
+  booking: '',
 };
 
 const statusClass: Record<Booking['status'] | GuestFolio['status'], string> = {
@@ -87,6 +98,7 @@ const Bookings: React.FC = () => {
   const { data: rooms } = useRooms();
   const createGuest = useCreateGuest();
   const updateGuest = useUpdateGuest();
+  const createCommunication = useCreateGuestCommunication();
   const createBooking = useCreateBooking();
   const bookingAction = useBookingAction();
   const [activeTab, setActiveTab] = useState<BookingTab>((searchParams.get('tab') as BookingTab | null) || 'reservations');
@@ -98,6 +110,7 @@ const Bookings: React.FC = () => {
   const [guestSearch, setGuestSearch] = useState('');
   const [isAddingGuestInBooking, setIsAddingGuestInBooking] = useState(false);
   const [guestProfileForm, setGuestProfileForm] = useState({ vip_level: 'standard' as Guest['vip_level'], notes: '', preferencesText: '', marketing_opt_in: false });
+  const [communicationForm, setCommunicationForm] = useState(emptyCommunication);
   const [checkoutPayment, setCheckoutPayment] = useState<{ payment_method: CheckoutPaymentMethod; paid_amount: string }>({
     payment_method: 'cash',
     paid_amount: '',
@@ -125,6 +138,7 @@ const Bookings: React.FC = () => {
     transferBooking?.check_out_date,
   );
   const { data: guestHistory, isFetching: guestHistoryLoading } = useGuestHistory(selectedGuestId);
+  const { data: guestCommunications, isFetching: guestCommunicationsLoading } = useGuestCommunications(selectedGuestId);
 
   const selectedRoom = useMemo(
     () => bookableRooms?.find((room) => room.id === bookingForm.room),
@@ -168,6 +182,7 @@ const Bookings: React.FC = () => {
         .join('\n'),
       marketing_opt_in: guestHistory.guest.marketing_opt_in,
     });
+    setCommunicationForm(emptyCommunication);
   }, [guestHistory]);
 
   const estimatedTotal = useMemo(() => {
@@ -358,6 +373,25 @@ const Bookings: React.FC = () => {
         marketing_opt_in: guestProfileForm.marketing_opt_in,
       },
     });
+  };
+
+  const handleCreateCommunication = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedGuestId || !communicationForm.message.trim()) return;
+    createCommunication.mutate(
+      {
+        guest: selectedGuestId,
+        booking: communicationForm.booking || undefined,
+        channel: communicationForm.channel,
+        direction: communicationForm.direction,
+        subject: communicationForm.subject,
+        message: communicationForm.message,
+        status: communicationForm.status,
+      },
+      {
+        onSuccess: () => setCommunicationForm(emptyCommunication),
+      },
+    );
   };
 
   const openCheckout = (booking: Booking) => {
@@ -665,6 +699,104 @@ const Bookings: React.FC = () => {
                           <p className="mt-1 text-lg font-semibold text-slate-900">{value}</p>
                         </div>
                       ))}
+                    </div>
+                    <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+                      <form onSubmit={handleCreateCommunication} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                        <h3 className="text-sm font-semibold text-slate-900">Log communication</h3>
+                        <div className="mt-3 grid gap-2">
+                          <select
+                            value={communicationForm.channel}
+                            onChange={(e) => setCommunicationForm({ ...communicationForm, channel: e.target.value as GuestCommunication['channel'] })}
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                          >
+                            <option value="note">Internal note</option>
+                            <option value="email">Email</option>
+                            <option value="phone">Phone</option>
+                            <option value="sms">SMS</option>
+                            <option value="whatsapp">WhatsApp</option>
+                            <option value="in_person">In person</option>
+                          </select>
+                          <div className="grid grid-cols-2 gap-2">
+                            <select
+                              value={communicationForm.direction}
+                              onChange={(e) => setCommunicationForm({ ...communicationForm, direction: e.target.value as GuestCommunication['direction'] })}
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                            >
+                              <option value="internal">Internal</option>
+                              <option value="inbound">Inbound</option>
+                              <option value="outbound">Outbound</option>
+                            </select>
+                            <select
+                              value={communicationForm.status}
+                              onChange={(e) => setCommunicationForm({ ...communicationForm, status: e.target.value as GuestCommunication['status'] })}
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                            >
+                              <option value="logged">Logged</option>
+                              <option value="sent">Sent</option>
+                              <option value="failed">Failed</option>
+                              <option value="follow_up">Follow up</option>
+                            </select>
+                          </div>
+                          <select
+                            value={communicationForm.booking}
+                            onChange={(e) => setCommunicationForm({ ...communicationForm, booking: e.target.value })}
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                          >
+                            <option value="">No booking link</option>
+                            {guestHistory.bookings.map((booking) => (
+                              <option key={booking.id} value={booking.id}>
+                                {booking.check_in_date} to {booking.check_out_date} - Room {booking.room_details?.room_number || '-'}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            value={communicationForm.subject}
+                            onChange={(e) => setCommunicationForm({ ...communicationForm, subject: e.target.value })}
+                            placeholder="Subject"
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                          />
+                          <textarea
+                            value={communicationForm.message}
+                            onChange={(e) => setCommunicationForm({ ...communicationForm, message: e.target.value })}
+                            placeholder="What happened?"
+                            className="min-h-24 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                            required
+                          />
+                          <button
+                            type="submit"
+                            disabled={createCommunication.isPending || !communicationForm.message.trim()}
+                            className="rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300"
+                          >
+                            Save communication
+                          </button>
+                          {createCommunication.isError && <p className="text-sm text-red-600">Could not save communication.</p>}
+                        </div>
+                      </form>
+                      <div className="rounded-xl border border-slate-100 bg-white p-3">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-semibold text-slate-900">Communication timeline</h3>
+                          <span className="text-xs text-slate-500">{guestCommunications?.length || 0} item(s)</span>
+                        </div>
+                        <div className="mt-3 space-y-3">
+                          {guestCommunicationsLoading && <p className="text-sm text-slate-600">Loading communication timeline...</p>}
+                          {guestCommunications?.map((communication) => (
+                            <article key={communication.id} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-sm font-medium text-slate-900">{communication.subject || communication.channel.replace('_', ' ')}</p>
+                                <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-600">{communication.status.replace('_', ' ')}</span>
+                              </div>
+                              <p className="mt-1 text-sm text-slate-700">{communication.message}</p>
+                              <p className="mt-2 text-xs text-slate-500">
+                                {new Date(communication.occurred_at).toLocaleString()} - {communication.channel.replace('_', ' ')} - {communication.direction}
+                                {communication.booking_reference ? ` - ${communication.booking_reference}` : ''}
+                              </p>
+                            </article>
+                          ))}
+                          {!guestCommunicationsLoading && guestCommunications?.length === 0 && (
+                            <p className="text-sm text-slate-600">No communication has been logged for this guest yet.</p>
+                          )}
+                        </div>
+                      </div>
                     </div>
                     <div className="overflow-hidden rounded-xl border border-slate-100">
                       <table className="w-full min-w-[720px] text-left text-sm">

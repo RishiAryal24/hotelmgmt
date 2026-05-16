@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import CompactTabs from '../components/CompactTabs';
 import {
+  downloadBookingConfirmationPdf,
+  downloadGuestFolioPdf,
   useAvailableRooms,
   useBookingAction,
   useBookings,
@@ -455,6 +457,14 @@ const Bookings: React.FC = () => {
     );
   };
 
+  const handleDownloadBookingPdf = (bookingId: string) => {
+    downloadBookingConfirmationPdf(bookingId);
+  };
+
+  const handleDownloadFolioPdf = (folio: GuestFolio) => {
+    downloadGuestFolioPdf(folio.id, folio.folio_number);
+  };
+
   if (isLoading) return <div className="p-6 text-slate-600">Loading reservations...</div>;
   if (error) return <div className="p-6 text-red-600">Error loading reservations</div>;
 
@@ -540,6 +550,13 @@ const Bookings: React.FC = () => {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadBookingPdf(booking.id)}
+                          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                        >
+                          PDF
+                        </button>
                         {booking.status === 'confirmed' && (
                           <>
                             <button
@@ -937,6 +954,7 @@ const Bookings: React.FC = () => {
                   <th className="px-4 py-3">Stay</th>
                   <th className="px-4 py-3 text-right">Due</th>
                   <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3 text-right">PDF</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -953,6 +971,15 @@ const Bookings: React.FC = () => {
                     <td className="px-4 py-3 text-right font-medium text-slate-900">{formatMoney(folio.grand_total, settings?.currency)}</td>
                     <td className="px-4 py-3">
                       <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusClass[folio.status]}`}>{folio.status}</span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadFolioPdf(folio)}
+                        className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        PDF
+                      </button>
                     </td>
                   </tr>
                 ))}

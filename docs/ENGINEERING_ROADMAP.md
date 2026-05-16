@@ -115,13 +115,13 @@ Status: functional MVP, needs hardening.
 Completed:
 
 - Guest communication timeline with tenant-scoped API and guest profile UI.
+- Reservation confirmation and guest folio PDF exports.
 
 Next slices:
 
 1. Booking modification workflow.
 2. Walk-in booking polish.
 3. Room transfer rate adjustment policy.
-4. PDF guest folio or reservation confirmation.
 
 Acceptance criteria:
 

@@ -414,3 +414,79 @@ class GuestCommunicationApiTests(TenantTestCase):
         results = response.data['results'] if isinstance(response.data, dict) else response.data
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]['subject'], 'Dietary note')
+
+
+class BookingPdfExportTests(TenantTestCase):
+    @classmethod
+    def get_test_schema_name(cls):
+        return 'tenant_pdf'
+
+    @classmethod
+    def get_test_tenant_domain(cls):
+        return 'tenant-pdf.test.com'
+
+    @classmethod
+    def setup_tenant(cls, tenant):
+        tenant.name = 'Tenant PDF'
+        tenant.created_by = 'test'
+        tenant.currency = 'NPR'
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient(HTTP_HOST=self.get_test_tenant_domain())
+        self.user = PlatformUser.objects.create_user(
+            email='frontdesk-pdf@example.com',
+            password='testpass123456',
+            tenant=self.tenant,
+            is_tenant_admin=True,
+        )
+        self.client.force_authenticate(self.user)
+        self.room_type = RoomType.objects.create(
+            name='PDF Standard',
+            code='PDF-STD',
+            base_rate='100.00',
+        )
+        self.room = Room.objects.create(
+            room_number='701',
+            room_type=self.room_type,
+            capacity=2,
+            price_per_night='100.00',
+        )
+        self.guest = Guest.objects.create(
+            first_name='Paper',
+            last_name='Guest',
+            email='paper.guest@example.com',
+        )
+        self.booking = Booking.objects.create(
+            room=self.room,
+            guest=self.guest,
+            check_in_date=date(2026, 5, 20),
+            check_out_date=date(2026, 5, 22),
+            number_of_guests=2,
+            status='confirmed',
+            special_requests='High floor',
+        )
+        self.folio = GuestFolio.objects.create(booking=self.booking, subtotal=self.booking.total_amount)
+        GuestFolioLine.objects.create(
+            folio=self.folio,
+            source_module='test',
+            source_id='minibar-1',
+            description='Minibar',
+            amount='25.00',
+        )
+
+    def test_booking_confirmation_pdf_endpoint_returns_pdf(self):
+        response = self.client.get(f'/api/v1/bookings/bookings/{self.booking.id}/confirmation-pdf/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertTrue(response.content.startswith(b'%PDF-'))
+        self.assertIn('reservation-', response['Content-Disposition'])
+
+    def test_guest_folio_pdf_endpoint_returns_pdf(self):
+        response = self.client.get(f'/api/v1/bookings/folios/{self.folio.id}/pdf/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertTrue(response.content.startswith(b'%PDF-'))
+        self.assertIn('.pdf', response['Content-Disposition'])

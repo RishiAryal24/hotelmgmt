@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.http import HttpResponse
 from django.db import transaction
 from django.utils.dateparse import parse_date
 from rest_framework import viewsets, status
@@ -9,6 +10,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.permissions import IsAuthenticated
 from bookings.models import Booking, Guest, GuestCommunication, GuestFolio, GuestPoints, LoyaltyProgram, Package, RatePlan, Room, RoomType
+from bookings.pdf import booking_confirmation_pdf, guest_folio_pdf
 from bookings.serializers import (
     BookingSerializer,
     GuestCommunicationSerializer,
@@ -250,6 +252,14 @@ class BookingViewSet(viewsets.ModelViewSet):
         serializer = RoomSerializer(available_rooms, many=True)
         return Response(serializer.data)
 
+    @action(detail=True, methods=['get'], url_path='confirmation-pdf')
+    def confirmation_pdf(self, request, pk=None):
+        booking = self.get_object()
+        pdf = booking_confirmation_pdf(booking, tenant=getattr(request, 'tenant', None))
+        response = HttpResponse(pdf, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="reservation-{booking.id}.pdf"'
+        return response
+
 
 class GuestFolioViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = GuestFolio.objects.select_related('booking', 'booking__guest', 'booking__room').all()
@@ -286,6 +296,15 @@ class GuestFolioViewSet(viewsets.ReadOnlyModelViewSet):
             post_room_payment(folio, posted_by=request.user)
 
         return Response(GuestFolioSerializer(folio).data)
+
+    @action(detail=True, methods=['get'], url_path='pdf')
+    def pdf(self, request, pk=None):
+        folio = self.get_object()
+        pdf = guest_folio_pdf(folio, tenant=getattr(request, 'tenant', None))
+        filename = folio.folio_number or f'folio-{folio.id}'
+        response = HttpResponse(pdf, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{filename}.pdf"'
+        return response
 
 
 class RatePlanViewSet(viewsets.ModelViewSet):

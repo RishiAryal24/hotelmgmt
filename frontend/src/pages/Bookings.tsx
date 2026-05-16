@@ -107,6 +107,7 @@ const Bookings: React.FC = () => {
   const [bookingFilter, setBookingFilter] = useState(searchParams.get('filter') || 'all');
   const [checkoutBooking, setCheckoutBooking] = useState<Booking | null>(null);
   const [extensionBooking, setExtensionBooking] = useState<Booking | null>(null);
+  const [modificationBooking, setModificationBooking] = useState<Booking | null>(null);
   const [transferBooking, setTransferBooking] = useState<Booking | null>(null);
   const [selectedGuestId, setSelectedGuestId] = useState(searchParams.get('guest') || '');
   const [guestSearch, setGuestSearch] = useState('');
@@ -118,6 +119,13 @@ const Bookings: React.FC = () => {
     paid_amount: '',
   });
   const [extensionForm, setExtensionForm] = useState({ check_out_date: '' });
+  const [modificationForm, setModificationForm] = useState({
+    room: '',
+    check_in_date: '',
+    check_out_date: '',
+    number_of_guests: 1,
+    special_requests: '',
+  });
   const [transferForm, setTransferForm] = useState({ room: '' });
   const [calendarStart, setCalendarStart] = useState(new Date().toISOString().slice(0, 10));
   const [guestForm, setGuestForm] = useState<Omit<Guest, 'id'>>(emptyGuest);
@@ -407,6 +415,17 @@ const Bookings: React.FC = () => {
     setExtensionForm({ check_out_date: booking.check_out_date });
   };
 
+  const openModification = (booking: Booking) => {
+    setModificationBooking(booking);
+    setModificationForm({
+      room: booking.room,
+      check_in_date: booking.check_in_date,
+      check_out_date: booking.check_out_date,
+      number_of_guests: booking.number_of_guests,
+      special_requests: booking.special_requests || '',
+    });
+  };
+
   const openTransfer = (booking: Booking) => {
     setTransferBooking(booking);
     setTransferForm({ room: '' });
@@ -438,6 +457,21 @@ const Bookings: React.FC = () => {
       },
       {
         onSuccess: () => setExtensionBooking(null),
+      },
+    );
+  };
+
+  const handleModifyBooking = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!modificationBooking) return;
+    bookingAction.mutate(
+      {
+        bookingId: modificationBooking.id,
+        action: 'modify',
+        payload: modificationForm,
+      },
+      {
+        onSuccess: () => setModificationBooking(null),
       },
     );
   };
@@ -559,6 +593,12 @@ const Bookings: React.FC = () => {
                         </button>
                         {booking.status === 'confirmed' && (
                           <>
+                            <button
+                              onClick={() => openModification(booking)}
+                              className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                            >
+                              Modify
+                            </button>
                             <button
                               onClick={() => bookingAction.mutate({ bookingId: booking.id, action: 'check_in' })}
                               className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700"
@@ -1190,6 +1230,69 @@ const Bookings: React.FC = () => {
             </button>
           </div>
           {createBooking.isError && <p className="mt-3 text-sm text-red-600">Could not create reservation.</p>}
+        </form>
+      )}
+
+      {modificationBooking && (
+        <form onSubmit={handleModifyBooking} className="rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="md:col-span-2">
+              <p className="text-sm font-semibold text-slate-900">Modify reservation #{modificationBooking.id.slice(-8)}</p>
+              <p className="text-xs text-slate-500">
+                {modificationBooking.guest_details?.first_name} {modificationBooking.guest_details?.last_name} - Current room {modificationBooking.room_details?.room_number || '-'}
+              </p>
+            </div>
+            <input
+              type="date"
+              value={modificationForm.check_in_date}
+              onChange={(e) => setModificationForm({ ...modificationForm, check_in_date: e.target.value })}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              required
+            />
+            <input
+              type="date"
+              value={modificationForm.check_out_date}
+              onChange={(e) => setModificationForm({ ...modificationForm, check_out_date: e.target.value })}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              required
+            />
+            <select
+              value={modificationForm.room}
+              onChange={(e) => setModificationForm({ ...modificationForm, room: e.target.value })}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              required
+            >
+              <option value="">Select room</option>
+              {rooms?.map((room) => (
+                <option key={room.id} value={room.id}>
+                  Room {room.room_number} - {room.room_type_name} - {formatMoney(room.price_per_night, settings?.currency)}
+                </option>
+              ))}
+            </select>
+            <input
+              type="number"
+              min="1"
+              value={modificationForm.number_of_guests}
+              onChange={(e) => setModificationForm({ ...modificationForm, number_of_guests: Number(e.target.value) })}
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              required
+            />
+            <textarea
+              value={modificationForm.special_requests}
+              onChange={(e) => setModificationForm({ ...modificationForm, special_requests: e.target.value })}
+              placeholder="Special requests"
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2"
+            />
+          </div>
+          <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+            <button type="submit" className="rounded-xl bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800">
+              Save changes
+            </button>
+            <button type="button" onClick={() => setModificationBooking(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Close
+            </button>
+          </div>
+          {bookingAction.isError && <p className="mt-3 text-sm text-red-600">Could not modify reservation. Check the dates and room availability.</p>}
         </form>
       )}
 

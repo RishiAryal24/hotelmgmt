@@ -89,6 +89,52 @@ def extend_booking_stay(booking: Booking, new_check_out_date):
 
 
 @transaction.atomic
+def modify_confirmed_booking(
+    booking: Booking,
+    *,
+    room: Room | None = None,
+    check_in_date=None,
+    check_out_date=None,
+    number_of_guests=None,
+    special_requests=None,
+):
+    if booking.status != 'confirmed':
+        raise ValueError('Only confirmed reservations can be modified before check-in.')
+
+    next_room = room or booking.room
+    next_check_in_date = check_in_date or booking.check_in_date
+    next_check_out_date = check_out_date or booking.check_out_date
+
+    if next_check_out_date <= next_check_in_date:
+        raise ValueError('Checkout date must be after check-in date.')
+    if next_room.status == 'maintenance':
+        raise ValueError('Target room is unavailable for maintenance.')
+
+    has_conflict = (
+        Booking.objects.filter(
+            room=next_room,
+            check_in_date__lt=next_check_out_date,
+            check_out_date__gt=next_check_in_date,
+            status__in=['confirmed', 'checked_in'],
+        )
+        .exclude(pk=booking.pk)
+        .exists()
+    )
+    if has_conflict:
+        raise ValueError('Target room is not available for the requested stay dates.')
+
+    booking.room = next_room
+    booking.check_in_date = next_check_in_date
+    booking.check_out_date = next_check_out_date
+    if number_of_guests is not None:
+        booking.number_of_guests = number_of_guests
+    if special_requests is not None:
+        booking.special_requests = special_requests
+    booking.save()
+    return booking
+
+
+@transaction.atomic
 def transfer_booking_room(booking: Booking, new_room: Room):
     if booking.status != 'checked_in':
         raise ValueError('Only checked-in bookings can be transferred.')

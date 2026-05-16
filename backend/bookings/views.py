@@ -23,7 +23,7 @@ from bookings.serializers import (
     RoomSerializer,
     RoomTypeSerializer,
 )
-from bookings.services import extend_booking_stay, get_guest_history, transfer_booking_room
+from bookings.services import extend_booking_stay, get_guest_history, modify_confirmed_booking, transfer_booking_room
 from users.permissions import HasActionPermission
 from .tasks import send_booking_confirmation_email
 
@@ -118,6 +118,7 @@ class BookingViewSet(viewsets.ModelViewSet):
         'partial_update': 'bookings.reservation.create',
         'destroy': 'bookings.reservation.create',
         'cancel': 'bookings.reservation.create',
+        'modify': 'bookings.reservation.create',
         'extend_stay': 'bookings.reservation.create',
         'transfer_room': 'bookings.reservation.create',
         'check_in': 'bookings.reservation.check_in',
@@ -190,6 +191,51 @@ class BookingViewSet(viewsets.ModelViewSet):
         booking.status = 'cancelled'
         booking.save()
         return Response({'status': 'Reservation cancelled successfully'})
+
+    @action(detail=True, methods=['post'])
+    def modify(self, request, pk=None):
+        booking = self.get_object()
+        room = booking.room
+        room_id = request.data.get('room')
+        check_in_date = parse_date(request.data.get('check_in_date') or '') if 'check_in_date' in request.data else None
+        check_out_date = parse_date(request.data.get('check_out_date') or '') if 'check_out_date' in request.data else None
+        number_of_guests = request.data.get('number_of_guests')
+
+        if 'check_in_date' in request.data and not check_in_date:
+            return Response({'check_in_date': 'Valid check-in date is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if 'check_out_date' in request.data and not check_out_date:
+            return Response({'check_out_date': 'Valid checkout date is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if room_id:
+            try:
+                room = Room.objects.get(id=room_id)
+            except Room.DoesNotExist:
+                return Response({'room': 'Target room was not found.'}, status=status.HTTP_400_BAD_REQUEST)
+        if number_of_guests is not None:
+            try:
+                number_of_guests = int(number_of_guests)
+            except (TypeError, ValueError):
+                return Response({'number_of_guests': 'Number of guests must be a whole number.'}, status=status.HTTP_400_BAD_REQUEST)
+            if number_of_guests < 1:
+                return Response({'number_of_guests': 'Number of guests must be at least 1.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            booking = modify_confirmed_booking(
+                booking,
+                room=room,
+                check_in_date=check_in_date,
+                check_out_date=check_out_date,
+                number_of_guests=number_of_guests,
+                special_requests=request.data.get('special_requests') if 'special_requests' in request.data else None,
+            )
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            {
+                'status': 'Reservation modified successfully',
+                'booking': self.get_serializer(booking).data,
+            },
+        )
 
     @action(detail=True, methods=['post'], url_path='extend-stay')
     def extend_stay(self, request, pk=None):

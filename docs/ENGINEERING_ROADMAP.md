@@ -116,12 +116,12 @@ Completed:
 
 - Guest communication timeline with tenant-scoped API and guest profile UI.
 - Reservation confirmation and guest folio PDF exports.
+- Booking modification workflow for confirmed reservations.
 
 Next slices:
 
-1. Booking modification workflow.
-2. Walk-in booking polish.
-3. Room transfer rate adjustment policy.
+1. Walk-in booking polish.
+2. Room transfer rate adjustment policy.
 
 Acceptance criteria:
 

@@ -5,7 +5,7 @@ from django_tenants.test.cases import TenantTestCase
 from django_tenants.utils import schema_context, tenant_context
 
 from bookings.models import Booking, Guest, GuestCommunication, GuestFolio, GuestFolioLine, Room, RoomType
-from bookings.services import extend_booking_stay, get_guest_history, transfer_booking_room
+from bookings.services import extend_booking_stay, get_guest_history, modify_confirmed_booking, transfer_booking_room
 from housekeeping.models import HousekeepingTask
 from housekeeping.services import complete_housekeeping_task, create_checkout_cleaning_task
 from tenants.models import Domain, Tenant
@@ -414,6 +414,135 @@ class GuestCommunicationApiTests(TenantTestCase):
         results = response.data['results'] if isinstance(response.data, dict) else response.data
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]['subject'], 'Dietary note')
+
+
+class BookingModificationTests(TenantTestCase):
+    @classmethod
+    def get_test_schema_name(cls):
+        return 'tenant_modification'
+
+    @classmethod
+    def get_test_tenant_domain(cls):
+        return 'tenant-modification.test.com'
+
+    @classmethod
+    def setup_tenant(cls, tenant):
+        tenant.name = 'Tenant Modification'
+        tenant.created_by = 'test'
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient(HTTP_HOST=self.get_test_tenant_domain())
+        self.user = PlatformUser.objects.create_user(
+            email='frontdesk-modification@example.com',
+            password='testpass123456',
+            tenant=self.tenant,
+            is_tenant_admin=True,
+        )
+        self.client.force_authenticate(self.user)
+        self.room_type = RoomType.objects.create(
+            name='Modification Standard',
+            code='MOD-STD',
+            base_rate='100.00',
+        )
+        self.room = Room.objects.create(
+            room_number='801',
+            room_type=self.room_type,
+            capacity=2,
+            price_per_night='100.00',
+        )
+        self.new_room = Room.objects.create(
+            room_number='802',
+            room_type=self.room_type,
+            capacity=3,
+            price_per_night='120.00',
+        )
+        self.guest = Guest.objects.create(
+            first_name='Modify',
+            last_name='Guest',
+            email='modify.guest@example.com',
+        )
+        self.booking = Booking.objects.create(
+            room=self.room,
+            guest=self.guest,
+            check_in_date=date(2026, 5, 20),
+            check_out_date=date(2026, 5, 22),
+            number_of_guests=1,
+            status='confirmed',
+            special_requests='Quiet room',
+        )
+
+    def test_confirmed_booking_can_be_modified_and_repriced(self):
+        booking = modify_confirmed_booking(
+            self.booking,
+            room=self.new_room,
+            check_in_date=date(2026, 5, 21),
+            check_out_date=date(2026, 5, 24),
+            number_of_guests=2,
+            special_requests='Twin beds',
+        )
+
+        booking.refresh_from_db()
+
+        self.assertEqual(booking.room_id, self.new_room.id)
+        self.assertEqual(booking.check_in_date, date(2026, 5, 21))
+        self.assertEqual(booking.check_out_date, date(2026, 5, 24))
+        self.assertEqual(booking.number_of_guests, 2)
+        self.assertEqual(booking.special_requests, 'Twin beds')
+        self.assertEqual(booking.total_amount, 360)
+
+    def test_modification_is_blocked_when_target_room_overlaps(self):
+        blocker_guest = Guest.objects.create(
+            first_name='Blocker',
+            last_name='Guest',
+            email='blocker.modification@example.com',
+        )
+        Booking.objects.create(
+            room=self.new_room,
+            guest=blocker_guest,
+            check_in_date=date(2026, 5, 22),
+            check_out_date=date(2026, 5, 25),
+            number_of_guests=1,
+            status='confirmed',
+        )
+
+        with self.assertRaises(ValueError):
+            modify_confirmed_booking(
+                self.booking,
+                room=self.new_room,
+                check_in_date=date(2026, 5, 21),
+                check_out_date=date(2026, 5, 24),
+            )
+
+        self.booking.refresh_from_db()
+        self.assertEqual(self.booking.room_id, self.room.id)
+        self.assertEqual(self.booking.check_in_date, date(2026, 5, 20))
+
+    def test_checked_in_booking_cannot_be_modified_as_reservation(self):
+        self.booking.status = 'checked_in'
+        self.booking.save(update_fields=['status', 'updated_at'])
+
+        with self.assertRaises(ValueError):
+            modify_confirmed_booking(self.booking, check_out_date=date(2026, 5, 24))
+
+    def test_tenant_user_can_modify_booking_from_api(self):
+        response = self.client.post(
+            f'/api/v1/bookings/bookings/{self.booking.id}/modify/',
+            {
+                'room': str(self.new_room.id),
+                'check_in_date': '2026-05-21',
+                'check_out_date': '2026-05-23',
+                'number_of_guests': 2,
+                'special_requests': 'Late arrival',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.booking.refresh_from_db()
+        self.assertEqual(self.booking.room_id, self.new_room.id)
+        self.assertEqual(self.booking.total_amount, 240)
+        self.assertEqual(response.data['booking']['special_requests'], 'Late arrival')
 
 
 class BookingPdfExportTests(TenantTestCase):

@@ -169,7 +169,7 @@ export const useBookingAction = () => {
       payload,
     }: {
       bookingId: string;
-      action: 'check_in' | 'check_out' | 'cancel' | 'extend-stay' | 'transfer-room';
+      action: 'check_in' | 'check_out' | 'cancel' | 'modify' | 'extend-stay' | 'transfer-room';
       payload?: Record<string, unknown>;
     }) => {
       const response = await apiClient.post(`/bookings/bookings/${bookingId}/${action}/`, payload || {});

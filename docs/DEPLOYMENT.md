@@ -177,6 +177,43 @@ Frontend variables:
 
 - `VITE_API_BASE_URL`: deployed backend API root, for example `https://hotelmgmt-backend.onrender.com/api/v1`.
 
+## Render Backend Setup
+
+The repository includes `render.yaml` for the backend web service. Use this for the first cloud preview.
+
+1. Push the latest commit to GitHub.
+2. In Render, create a PostgreSQL database.
+3. Copy the database internal connection string.
+4. Create a new Blueprint from this repository, or create a Web Service using `render.yaml`.
+5. Set the backend environment variables:
+
+   ```text
+   DATABASE_URL=<render-postgres-internal-url>
+   BOOTSTRAP_TENANT_NAME=<demo hotel name>
+   BOOTSTRAP_TENANT_DOMAIN=<backend-host-or-demo-domain>
+   BOOTSTRAP_TENANT_ADMIN_EMAIL=<admin email>
+   BOOTSTRAP_TENANT_ADMIN_PASSWORD=<strong admin password>
+   BOOTSTRAP_TENANT_CURRENCY=NPR
+   ```
+
+6. Confirm these production variables remain set:
+
+   ```text
+   DJANGO_DEBUG=False
+   DJANGO_STATICFILES_STORAGE=whitenoise.storage.CompressedManifestStaticFilesStorage
+   DJANGO_SERVE_LOCAL_STATIC=False
+   CORS_ALLOW_ALL_ORIGINS=True
+   ```
+
+7. Deploy the backend.
+8. Run the production smoke checklist below.
+
+Notes:
+
+- The Render build command installs dependencies and runs `collectstatic`.
+- The Render start command applies tenant migrations, bootstraps the public tenant, bootstraps the demo tenant, and starts Gunicorn.
+- Keep `BOOTSTRAP_TENANT_ADMIN_PASSWORD` in Render secrets only. Do not commit real credentials.
+
 ## Production Smoke Checklist
 
 Run these checks after every first deploy or config change:

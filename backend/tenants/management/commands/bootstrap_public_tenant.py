@@ -9,6 +9,11 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument('--name', default='Public Platform', help='Public tenant display name')
         parser.add_argument('--domain', default='localhost', help='Primary local development domain')
+        parser.add_argument(
+            '--include-local-domains',
+            action='store_true',
+            help='Also attach localhost and 127.0.0.1 to the public tenant.',
+        )
 
     def handle(self, *args, **options):
         tenant, _ = Tenant.objects.get_or_create(
@@ -32,12 +37,21 @@ class Command(BaseCommand):
             },
         )
 
-        Domain.objects.update_or_create(
-            domain='127.0.0.1',
-            defaults={
-                'tenant': tenant,
-                'is_primary': False,
-            },
-        )
+        if options['include_local_domains']:
+            Domain.objects.update_or_create(
+                domain='localhost',
+                defaults={
+                    'tenant': tenant,
+                    'is_primary': options['domain'] == 'localhost',
+                },
+            )
 
-        self.stdout.write(self.style.SUCCESS('Public tenant and local domains are ready.'))
+            Domain.objects.update_or_create(
+                domain='127.0.0.1',
+                defaults={
+                    'tenant': tenant,
+                    'is_primary': False,
+                },
+            )
+
+        self.stdout.write(self.style.SUCCESS('Public tenant domain is ready.'))

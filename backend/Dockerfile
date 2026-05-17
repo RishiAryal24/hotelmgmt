@@ -10,7 +10,5 @@ RUN python -m pip install --upgrade pip setuptools wheel && \
 
 COPY backend/ .
 
-RUN python manage.py collectstatic --noinput
-
 EXPOSE 8000
 CMD ["sh", "-c", "gunicorn hotelmgmt.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 3"]

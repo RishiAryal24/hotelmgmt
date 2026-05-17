@@ -177,6 +177,29 @@ Frontend variables:
 
 - `VITE_API_BASE_URL`: deployed backend API root, for example `https://hotelmgmt-backend.onrender.com/api/v1`.
 
+## Vercel Frontend Setup
+
+The repository includes `vercel.json` for the React/Vite frontend.
+
+1. Push the latest commit to GitHub.
+2. In Vercel, import the GitHub repository.
+3. Keep the project root as the repository root. The `vercel.json` file handles the `frontend/` build path.
+4. Set the environment variable:
+
+   ```text
+   VITE_API_BASE_URL=https://<render-backend-host>/api/v1
+   ```
+
+5. Deploy the frontend.
+6. Open the Vercel URL and log in with the Render bootstrap admin.
+
+Vercel build behavior:
+
+- Install command: `cd frontend && npm ci`
+- Build command: `cd frontend && npm run build`
+- Output directory: `frontend/dist`
+- SPA routing is handled by rewriting all routes to `index.html`.
+
 ## Render Backend Setup
 
 The repository includes `render.yaml` for the backend web service. Use this for the first cloud preview.

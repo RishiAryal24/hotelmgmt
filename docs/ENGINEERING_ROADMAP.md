@@ -390,3 +390,4 @@ Record major implementation decisions here as they are made.
 | 2026-05-17 | Keep local static serving separate from production manifest static files. | Local admin must work without `collectstatic`, while production should keep hashed static assets. |
 | 2026-05-17 | Treat `frontend/dist/` as generated output. | Vite builds should be reproducible and should not create source-control churn. |
 | 2026-05-17 | Let deployment platforms run `collectstatic` with production environment variables. | Docker image builds may not have deployment secrets or storage settings available. |
+| 2026-05-17 | Deploy frontend preview through Vercel using repo-root `vercel.json`. | Keeps monorepo deployment explicit while preserving Vite SPA routing. |

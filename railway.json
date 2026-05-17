@@ -22,6 +22,8 @@
     "DJANGO_ALLOWED_HOSTS": "*",
     "DATABASE_URL": "",
     "VITE_API_BASE_URL": "",
-    "REDIS_URL": ""
+    "REDIS_URL": "",
+    "CELERY_TASK_ALWAYS_EAGER": "False",
+    "CELERY_TASK_EAGER_PROPAGATES": "False"
   }
 }

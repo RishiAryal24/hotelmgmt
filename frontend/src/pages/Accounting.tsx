@@ -1,5 +1,6 @@
 import { Fragment, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
 import { useAccounts, useCreateJournalEntry, useJournalEntries, useSeedAccounts } from '../hooks/accounting';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
@@ -73,6 +74,7 @@ const Accounting = () => {
   const seedAccounts = useSeedAccounts();
   const createJournalEntry = useCreateJournalEntry();
   const [activeTab, setActiveTab] = useState<AccountingTab>('summary');
+  const [isJournalModalOpen, setIsJournalModalOpen] = useState(false);
   const [journalEntryForm, setJournalEntryForm] = useState<JournalEntryForm>(emptyJournalEntry);
   const [sourceFilter, setSourceFilter] = useState<JournalSourceFilter>('all');
   const [statusFilter, setStatusFilter] = useState<JournalStatusFilter>('all');
@@ -136,6 +138,14 @@ const Accounting = () => {
     });
   };
 
+  const handleTabChange = (tabId: string) => {
+    if (tabId === 'create') {
+      setIsJournalModalOpen(true);
+      return;
+    }
+    setActiveTab(tabId as AccountingTab);
+  };
+
   return (
     <div className="mx-auto max-w-6xl space-y-5 p-6">
       <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 md:flex-row md:items-end md:justify-between">
@@ -146,7 +156,7 @@ const Accounting = () => {
         </div>
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => setActiveTab('create')}
+            onClick={() => setIsJournalModalOpen(true)}
             className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
           >
             New journal
@@ -168,7 +178,7 @@ const Accounting = () => {
           { id: 'create', label: 'Create Entry' },
         ]}
         activeTab={activeTab}
-        onChange={(tabId) => setActiveTab(tabId as AccountingTab)}
+        onChange={handleTabChange}
       />
 
       {activeTab === 'summary' && (
@@ -372,7 +382,8 @@ const Accounting = () => {
         </section>
       )}
 
-      {activeTab === 'create' && (
+      {isJournalModalOpen && (
+        <ActionModal title="Create journal entry" onClose={() => setIsJournalModalOpen(false)} maxWidthClassName="max-w-5xl">
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -392,12 +403,12 @@ const Accounting = () => {
               {
                 onSuccess: () => {
                   setJournalEntryForm(emptyJournalEntry);
+                  setIsJournalModalOpen(false);
                   setActiveTab('journals');
                 },
               },
             );
           }}
-          className="rounded-2xl border border-slate-200 bg-white p-4"
         >
           <div className="grid gap-3 md:grid-cols-2">
             <input value={journalEntryForm.description} onChange={(e) => setJournalEntryForm({ ...journalEntryForm, description: e.target.value })} placeholder="Description" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
@@ -454,7 +465,7 @@ const Accounting = () => {
             </table>
           </div>
 
-          <div className="mt-4 flex flex-wrap justify-between gap-3">
+          <div className="mt-4 flex flex-wrap justify-between gap-3 border-t border-slate-100 pt-4">
             <button
               type="button"
               onClick={() =>
@@ -466,6 +477,9 @@ const Accounting = () => {
               className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               Add line
+            </button>
+            <button type="button" onClick={() => setIsJournalModalOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Cancel
             </button>
             <button
               type="submit"
@@ -479,6 +493,7 @@ const Accounting = () => {
             <p className="mt-3 text-sm text-red-600">Failed to create journal entry. Check that debits and credits balance.</p>
           )}
         </form>
+        </ActionModal>
       )}
     </div>
   );

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
 import { useRooms } from '../hooks/bookings';
 import { useCreateHousekeepingTask, useHousekeepingAction, useHousekeepingTasks } from '../hooks/housekeeping';
@@ -43,6 +44,9 @@ const Housekeeping: React.FC = () => {
   const createTask = useCreateHousekeepingTask();
   const taskAction = useHousekeepingAction();
   const [activeTab, setActiveTab] = useState<HousekeepingTab>((searchParams.get('status') as HousekeepingTab | null) || 'open');
+  const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
+  const [escalationTask, setEscalationTask] = useState<HousekeepingTask | null>(null);
+  const [escalationNotes, setEscalationNotes] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<HousekeepingTask['priority'] | 'all'>(
     (searchParams.get('priority') as HousekeepingTask['priority'] | null) || 'all',
   );
@@ -68,6 +72,10 @@ const Housekeeping: React.FC = () => {
   );
 
   const handleTabChange = (tabId: string) => {
+    if (tabId === 'create') {
+      setIsCreateTaskOpen(true);
+      return;
+    }
     setActiveTab(tabId as HousekeepingTab);
     const nextParams = new URLSearchParams(searchParams);
     if (tabId === 'create') {
@@ -99,9 +107,24 @@ const Housekeeping: React.FC = () => {
     createTask.mutate(formData, {
       onSuccess: () => {
         setFormData(emptyTask);
+        setIsCreateTaskOpen(false);
         setActiveTab('open');
       },
     });
+  };
+
+  const handleEscalate = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!escalationTask) return;
+    taskAction.mutate(
+      { taskId: escalationTask.id, action: 'escalate_maintenance', notes: escalationNotes },
+      {
+        onSuccess: () => {
+          setEscalationTask(null);
+          setEscalationNotes('');
+        },
+      },
+    );
   };
 
   if (isLoading) return <div className="p-6 text-slate-600">Loading housekeeping tasks...</div>;
@@ -116,7 +139,7 @@ const Housekeeping: React.FC = () => {
           <p className="mt-1 text-sm text-slate-600">Track room readiness, cleaning queues, and maintenance escalations.</p>
         </div>
         <button
-          onClick={() => setActiveTab('create')}
+          onClick={() => setIsCreateTaskOpen(true)}
           className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
         >
           Create task
@@ -135,59 +158,7 @@ const Housekeeping: React.FC = () => {
         onChange={handleTabChange}
       />
 
-      {activeTab === 'create' ? (
-        <form onSubmit={handleSubmit} className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="grid gap-3 md:grid-cols-2">
-            <select
-              value={formData.room}
-              onChange={(e) => setFormData({ ...formData, room: e.target.value })}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              required
-            >
-              <option value="">Select room</option>
-              {rooms?.map((room) => (
-                <option key={room.id} value={room.id}>
-                  Room {room.room_number} - {room.status}
-                </option>
-              ))}
-            </select>
-            <select
-              value={formData.task_type}
-              onChange={(e) => setFormData({ ...formData, task_type: e.target.value as HousekeepingTask['task_type'] })}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-            >
-              {Object.entries(taskTypeLabels).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-            <select
-              value={formData.priority}
-              onChange={(e) => setFormData({ ...formData, priority: e.target.value as HousekeepingTask['priority'] })}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-            >
-              <option value="low">Low</option>
-              <option value="normal">Normal</option>
-              <option value="high">High</option>
-              <option value="urgent">Urgent</option>
-            </select>
-            <input
-              value={formData.notes}
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-              placeholder="Notes"
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-            />
-          </div>
-          <div className="mt-4 flex justify-end">
-            <button type="submit" className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
-              Save task
-            </button>
-          </div>
-          {createTask.isError && <p className="mt-3 text-sm text-red-600">Could not create housekeeping task.</p>}
-        </form>
-      ) : (
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-base font-semibold text-slate-900">
@@ -253,10 +224,8 @@ const Housekeeping: React.FC = () => {
                             </button>
                             <button
                               onClick={() => {
-                                const notes = window.prompt('Maintenance notes');
-                                if (notes !== null) {
-                                  taskAction.mutate({ taskId: task.id, action: 'escalate_maintenance', notes });
-                                }
+                                setEscalationTask(task);
+                                setEscalationNotes(task.notes || '');
                               }}
                               className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50"
                             >
@@ -273,6 +242,89 @@ const Housekeeping: React.FC = () => {
           </div>
           {visibleTasks.length === 0 && <p className="p-4 text-sm text-slate-600">No {activeTab.replace('_', ' ')} tasks.</p>}
         </section>
+
+      {isCreateTaskOpen && (
+        <ActionModal title="Create housekeeping task" onClose={() => setIsCreateTaskOpen(false)}>
+          <form onSubmit={handleSubmit}>
+            <div className="grid gap-3 md:grid-cols-2">
+              <select
+                value={formData.room}
+                onChange={(e) => setFormData({ ...formData, room: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                required
+              >
+                <option value="">Select room</option>
+                {rooms?.map((room) => (
+                  <option key={room.id} value={room.id}>
+                    Room {room.room_number} - {room.status}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={formData.task_type}
+                onChange={(e) => setFormData({ ...formData, task_type: e.target.value as HousekeepingTask['task_type'] })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              >
+                {Object.entries(taskTypeLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={formData.priority}
+                onChange={(e) => setFormData({ ...formData, priority: e.target.value as HousekeepingTask['priority'] })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              >
+                <option value="low">Low</option>
+                <option value="normal">Normal</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+              <input
+                value={formData.notes}
+                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                placeholder="Notes"
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button type="button" onClick={() => setIsCreateTaskOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Cancel
+              </button>
+              <button type="submit" disabled={createTask.isPending} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Save task
+              </button>
+            </div>
+            {createTask.isError && <p className="mt-3 text-sm text-red-600">Could not create housekeeping task.</p>}
+          </form>
+        </ActionModal>
+      )}
+
+      {escalationTask && (
+        <ActionModal
+          title={`Escalate room ${escalationTask.room_details?.room_number || '-'}`}
+          description={taskTypeLabels[escalationTask.task_type]}
+          onClose={() => setEscalationTask(null)}
+        >
+          <form onSubmit={handleEscalate}>
+            <textarea
+              value={escalationNotes}
+              onChange={(e) => setEscalationNotes(e.target.value)}
+              placeholder="Maintenance notes"
+              className="min-h-28 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+            />
+            <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button type="button" onClick={() => setEscalationTask(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Cancel
+              </button>
+              <button type="submit" disabled={taskAction.isPending} className="rounded-xl bg-rose-700 px-4 py-2 text-sm font-medium text-white hover:bg-rose-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Escalate
+              </button>
+            </div>
+            {taskAction.isError && <p className="mt-3 text-sm text-red-600">Could not escalate task.</p>}
+          </form>
+        </ActionModal>
       )}
     </div>
   );

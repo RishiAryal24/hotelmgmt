@@ -28,6 +28,10 @@ services:
         value: "https://hotelmgmt-backend.onrender.com"
       - key: CORS_ALLOW_ALL_ORIGINS
         value: "True"
+      - key: CELERY_TASK_ALWAYS_EAGER
+        value: "False"
+      - key: CELERY_TASK_EAGER_PROPAGATES
+        value: "False"
       - key: DATABASE_URL
         sync: false
       - key: BOOTSTRAP_TENANT_NAME

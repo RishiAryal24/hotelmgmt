@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
 import {
   useAttendance,
@@ -113,6 +114,7 @@ const HRMS = () => {
   const postPayrollRun = usePostPayrollRun();
   const settlePayrollRun = useSettlePayrollRun();
   const [activeTab, setActiveTab] = useState<HRTab>('employees');
+  const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [employeeForm, setEmployeeForm] = useState(emptyEmployee);
   const [shiftForm, setShiftForm] = useState(emptyShift);
   const [payrollPeriodForm, setPayrollPeriodForm] = useState(emptyPayrollPeriod);
@@ -150,6 +152,7 @@ const HRMS = () => {
     createEmployee.mutate(employeeForm, {
       onSuccess: () => {
         setEmployeeForm(emptyEmployee);
+        setIsEmployeeModalOpen(false);
         setActiveTab('employees');
       },
     });
@@ -258,6 +261,14 @@ const HRMS = () => {
     );
   };
 
+  const handleTabChange = (tabId: string) => {
+    if (tabId === 'create') {
+      setIsEmployeeModalOpen(true);
+      return;
+    }
+    setActiveTab(tabId as HRTab);
+  };
+
   if (employeesLoading || shiftsLoading || attendanceLoading || periodsLoading || payrollRunsLoading) return <div className="p-6 text-slate-600">Loading HRMS...</div>;
   if (employeesError) return <div className="p-6 text-red-600">Error loading HRMS records</div>;
 
@@ -270,7 +281,7 @@ const HRMS = () => {
           <p className="mt-1 text-sm text-slate-600">Employee records, shifts, and daily attendance.</p>
         </div>
         <button
-          onClick={() => setActiveTab('create')}
+          onClick={() => setIsEmployeeModalOpen(true)}
           className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
         >
           Add employee
@@ -286,7 +297,7 @@ const HRMS = () => {
           { id: 'create', label: 'New Employee' },
         ]}
         activeTab={activeTab}
-        onChange={(tabId) => setActiveTab(tabId as HRTab)}
+        onChange={handleTabChange}
       />
 
       {activeTab === 'employees' && (
@@ -662,8 +673,9 @@ const HRMS = () => {
         </section>
       )}
 
-      {activeTab === 'create' && (
-        <form onSubmit={handleEmployeeSubmit} className="rounded-2xl border border-slate-200 bg-white p-4">
+      {isEmployeeModalOpen && (
+        <ActionModal title="Add employee" onClose={() => setIsEmployeeModalOpen(false)} maxWidthClassName="max-w-5xl">
+        <form onSubmit={handleEmployeeSubmit}>
           <div className="grid gap-3 md:grid-cols-3">
             <input placeholder="Employee ID" value={employeeForm.employee_id} onChange={(e) => setEmployeeForm({ ...employeeForm, employee_id: e.target.value.toUpperCase().replace(/\s+/g, '-') })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
             <input placeholder="First name" value={employeeForm.first_name} onChange={(e) => setEmployeeForm({ ...employeeForm, first_name: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
@@ -691,13 +703,17 @@ const HRMS = () => {
             <textarea placeholder="Address" value={employeeForm.address} onChange={(e) => setEmployeeForm({ ...employeeForm, address: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2" />
             <textarea placeholder="Notes" value={employeeForm.notes} onChange={(e) => setEmployeeForm({ ...employeeForm, notes: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-3" />
           </div>
-          <div className="mt-4 flex justify-end">
-            <button type="submit" className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
+          <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+            <button type="button" onClick={() => setIsEmployeeModalOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Cancel
+            </button>
+            <button type="submit" disabled={createEmployee.isPending} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">
               Save employee
             </button>
           </div>
           {createEmployee.isError && <p className="mt-3 text-sm text-red-600">Could not create employee. Check Employee ID uniqueness and required fields.</p>}
         </form>
+        </ActionModal>
       )}
     </div>
   );

@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
 import { useRooms } from '../hooks/bookings';
 import { useCreateMaintenanceTicket, useMaintenanceAction, useMaintenanceTickets } from '../hooks/maintenance';
@@ -46,6 +47,9 @@ const Maintenance: React.FC = () => {
   const createTicket = useCreateMaintenanceTicket();
   const ticketAction = useMaintenanceAction();
   const [activeTab, setActiveTab] = useState<MaintenanceTab>('open');
+  const [isCreateTicketOpen, setIsCreateTicketOpen] = useState(false);
+  const [resolvingTicket, setResolvingTicket] = useState<MaintenanceTicket | null>(null);
+  const [resolutionNotes, setResolutionNotes] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<MaintenanceTicket['priority'] | 'all'>('all');
   const [formData, setFormData] = useState(emptyTicket);
 
@@ -83,15 +87,33 @@ const Maintenance: React.FC = () => {
       {
         onSuccess: () => {
           setFormData(emptyTicket);
+          setIsCreateTicketOpen(false);
           setActiveTab('open');
         },
       },
     );
   };
 
-  const handleResolve = (ticketId: string) => {
-    const resolution_notes = window.prompt('Resolution notes') || '';
-    ticketAction.mutate({ ticketId, action: 'resolve', resolution_notes });
+  const handleResolve = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resolvingTicket) return;
+    ticketAction.mutate(
+      { ticketId: resolvingTicket.id, action: 'resolve', resolution_notes: resolutionNotes },
+      {
+        onSuccess: () => {
+          setResolvingTicket(null);
+          setResolutionNotes('');
+        },
+      },
+    );
+  };
+
+  const handleTabChange = (tabId: string) => {
+    if (tabId === 'create') {
+      setIsCreateTicketOpen(true);
+      return;
+    }
+    setActiveTab(tabId as MaintenanceTab);
   };
 
   if (isLoading) return <div className="p-6 text-slate-600">Loading maintenance tickets...</div>;
@@ -106,7 +128,7 @@ const Maintenance: React.FC = () => {
           <p className="mt-1 text-sm text-slate-600">Manage room downtime, repair tickets, and housekeeping escalations.</p>
         </div>
         <button
-          onClick={() => setActiveTab('create')}
+          onClick={() => setIsCreateTicketOpen(true)}
           className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
         >
           New ticket
@@ -136,75 +158,10 @@ const Maintenance: React.FC = () => {
           { id: 'create', label: 'New Ticket' },
         ]}
         activeTab={activeTab}
-        onChange={(tabId) => setActiveTab(tabId as MaintenanceTab)}
+        onChange={handleTabChange}
       />
 
-      {activeTab === 'create' ? (
-        <form onSubmit={handleSubmit} className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="grid gap-3 md:grid-cols-2">
-            <select
-              value={formData.room}
-              onChange={(e) => setFormData({ ...formData, room: e.target.value })}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              required
-            >
-              <option value="">Select room</option>
-              {rooms?.map((room) => (
-                <option key={room.id} value={room.id}>
-                  Room {room.room_number} - {room.status}
-                </option>
-              ))}
-            </select>
-            <input
-              value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              placeholder="Issue title"
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              required
-            />
-            <select
-              value={formData.category}
-              onChange={(e) => setFormData({ ...formData, category: e.target.value as MaintenanceTicket['category'] })}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-            >
-              {Object.entries(categoryLabels).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-            <select
-              value={formData.priority}
-              onChange={(e) => setFormData({ ...formData, priority: e.target.value as MaintenanceTicket['priority'] })}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-            >
-              <option value="low">Low</option>
-              <option value="normal">Normal</option>
-              <option value="high">High</option>
-              <option value="urgent">Urgent</option>
-            </select>
-            <input
-              type="datetime-local"
-              value={formData.due_at}
-              onChange={(e) => setFormData({ ...formData, due_at: e.target.value })}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-            />
-            <textarea
-              value={formData.description}
-              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              placeholder="Description"
-              className="min-h-24 rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2"
-            />
-          </div>
-          <div className="mt-4 flex justify-end">
-            <button type="submit" className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
-              Save ticket
-            </button>
-          </div>
-          {createTicket.isError && <p className="mt-3 text-sm text-red-600">Could not create maintenance ticket.</p>}
-        </form>
-      ) : (
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
           <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-base font-semibold capitalize text-slate-900">
@@ -270,7 +227,10 @@ const Maintenance: React.FC = () => {
                         {['open', 'in_progress'].includes(ticket.status) && (
                           <>
                             <button
-                              onClick={() => handleResolve(ticket.id)}
+                              onClick={() => {
+                                setResolvingTicket(ticket);
+                                setResolutionNotes(ticket.resolution_notes || '');
+                              }}
                               className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700"
                             >
                               Resolve
@@ -300,6 +260,102 @@ const Maintenance: React.FC = () => {
           </div>
           {visibleTickets.length === 0 && <p className="p-4 text-sm text-slate-600">No {activeTab.replace('_', ' ')} tickets.</p>}
         </section>
+
+      {isCreateTicketOpen && (
+        <ActionModal title="Create maintenance ticket" onClose={() => setIsCreateTicketOpen(false)}>
+          <form onSubmit={handleSubmit}>
+            <div className="grid gap-3 md:grid-cols-2">
+              <select
+                value={formData.room}
+                onChange={(e) => setFormData({ ...formData, room: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                required
+              >
+                <option value="">Select room</option>
+                {rooms?.map((room) => (
+                  <option key={room.id} value={room.id}>
+                    Room {room.room_number} - {room.status}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={formData.title}
+                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                placeholder="Issue title"
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                required
+              />
+              <select
+                value={formData.category}
+                onChange={(e) => setFormData({ ...formData, category: e.target.value as MaintenanceTicket['category'] })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              >
+                {Object.entries(categoryLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={formData.priority}
+                onChange={(e) => setFormData({ ...formData, priority: e.target.value as MaintenanceTicket['priority'] })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              >
+                <option value="low">Low</option>
+                <option value="normal">Normal</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+              <input
+                type="datetime-local"
+                value={formData.due_at}
+                onChange={(e) => setFormData({ ...formData, due_at: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              />
+              <textarea
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                placeholder="Description"
+                className="min-h-24 rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2"
+              />
+            </div>
+            <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button type="button" onClick={() => setIsCreateTicketOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Cancel
+              </button>
+              <button type="submit" disabled={createTicket.isPending} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Save ticket
+              </button>
+            </div>
+            {createTicket.isError && <p className="mt-3 text-sm text-red-600">Could not create maintenance ticket.</p>}
+          </form>
+        </ActionModal>
+      )}
+
+      {resolvingTicket && (
+        <ActionModal
+          title={`Resolve ${resolvingTicket.title}`}
+          description={`Room ${resolvingTicket.room_details?.room_number || '-'}`}
+          onClose={() => setResolvingTicket(null)}
+        >
+          <form onSubmit={handleResolve}>
+            <textarea
+              value={resolutionNotes}
+              onChange={(e) => setResolutionNotes(e.target.value)}
+              placeholder="Resolution notes"
+              className="min-h-28 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+            />
+            <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button type="button" onClick={() => setResolvingTicket(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Cancel
+              </button>
+              <button type="submit" disabled={ticketAction.isPending} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Resolve ticket
+              </button>
+            </div>
+            {ticketAction.isError && <p className="mt-3 text-sm text-red-600">Could not resolve ticket.</p>}
+          </form>
+        </ActionModal>
       )}
     </div>
   );

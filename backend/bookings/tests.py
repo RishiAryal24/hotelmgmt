@@ -1,11 +1,15 @@
 from datetime import date
+from unittest.mock import patch
 
+from django.test import override_settings
+from kombu.exceptions import OperationalError
 from rest_framework.test import APIClient
 from django_tenants.test.cases import TenantTestCase
 from django_tenants.utils import schema_context, tenant_context
 
 from bookings.models import Booking, Guest, GuestCommunication, GuestFolio, GuestFolioLine, Room, RoomType
-from bookings.services import extend_booking_stay, get_guest_history, modify_confirmed_booking, transfer_booking_room
+from bookings.services import check_in_booking, create_walk_in_booking, extend_booking_stay, get_guest_history, modify_confirmed_booking, transfer_booking_room
+from bookings.tasks import queue_booking_confirmation_email
 from housekeeping.models import HousekeepingTask
 from housekeeping.services import complete_housekeeping_task, create_checkout_cleaning_task
 from tenants.models import Domain, Tenant
@@ -543,6 +547,205 @@ class BookingModificationTests(TenantTestCase):
         self.assertEqual(self.booking.room_id, self.new_room.id)
         self.assertEqual(self.booking.total_amount, 240)
         self.assertEqual(response.data['booking']['special_requests'], 'Late arrival')
+
+
+class WalkInBookingTests(TenantTestCase):
+    @classmethod
+    def get_test_schema_name(cls):
+        return 'tenant_walkin'
+
+    @classmethod
+    def get_test_tenant_domain(cls):
+        return 'tenant-walkin.test.com'
+
+    @classmethod
+    def setup_tenant(cls, tenant):
+        tenant.name = 'Tenant Walkin'
+        tenant.created_by = 'test'
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient(HTTP_HOST=self.get_test_tenant_domain())
+        self.user = PlatformUser.objects.create_user(
+            email='frontdesk-walkin@example.com',
+            password='testpass123456',
+            tenant=self.tenant,
+            is_tenant_admin=True,
+        )
+        self.client.force_authenticate(self.user)
+        self.room_type = RoomType.objects.create(
+            name='Walkin Standard',
+            code='WLK-STD',
+            base_rate='150.00',
+        )
+        self.room = Room.objects.create(
+            room_number='901',
+            room_type=self.room_type,
+            capacity=2,
+            price_per_night='150.00',
+            status='available',
+        )
+        self.guest = Guest.objects.create(
+            first_name='Walkin',
+            last_name='Guest',
+            email='walkin.guest@example.com',
+        )
+
+    def test_walk_in_service_checks_in_guest_and_opens_folio(self):
+        booking, folio = create_walk_in_booking(
+            room=self.room,
+            guest=self.guest,
+            check_in_date=date(2026, 5, 20),
+            check_out_date=date(2026, 5, 22),
+            number_of_guests=2,
+            special_requests='Near elevator',
+        )
+
+        self.room.refresh_from_db()
+
+        self.assertEqual(booking.status, 'checked_in')
+        self.assertEqual(booking.total_amount, 300)
+        self.assertEqual(booking.special_requests, 'Near elevator')
+        self.assertEqual(self.room.status, 'occupied')
+        self.assertEqual(folio.status, 'open')
+        self.assertEqual(folio.subtotal, booking.total_amount)
+
+    def test_walk_in_service_requires_available_room(self):
+        self.room.status = 'cleaning'
+        self.room.save(update_fields=['status', 'updated_at'])
+
+        with self.assertRaises(ValueError):
+            create_walk_in_booking(
+                room=self.room,
+                guest=self.guest,
+                check_in_date=date(2026, 5, 20),
+                check_out_date=date(2026, 5, 21),
+            )
+
+        self.assertFalse(Booking.objects.exists())
+
+    def test_tenant_user_can_create_walk_in_from_api(self):
+        response = self.client.post(
+            '/api/v1/bookings/bookings/walk-in/',
+            {
+                'room': str(self.room.id),
+                'guest': str(self.guest.id),
+                'check_in_date': '2026-05-20',
+                'check_out_date': '2026-05-21',
+                'number_of_guests': 1,
+                'special_requests': 'Cash payer',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        booking = Booking.objects.get()
+        self.room.refresh_from_db()
+        self.assertEqual(booking.status, 'checked_in')
+        self.assertEqual(self.room.status, 'occupied')
+        self.assertTrue(GuestFolio.objects.filter(booking=booking, status='open').exists())
+        self.assertEqual(response.data['booking']['special_requests'], 'Cash payer')
+
+
+class ReservationCheckInFolioTests(TenantTestCase):
+    @classmethod
+    def get_test_schema_name(cls):
+        return 'tenant_checkin_folio'
+
+    @classmethod
+    def get_test_tenant_domain(cls):
+        return 'tenant-checkin-folio.test.com'
+
+    @classmethod
+    def setup_tenant(cls, tenant):
+        tenant.name = 'Tenant Checkin Folio'
+        tenant.created_by = 'test'
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient(HTTP_HOST=self.get_test_tenant_domain())
+        self.user = PlatformUser.objects.create_user(
+            email='frontdesk-checkin-folio@example.com',
+            password='testpass123456',
+            tenant=self.tenant,
+            is_tenant_admin=True,
+        )
+        self.client.force_authenticate(self.user)
+        self.room_type = RoomType.objects.create(
+            name='Checkin Standard',
+            code='CHK-STD',
+            base_rate='110.00',
+        )
+        self.room = Room.objects.create(
+            room_number='911',
+            room_type=self.room_type,
+            capacity=2,
+            price_per_night='110.00',
+            status='available',
+        )
+        self.guest = Guest.objects.create(
+            first_name='Checkin',
+            last_name='Guest',
+            email='checkin.folio@example.com',
+        )
+        self.booking = Booking.objects.create(
+            room=self.room,
+            guest=self.guest,
+            check_in_date=date(2026, 5, 24),
+            check_out_date=date(2026, 5, 26),
+            number_of_guests=1,
+            status='confirmed',
+        )
+
+    def test_check_in_service_opens_folio_and_occupies_room(self):
+        booking, folio = check_in_booking(self.booking)
+
+        self.room.refresh_from_db()
+
+        self.assertEqual(booking.status, 'checked_in')
+        self.assertEqual(self.room.status, 'occupied')
+        self.assertEqual(folio.status, 'open')
+        self.assertEqual(folio.subtotal, booking.total_amount)
+        self.assertEqual(folio.grand_total, booking.total_amount)
+
+    def test_check_in_api_returns_open_folio(self):
+        response = self.client.post(f'/api/v1/bookings/bookings/{self.booking.id}/check_in/')
+
+        self.assertEqual(response.status_code, 200)
+        self.booking.refresh_from_db()
+        self.room.refresh_from_db()
+        folio = GuestFolio.objects.get(booking=self.booking)
+        self.assertEqual(self.booking.status, 'checked_in')
+        self.assertEqual(self.room.status, 'occupied')
+        self.assertEqual(folio.status, 'open')
+        self.assertEqual(response.data['folio']['id'], str(folio.id))
+
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=True, CELERY_TASK_EAGER_PROPAGATES=True)
+    def test_checkout_api_settles_folio_and_marks_room_for_cleaning(self):
+        booking, folio = check_in_booking(self.booking)
+
+        response = self.client.post(
+            f'/api/v1/bookings/bookings/{booking.id}/check_out/',
+            {
+                'payment_method': 'cash',
+                'paid_amount': str(folio.grand_total),
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        booking.refresh_from_db()
+        folio.refresh_from_db()
+        self.room.refresh_from_db()
+        self.assertEqual(booking.status, 'checked_out')
+        self.assertEqual(folio.status, 'paid')
+        self.assertEqual(self.room.status, 'cleaning')
+        self.assertTrue(HousekeepingTask.objects.filter(room=self.room, task_type='checkout_clean', status='open').exists())
+
+    @override_settings(DEBUG=True, EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
+    def test_email_queue_failure_does_not_block_local_flow(self):
+        with patch('bookings.tasks.send_booking_confirmation_email.delay', side_effect=OperationalError('redis down')):
+            queue_booking_confirmation_email(self.booking.id, self.guest.email)
 
 
 class BookingPdfExportTests(TenantTestCase):

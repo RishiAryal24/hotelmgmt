@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFormik } from 'formik';
 import * as yup from 'yup';
+import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
 import apiClient from '../services/api';
 import { AuthRole, AuthUser } from '../services/auth';
@@ -29,6 +30,7 @@ const Staff = () => {
   const { data: staff, isLoading: staffLoading } = useQuery({ queryKey: ['staff'], queryFn: fetchStaff });
   const { data: roles, isLoading: rolesLoading } = useQuery({ queryKey: ['roles'], queryFn: fetchRoles });
   const [activeTab, setActiveTab] = useState<StaffTab>('staff');
+  const [isCreateStaffOpen, setIsCreateStaffOpen] = useState(false);
 
   const mutation = useMutation({
     mutationFn: async (payload: { email: string; full_name: string; password: string; role_ids: string[] }) => {
@@ -38,6 +40,7 @@ const Staff = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['staff'] });
       formik.resetForm();
+      setIsCreateStaffOpen(false);
       setActiveTab('staff');
     },
   });
@@ -74,6 +77,14 @@ const Staff = () => {
     formik.setFieldValue('role_ids', roleIds);
   };
 
+  const handleTabChange = (tabId: string) => {
+    if (tabId === 'create') {
+      setIsCreateStaffOpen(true);
+      return;
+    }
+    setActiveTab(tabId as StaffTab);
+  };
+
   return (
     <div className="mx-auto max-w-6xl space-y-5 p-6">
       <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 md:flex-row md:items-end md:justify-between">
@@ -83,7 +94,7 @@ const Staff = () => {
           <p className="mt-1 text-sm text-slate-600">Create staff accounts and review role assignments in compact rows.</p>
         </div>
         <button
-          onClick={() => setActiveTab('create')}
+          onClick={() => setIsCreateStaffOpen(true)}
           className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
         >
           Create staff
@@ -97,7 +108,7 @@ const Staff = () => {
           { id: 'create', label: 'New Staff' },
         ]}
         activeTab={activeTab}
-        onChange={(tabId) => setActiveTab(tabId as StaffTab)}
+        onChange={handleTabChange}
       />
 
       {activeTab === 'staff' && (
@@ -183,8 +194,9 @@ const Staff = () => {
         </section>
       )}
 
-      {activeTab === 'create' && (
-        <form onSubmit={formik.handleSubmit} className="rounded-2xl border border-slate-200 bg-white p-4">
+      {isCreateStaffOpen && (
+        <ActionModal title="Create staff" onClose={() => setIsCreateStaffOpen(false)} maxWidthClassName="max-w-4xl">
+        <form onSubmit={formik.handleSubmit}>
           <div className="grid gap-3 md:grid-cols-3">
             <label className="text-sm font-medium text-slate-700">
               Full name
@@ -253,7 +265,10 @@ const Staff = () => {
               Staff creation failed. Check that the email is unique and roles are valid.
             </p>
           )}
-          <div className="mt-4 flex justify-end">
+          <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+            <button type="button" onClick={() => setIsCreateStaffOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Cancel
+            </button>
             <button
               type="submit"
               disabled={mutation.isPending}
@@ -263,6 +278,7 @@ const Staff = () => {
             </button>
           </div>
         </form>
+        </ActionModal>
       )}
     </div>
   );

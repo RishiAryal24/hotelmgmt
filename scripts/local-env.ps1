@@ -10,6 +10,8 @@ $env:DJANGO_ALLOWED_HOSTS = "localhost,127.0.0.1,local.hotel.test"
 $env:CORS_ALLOW_ALL_ORIGINS = "True"
 $env:CELERY_BROKER_URL = "redis://127.0.0.1:6379/0"
 $env:CELERY_RESULT_BACKEND = "redis://127.0.0.1:6379/0"
+$env:CELERY_TASK_ALWAYS_EAGER = "True"
+$env:CELERY_TASK_EAGER_PROPAGATES = "True"
 
 $env:BOOTSTRAP_TENANT_NAME = "Local Hotel"
 $env:BOOTSTRAP_TENANT_DOMAIN = "local.hotel.test"

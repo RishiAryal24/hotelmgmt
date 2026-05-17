@@ -40,6 +40,94 @@ def get_guest_history(guest):
 
 
 @transaction.atomic
+def check_in_booking(booking: Booking):
+    if booking.status != 'confirmed':
+        raise ValueError('Only confirmed reservations can be checked in.')
+    if booking.room.status not in ['available', 'occupied']:
+        raise ValueError('Room is not ready for check-in.')
+
+    has_conflict = (
+        Booking.objects.filter(
+            room=booking.room,
+            check_in_date__lt=booking.check_out_date,
+            check_out_date__gt=booking.check_in_date,
+            status='checked_in',
+        )
+        .exclude(pk=booking.pk)
+        .exists()
+    )
+    if has_conflict:
+        raise ValueError('Room already has an in-house guest for this stay.')
+
+    booking.status = 'checked_in'
+    booking.save(update_fields=['status', 'updated_at'])
+
+    room = booking.room
+    room.status = 'occupied'
+    room.save(update_fields=['status', 'updated_at'])
+
+    folio, _ = GuestFolio.objects.get_or_create(
+        booking=booking,
+        defaults={
+            'subtotal': booking.total_amount,
+        },
+    )
+    return booking, folio
+
+
+@transaction.atomic
+def create_walk_in_booking(
+    *,
+    room: Room,
+    guest,
+    check_in_date,
+    check_out_date,
+    number_of_guests: int = 1,
+    special_requests: str = '',
+):
+    if check_out_date <= check_in_date:
+        raise ValueError('Checkout date must be after check-in date.')
+    if getattr(guest, 'vip_level', '') == 'blacklist':
+        raise ValueError('Guest is marked do not book.')
+    if number_of_guests < 1:
+        raise ValueError('Number of guests must be at least 1.')
+    if number_of_guests > room.capacity:
+        raise ValueError('Number of guests exceeds room capacity.')
+    if room.status != 'available':
+        raise ValueError('Walk-in room must be available.')
+
+    has_conflict = (
+        Booking.objects.filter(
+            room=room,
+            check_in_date__lt=check_out_date,
+            check_out_date__gt=check_in_date,
+            status__in=['confirmed', 'checked_in'],
+        )
+        .exists()
+    )
+    if has_conflict:
+        raise ValueError('Room is not available for the requested stay dates.')
+
+    booking = Booking.objects.create(
+        room=room,
+        guest=guest,
+        check_in_date=check_in_date,
+        check_out_date=check_out_date,
+        number_of_guests=number_of_guests,
+        status='checked_in',
+        special_requests=special_requests,
+    )
+    room.status = 'occupied'
+    room.save(update_fields=['status', 'updated_at'])
+    folio = GuestFolio.objects.create(
+        booking=booking,
+        subtotal=booking.total_amount,
+    )
+
+    return booking, folio
+
+
+@transaction.atomic
 def extend_booking_stay(booking: Booking, new_check_out_date):
     if booking.status != 'checked_in':
         raise ValueError('Only checked-in bookings can be extended.')

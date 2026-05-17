@@ -23,9 +23,9 @@ from bookings.serializers import (
     RoomSerializer,
     RoomTypeSerializer,
 )
-from bookings.services import extend_booking_stay, get_guest_history, modify_confirmed_booking, transfer_booking_room
+from bookings.services import check_in_booking, create_walk_in_booking, extend_booking_stay, get_guest_history, modify_confirmed_booking, transfer_booking_room
 from users.permissions import HasActionPermission
-from .tasks import send_booking_confirmation_email
+from .tasks import queue_booking_confirmation_email
 
 
 class RoomTypeViewSet(viewsets.ModelViewSet):
@@ -83,6 +83,7 @@ class GuestViewSet(viewsets.ModelViewSet):
         'list': 'bookings.reservation.read',
         'retrieve': 'bookings.reservation.read',
         'create': 'bookings.reservation.create',
+        'walk_in': 'bookings.reservation.check_in',
         'update': 'bookings.reservation.create',
         'partial_update': 'bookings.reservation.create',
         'destroy': 'bookings.reservation.create',
@@ -129,16 +130,51 @@ class BookingViewSet(viewsets.ModelViewSet):
     search_fields = ['guest__first_name', 'guest__last_name', 'guest__email']
     ordering_fields = ['check_in_date', 'check_out_date', 'created_at']
 
+    def create(self, request, *args, **kwargs):
+        if request.data.get('status') == 'checked_in':
+            return self.walk_in(request)
+        return super().create(request, *args, **kwargs)
+
     @action(detail=True, methods=['post'])
     def check_in(self, request, pk=None):
         booking = self.get_object()
-        if booking.status == 'confirmed':
-            booking.status = 'checked_in'
-            booking.room.status = 'occupied'
-            booking.save()
-            booking.room.save()
-            return Response({'status': 'Checked in successfully'})
-        return Response({'error': 'Cannot check in'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            booking, folio = check_in_booking(booking)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'status': 'Checked in successfully',
+            'booking': self.get_serializer(booking).data,
+            'folio': GuestFolioSerializer(folio).data,
+        })
+
+    @action(detail=False, methods=['post'], url_path='walk-in')
+    def walk_in(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        try:
+            booking, folio = create_walk_in_booking(
+                room=data['room'],
+                guest=data['guest'],
+                check_in_date=data['check_in_date'],
+                check_out_date=data['check_out_date'],
+                number_of_guests=data.get('number_of_guests', 1),
+                special_requests=data.get('special_requests', ''),
+            )
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(
+            {
+                'status': 'Walk-in checked in successfully',
+                'booking': self.get_serializer(booking).data,
+                'folio': GuestFolioSerializer(folio).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=['post'])
     def check_out(self, request, pk=None):
@@ -174,8 +210,7 @@ class BookingViewSet(viewsets.ModelViewSet):
 
                 create_checkout_cleaning_task(booking)
 
-                # Send checkout confirmation email asynchronously
-                send_booking_confirmation_email.delay(booking.id, booking.guest.email)
+                queue_booking_confirmation_email(booking.id, booking.guest.email)
             return Response({
                 'status': 'Checked out and settled successfully',
                 'folio': GuestFolioSerializer(folio).data,

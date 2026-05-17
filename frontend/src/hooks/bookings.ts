@@ -160,6 +160,25 @@ export const useCreateBooking = () => {
   });
 };
 
+export const useCreateWalkInBooking = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (booking: Omit<Booking, 'id' | 'total_amount' | 'room_details' | 'guest_details'>): Promise<{
+      status: string;
+      booking: Booking;
+      folio: GuestFolio;
+    }> => {
+      const response = await apiClient.post('/bookings/bookings/walk-in/', booking);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['rooms'] });
+      queryClient.invalidateQueries({ queryKey: ['guest-folios'] });
+    },
+  });
+};
+
 export const useBookingAction = () => {
   const queryClient = useQueryClient();
   return useMutation({

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
 import { useBookings } from '../hooks/bookings';
 import { useInventoryItems } from '../hooks/inventory';
@@ -69,6 +70,7 @@ const Restaurant: React.FC = () => {
   const [orderForm, setOrderForm] = useState(emptyOrder);
   const [lineForms, setLineForms] = useState<Record<string, typeof emptyOrderLine>>({});
   const [settleForms, setSettleForms] = useState<Record<string, typeof emptySettleForm>>({});
+  const [settlingOrder, setSettlingOrder] = useState<RestaurantOrder | null>(null);
 
   const activeOrders = orders?.filter((order) => order.status !== 'paid' && order.status !== 'cancelled') || [];
   const inHouseBookings = bookings?.filter((booking) => booking.status === 'checked_in') || [];
@@ -139,9 +141,24 @@ const Restaurant: React.FC = () => {
         booking: form.payment_method === 'room_posting' ? form.booking : undefined,
       },
       {
-        onSuccess: () => setSettleForms({ ...settleForms, [orderId]: emptySettleForm }),
+        onSuccess: () => {
+          setSettleForms({ ...settleForms, [orderId]: emptySettleForm });
+          setSettlingOrder(null);
+        },
       },
     );
+  };
+
+  const openSettleOrder = (order: RestaurantOrder) => {
+    setSettleForms({
+      ...settleForms,
+      [order.id]: settleForms[order.id] || {
+        ...emptySettleForm,
+        paid_amount: order.grand_total,
+        booking: order.room_booking || '',
+      },
+    });
+    setSettlingOrder(order);
   };
 
   return (
@@ -190,11 +207,6 @@ const Restaurant: React.FC = () => {
                 <tbody className="divide-y divide-slate-100">
                   {activeOrders.map((order) => {
                     const lineForm = lineForms[order.id] || emptyOrderLine;
-                    const settleForm = settleForms[order.id] || {
-                      ...emptySettleForm,
-                      paid_amount: order.grand_total,
-                      booking: order.room_booking || '',
-                    };
                     return (
                       <tr key={order.id}>
                         <td className="py-3 pr-4"><p className="font-medium text-slate-900">{order.order_number}</p><p className="text-xs text-slate-500">{order.order_type} {order.table_details ? `| Table ${order.table_details.table_number}` : ''}{order.room_number ? ` | Room ${order.room_number}` : ''}</p></td>
@@ -211,58 +223,14 @@ const Restaurant: React.FC = () => {
                           </div>
                         </td>
                         <td className="py-3 pr-4">
-                          {order.status === 'served' ? (
-                            <div className="grid min-w-[360px] gap-2">
-                              <div className="grid grid-cols-[120px_1fr_92px] gap-2">
-                                <select
-                                  value={settleForm.payment_method}
-                                  onChange={(e) =>
-                                    setSettleForms({
-                                      ...settleForms,
-                                      [order.id]: { ...settleForm, payment_method: e.target.value as typeof emptySettleForm.payment_method },
-                                    })
-                                  }
-                                  className="rounded-xl border border-slate-200 px-2 py-2 text-xs"
-                                >
-                                  <option value="cash">Cash</option>
-                                  <option value="card">Card</option>
-                                  <option value="wallet">Wallet</option>
-                                  <option value="bank_transfer">Bank</option>
-                                  <option value="room_posting">Room</option>
-                                </select>
-                                <select
-                                  value={settleForm.booking}
-                                  onChange={(e) => setSettleForms({ ...settleForms, [order.id]: { ...settleForm, booking: e.target.value } })}
-                                  disabled={settleForm.payment_method !== 'room_posting'}
-                                  className="rounded-xl border border-slate-200 px-2 py-2 text-xs disabled:bg-slate-50 disabled:text-slate-400"
-                                >
-                                  <option value="">In-house room</option>
-                                  {inHouseBookings.map((booking) => (
-                                    <option key={booking.id} value={booking.id}>
-                                      {booking.room_details?.room_number} - {booking.guest_details?.first_name} {booking.guest_details?.last_name}
-                                    </option>
-                                  ))}
-                                </select>
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  value={settleForm.paid_amount}
-                                  onChange={(e) => setSettleForms({ ...settleForms, [order.id]: { ...settleForm, paid_amount: e.target.value } })}
-                                  className="rounded-xl border border-slate-200 px-2 py-2 text-xs"
-                                />
-                              </div>
-                              {settleOrder.isError && <p className="text-xs text-red-600">Could not settle order. Check payment and room selection.</p>}
-                            </div>
-                          ) : (
-                            <span className="text-xs text-slate-500">Mark served first</span>
-                          )}
+                          <span className="text-xs text-slate-500">{order.status === 'served' ? 'Ready to settle' : 'Mark served first'}</span>
                         </td>
                         <td className="py-3 pr-4">
                           <div className="flex flex-wrap gap-2">
                             <button onClick={() => handleAddLine(order.id)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">Add</button>
                             {order.lines.length > 0 && ['draft', 'sent_to_kitchen'].includes(order.status) && <button onClick={() => orderAction.mutate({ orderId: order.id, action: 'send_to_kitchen' })} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-medium text-white">Kitchen</button>}
                             {['sent_to_kitchen', 'preparing'].includes(order.status) && <button onClick={() => orderAction.mutate({ orderId: order.id, action: 'mark_served' })} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-medium text-white">Served</button>}
-                            {order.status === 'served' && <button onClick={() => handleSettleOrder(order.id)} className="rounded-xl bg-slate-800 px-3 py-2 text-xs font-medium text-white">Settle</button>}
+                            {order.status === 'served' && <button onClick={() => openSettleOrder(order)} className="rounded-xl bg-slate-800 px-3 py-2 text-xs font-medium text-white">Settle</button>}
                           </div>
                         </td>
                       </tr>
@@ -360,6 +328,80 @@ const Restaurant: React.FC = () => {
           ))}
           {tickets?.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No kitchen tickets yet.</td></tr>}
         </RowsTable>
+      )}
+
+      {settlingOrder && (
+        <ActionModal
+          title={`Settle order ${settlingOrder.order_number}`}
+          description={`Total due ${formatMoney(settlingOrder.grand_total, settings?.currency)}`}
+          onClose={() => setSettlingOrder(null)}
+        >
+          {(() => {
+            const settleForm = settleForms[settlingOrder.id] || {
+              ...emptySettleForm,
+              paid_amount: settlingOrder.grand_total,
+              booking: settlingOrder.room_booking || '',
+            };
+            return (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSettleOrder(settlingOrder.id);
+                }}
+              >
+                <div className="grid gap-3 md:grid-cols-2">
+                  <select
+                    value={settleForm.payment_method}
+                    onChange={(e) =>
+                      setSettleForms({
+                        ...settleForms,
+                        [settlingOrder.id]: { ...settleForm, payment_method: e.target.value as typeof emptySettleForm.payment_method },
+                      })
+                    }
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="card">Card</option>
+                    <option value="wallet">Wallet</option>
+                    <option value="bank_transfer">Bank</option>
+                    <option value="room_posting">Room</option>
+                  </select>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={settleForm.paid_amount}
+                    onChange={(e) => setSettleForms({ ...settleForms, [settlingOrder.id]: { ...settleForm, paid_amount: e.target.value } })}
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                    required
+                  />
+                  <select
+                    value={settleForm.booking}
+                    onChange={(e) => setSettleForms({ ...settleForms, [settlingOrder.id]: { ...settleForm, booking: e.target.value } })}
+                    disabled={settleForm.payment_method !== 'room_posting'}
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50 disabled:text-slate-400 md:col-span-2"
+                    required={settleForm.payment_method === 'room_posting'}
+                  >
+                    <option value="">In-house room</option>
+                    {inHouseBookings.map((booking) => (
+                      <option key={booking.id} value={booking.id}>
+                        {booking.room_details?.room_number} - {booking.guest_details?.first_name} {booking.guest_details?.last_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+                  <button type="button" onClick={() => setSettlingOrder(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={settleOrder.isPending} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300">
+                    Settle order
+                  </button>
+                </div>
+                {settleOrder.isError && <p className="mt-3 text-sm text-red-600">Could not settle order. Check payment and room selection.</p>}
+              </form>
+            );
+          })()}
+        </ActionModal>
       )}
     </div>
   );

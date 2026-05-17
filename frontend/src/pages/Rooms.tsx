@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
 import { useCreateRoom, useCreateRoomType, useRoomTypes, useRooms } from '../hooks/bookings';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
@@ -35,6 +36,8 @@ const Rooms: React.FC = () => {
   const createRoom = useCreateRoom();
   const createRoomType = useCreateRoomType();
   const [activeTab, setActiveTab] = useState('rooms');
+  const [isCreateRoomOpen, setIsCreateRoomOpen] = useState(false);
+  const [isCreateTypeOpen, setIsCreateTypeOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState<Room['status'] | 'all'>(
     (searchParams.get('status') as Room['status'] | null) || 'all',
   );
@@ -53,12 +56,34 @@ const Rooms: React.FC = () => {
 
   const handleCreateRoom = (e: React.FormEvent) => {
     e.preventDefault();
-    createRoom.mutate(roomForm as Omit<Room, 'id' | 'room_type_name' | 'room_type_details'>, { onSuccess: () => setRoomForm(emptyRoom) });
+    createRoom.mutate(roomForm as Omit<Room, 'id' | 'room_type_name' | 'room_type_details'>, {
+      onSuccess: () => {
+        setRoomForm(emptyRoom);
+        setIsCreateRoomOpen(false);
+      },
+    });
   };
 
   const handleCreateRoomType = (e: React.FormEvent) => {
     e.preventDefault();
-    createRoomType.mutate(roomTypeForm, { onSuccess: () => setRoomTypeForm(emptyRoomType) });
+    createRoomType.mutate(roomTypeForm, {
+      onSuccess: () => {
+        setRoomTypeForm(emptyRoomType);
+        setIsCreateTypeOpen(false);
+      },
+    });
+  };
+
+  const handleTabChange = (tabId: string) => {
+    if (tabId === 'create-room') {
+      setIsCreateRoomOpen(true);
+      return;
+    }
+    if (tabId === 'create-type') {
+      setIsCreateTypeOpen(true);
+      return;
+    }
+    setActiveTab(tabId);
   };
 
   if (isLoading) return <div className="p-6 text-slate-600">Loading rooms...</div>;
@@ -98,7 +123,7 @@ const Rooms: React.FC = () => {
             <h1 className="text-2xl font-bold text-slate-900">Rooms Management</h1>
             <p className="mt-1 text-sm text-slate-500">Room inventory, rates, status, and room type setup in compact rows.</p>
           </div>
-          <CompactTabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
+          <CompactTabs tabs={tabs} activeTab={activeTab} onChange={handleTabChange} />
         </div>
       </section>
 
@@ -182,8 +207,10 @@ const Rooms: React.FC = () => {
         </section>
       )}
 
-      {activeTab === 'create-room' && (
-        <FormPanel title="Create Room" onSubmit={handleCreateRoom}>
+      {isCreateRoomOpen && (
+        <ActionModal title="Create room" onClose={() => setIsCreateRoomOpen(false)}>
+          <form onSubmit={handleCreateRoom}>
+            <div className="grid gap-3 md:grid-cols-2">
           <input placeholder="Room Number" value={roomForm.room_number} onChange={(e) => setRoomForm({ ...roomForm, room_number: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
           <select value={roomForm.room_type} onChange={(e) => handleRoomTypeChange(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required>
             <option value="">{roomTypesLoading ? 'Loading room types...' : 'Select Room Type'}</option>
@@ -195,18 +222,40 @@ const Rooms: React.FC = () => {
             <option value="available">Available</option><option value="occupied">Occupied</option><option value="maintenance">Maintenance</option><option value="cleaning">Cleaning</option>
           </select>
           <textarea placeholder="Description" value={roomForm.description} onChange={(e) => setRoomForm({ ...roomForm, description: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-        </FormPanel>
+            </div>
+            <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button type="button" onClick={() => setIsCreateRoomOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Cancel
+              </button>
+              <button type="submit" disabled={createRoom.isPending} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Save room
+              </button>
+            </div>
+          </form>
+        </ActionModal>
       )}
 
-      {activeTab === 'create-type' && (
-        <FormPanel title="Create Room Type" onSubmit={handleCreateRoomType}>
+      {isCreateTypeOpen && (
+        <ActionModal title="Create room type" onClose={() => setIsCreateTypeOpen(false)}>
+          <form onSubmit={handleCreateRoomType}>
+            <div className="grid gap-3 md:grid-cols-2">
           <input placeholder="Type Name" value={roomTypeForm.name} onChange={(e) => setRoomTypeForm({ ...roomTypeForm, name: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
           <input placeholder="Code" value={roomTypeForm.code} onChange={(e) => setRoomTypeForm({ ...roomTypeForm, code: e.target.value.toLowerCase().replace(/\s+/g, '_') })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
           <input type="number" placeholder="Base Occupancy" value={roomTypeForm.base_occupancy} onChange={(e) => setRoomTypeForm({ ...roomTypeForm, base_occupancy: Number(e.target.value) })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" min="1" required />
           <input type="number" placeholder="Max Occupancy" value={roomTypeForm.max_occupancy} onChange={(e) => setRoomTypeForm({ ...roomTypeForm, max_occupancy: Number(e.target.value) })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" min="1" required />
           <input type="number" step="0.01" placeholder="Base Rate" value={roomTypeForm.base_rate} onChange={(e) => setRoomTypeForm({ ...roomTypeForm, base_rate: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
           <textarea placeholder="Description" value={roomTypeForm.description} onChange={(e) => setRoomTypeForm({ ...roomTypeForm, description: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-        </FormPanel>
+            </div>
+            <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button type="button" onClick={() => setIsCreateTypeOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Cancel
+              </button>
+              <button type="submit" disabled={createRoomType.isPending} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Save room type
+              </button>
+            </div>
+          </form>
+        </ActionModal>
       )}
     </div>
   );

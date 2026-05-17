@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
 import {
   downloadBookingConfirmationPdf,
@@ -11,6 +12,7 @@ import {
   useCreateBooking,
   useCreateGuestCommunication,
   useCreateGuest,
+  useCreateWalkInBooking,
   useGuestCommunications,
   useGuestFolios,
   useGuestHistory,
@@ -102,6 +104,7 @@ const Bookings: React.FC = () => {
   const updateGuest = useUpdateGuest();
   const createCommunication = useCreateGuestCommunication();
   const createBooking = useCreateBooking();
+  const createWalkInBooking = useCreateWalkInBooking();
   const bookingAction = useBookingAction();
   const [activeTab, setActiveTab] = useState<BookingTab>((searchParams.get('tab') as BookingTab | null) || 'reservations');
   const [bookingFilter, setBookingFilter] = useState(searchParams.get('filter') || 'all');
@@ -315,13 +318,16 @@ const Bookings: React.FC = () => {
   const handleCreateBooking = (e: React.FormEvent) => {
     e.preventDefault();
     if (!bookingForm.guest) return;
-    createBooking.mutate(bookingForm, {
-      onSuccess: () => {
-        setBookingForm(emptyBooking);
-        setGuestSearch('');
-        setActiveTab('reservations');
-      },
-    });
+    const onSuccess = () => {
+      setBookingForm(emptyBooking);
+      setGuestSearch('');
+      setActiveTab('reservations');
+    };
+    if (bookingForm.status === 'checked_in') {
+      createWalkInBooking.mutate(bookingForm, { onSuccess });
+      return;
+    }
+    createBooking.mutate(bookingForm, { onSuccess });
   };
 
   const selectGuestForBooking = (guest: Guest) => {
@@ -1217,7 +1223,7 @@ const Bookings: React.FC = () => {
             </select>
             <select value={bookingForm.status} onChange={(e) => setBookingForm({ ...bookingForm, status: e.target.value as Booking['status'] })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
               <option value="confirmed">Confirmed</option>
-              <option value="checked_in">Checked in</option>
+              <option value="checked_in">Walk-in check-in</option>
             </select>
             <textarea placeholder="Special requests" value={bookingForm.special_requests} onChange={(e) => setBookingForm({ ...bookingForm, special_requests: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2" />
           </div>
@@ -1225,90 +1231,88 @@ const Bookings: React.FC = () => {
             <p className="text-sm text-slate-600">
               Estimated total: <span className="font-semibold text-slate-900">{formatMoney(estimatedTotal, settings?.currency)}</span>
             </p>
-            <button type="submit" disabled={!bookingForm.guest} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">
-              Create reservation
+            <button type="submit" disabled={!bookingForm.guest || createBooking.isPending || createWalkInBooking.isPending} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+              {bookingForm.status === 'checked_in' ? 'Check in walk-in' : 'Create reservation'}
             </button>
           </div>
-          {createBooking.isError && <p className="mt-3 text-sm text-red-600">Could not create reservation.</p>}
+          {(createBooking.isError || createWalkInBooking.isError) && <p className="mt-3 text-sm text-red-600">Could not create booking. Check dates, guest, and room availability.</p>}
         </form>
       )}
 
       {modificationBooking && (
-        <form onSubmit={handleModifyBooking} className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="md:col-span-2">
-              <p className="text-sm font-semibold text-slate-900">Modify reservation #{modificationBooking.id.slice(-8)}</p>
-              <p className="text-xs text-slate-500">
-                {modificationBooking.guest_details?.first_name} {modificationBooking.guest_details?.last_name} - Current room {modificationBooking.room_details?.room_number || '-'}
-              </p>
+        <ActionModal
+          title={`Modify reservation #${modificationBooking.id.slice(-8)}`}
+          description={`${modificationBooking.guest_details?.first_name || ''} ${modificationBooking.guest_details?.last_name || ''} - Current room ${modificationBooking.room_details?.room_number || '-'}`}
+          onClose={() => setModificationBooking(null)}
+        >
+          <form onSubmit={handleModifyBooking}>
+            <div className="grid gap-3 md:grid-cols-2">
+              <input
+                type="date"
+                value={modificationForm.check_in_date}
+                onChange={(e) => setModificationForm({ ...modificationForm, check_in_date: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                required
+              />
+              <input
+                type="date"
+                value={modificationForm.check_out_date}
+                onChange={(e) => setModificationForm({ ...modificationForm, check_out_date: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                required
+              />
+              <select
+                value={modificationForm.room}
+                onChange={(e) => setModificationForm({ ...modificationForm, room: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                required
+              >
+                <option value="">Select room</option>
+                {rooms?.map((room) => (
+                  <option key={room.id} value={room.id}>
+                    Room {room.room_number} - {room.room_type_name} - {formatMoney(room.price_per_night, settings?.currency)}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min="1"
+                value={modificationForm.number_of_guests}
+                onChange={(e) => setModificationForm({ ...modificationForm, number_of_guests: Number(e.target.value) })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                required
+              />
+              <textarea
+                value={modificationForm.special_requests}
+                onChange={(e) => setModificationForm({ ...modificationForm, special_requests: e.target.value })}
+                placeholder="Special requests"
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2"
+              />
             </div>
-            <input
-              type="date"
-              value={modificationForm.check_in_date}
-              onChange={(e) => setModificationForm({ ...modificationForm, check_in_date: e.target.value })}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              required
-            />
-            <input
-              type="date"
-              value={modificationForm.check_out_date}
-              onChange={(e) => setModificationForm({ ...modificationForm, check_out_date: e.target.value })}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              required
-            />
-            <select
-              value={modificationForm.room}
-              onChange={(e) => setModificationForm({ ...modificationForm, room: e.target.value })}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              required
-            >
-              <option value="">Select room</option>
-              {rooms?.map((room) => (
-                <option key={room.id} value={room.id}>
-                  Room {room.room_number} - {room.room_type_name} - {formatMoney(room.price_per_night, settings?.currency)}
-                </option>
-              ))}
-            </select>
-            <input
-              type="number"
-              min="1"
-              value={modificationForm.number_of_guests}
-              onChange={(e) => setModificationForm({ ...modificationForm, number_of_guests: Number(e.target.value) })}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              required
-            />
-            <textarea
-              value={modificationForm.special_requests}
-              onChange={(e) => setModificationForm({ ...modificationForm, special_requests: e.target.value })}
-              placeholder="Special requests"
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2"
-            />
-          </div>
-          <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
-            <button type="submit" className="rounded-xl bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800">
-              Save changes
-            </button>
-            <button type="button" onClick={() => setModificationBooking(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-              Close
-            </button>
-          </div>
-          {bookingAction.isError && <p className="mt-3 text-sm text-red-600">Could not modify reservation. Check the dates and room availability.</p>}
-        </form>
+            <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button type="button" onClick={() => setModificationBooking(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Cancel
+              </button>
+              <button type="submit" disabled={bookingAction.isPending} className="rounded-xl bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Save changes
+              </button>
+            </div>
+            {bookingAction.isError && <p className="mt-3 text-sm text-red-600">Could not modify reservation. Check the dates and room availability.</p>}
+          </form>
+        </ActionModal>
       )}
 
       {transferBooking && (
-        <form onSubmit={handleTransferRoom} className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="grid gap-3 md:grid-cols-[1fr_260px_auto] md:items-end">
-            <div>
-              <p className="text-sm font-semibold text-slate-900">Transfer room #{transferBooking.id.slice(-8)}</p>
-              <p className="text-xs text-slate-500">
-                Current room {transferBooking.room_details?.room_number || '-'} - Stay {transferBooking.check_in_date} to {transferBooking.check_out_date}
-              </p>
-            </div>
+        <ActionModal
+          title={`Transfer room #${transferBooking.id.slice(-8)}`}
+          description={`Current room ${transferBooking.room_details?.room_number || '-'} - Stay ${transferBooking.check_in_date} to ${transferBooking.check_out_date}`}
+          onClose={() => setTransferBooking(null)}
+        >
+          <form onSubmit={handleTransferRoom}>
             <select
               value={transferForm.room}
               onChange={(e) => setTransferForm({ room: e.target.value })}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
               required
             >
               <option value="">{transferRoomsLoading ? 'Checking rooms...' : 'Select available room'}</option>
@@ -1318,58 +1322,55 @@ const Bookings: React.FC = () => {
                 </option>
               ))}
             </select>
-            <div className="flex gap-2">
-              <button type="submit" className="rounded-xl bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800">
-                Confirm
-              </button>
+            <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
               <button type="button" onClick={() => setTransferBooking(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-                Close
+                Cancel
+              </button>
+              <button type="submit" disabled={bookingAction.isPending} className="rounded-xl bg-sky-700 px-4 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Transfer room
               </button>
             </div>
-          </div>
-          {bookingAction.isError && <p className="mt-3 text-sm text-red-600">Could not transfer room. The target room may no longer be available.</p>}
-        </form>
+            {bookingAction.isError && <p className="mt-3 text-sm text-red-600">Could not transfer room. The target room may no longer be available.</p>}
+          </form>
+        </ActionModal>
       )}
 
       {extensionBooking && (
-        <form onSubmit={handleExtendStay} className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="grid gap-3 md:grid-cols-[1fr_180px_auto] md:items-end">
-            <div>
-              <p className="text-sm font-semibold text-slate-900">Extend stay #{extensionBooking.id.slice(-8)}</p>
-              <p className="text-xs text-slate-500">
-                Current checkout {extensionBooking.check_out_date} - Room {extensionBooking.room_details?.room_number || '-'}
-              </p>
-            </div>
+        <ActionModal
+          title={`Extend stay #${extensionBooking.id.slice(-8)}`}
+          description={`Current checkout ${extensionBooking.check_out_date} - Room ${extensionBooking.room_details?.room_number || '-'}`}
+          onClose={() => setExtensionBooking(null)}
+        >
+          <form onSubmit={handleExtendStay}>
             <input
               type="date"
               min={extensionBooking.check_out_date}
               value={extensionForm.check_out_date}
               onChange={(e) => setExtensionForm({ check_out_date: e.target.value })}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
               required
             />
-            <div className="flex gap-2">
-              <button type="submit" className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
-                Confirm
-              </button>
+            <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
               <button type="button" onClick={() => setExtensionBooking(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-                Close
+                Cancel
+              </button>
+              <button type="submit" disabled={bookingAction.isPending} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Extend stay
               </button>
             </div>
-          </div>
-          {bookingAction.isError && <p className="mt-3 text-sm text-red-600">Could not extend stay. The room may be unavailable for the requested dates.</p>}
-        </form>
+            {bookingAction.isError && <p className="mt-3 text-sm text-red-600">Could not extend stay. The room may be unavailable for the requested dates.</p>}
+          </form>
+        </ActionModal>
       )}
 
       {checkoutBooking && (
-        <form onSubmit={handleCheckout} className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="grid gap-3 md:grid-cols-[1fr_180px_160px_auto] md:items-end">
-            <div>
-              <p className="text-sm font-semibold text-slate-900">Checkout #{checkoutBooking.id.slice(-8)}</p>
-              <p className="text-xs text-slate-500">
-                Total due {formatMoney(checkoutBooking.folio_details?.grand_total || checkoutBooking.total_amount, settings?.currency)}
-              </p>
-            </div>
+        <ActionModal
+          title={`Checkout #${checkoutBooking.id.slice(-8)}`}
+          description={`Total due ${formatMoney(checkoutBooking.folio_details?.grand_total || checkoutBooking.total_amount, settings?.currency)}`}
+          onClose={() => setCheckoutBooking(null)}
+        >
+          <form onSubmit={handleCheckout}>
+            <div className="grid gap-3 md:grid-cols-2">
             <select value={checkoutPayment.payment_method} onChange={(e) => setCheckoutPayment({ ...checkoutPayment, payment_method: e.target.value as CheckoutPaymentMethod })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
               {paymentMethods.map((method) => (
                 <option key={method.value} value={method.value}>
@@ -1378,17 +1379,18 @@ const Bookings: React.FC = () => {
               ))}
             </select>
             <input type="number" step="0.01" value={checkoutPayment.paid_amount} onChange={(e) => setCheckoutPayment({ ...checkoutPayment, paid_amount: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
-            <div className="flex gap-2">
-              <button type="submit" className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900">
-                Confirm
-              </button>
+            </div>
+            <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
               <button type="button" onClick={() => setCheckoutBooking(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-                Close
+                Cancel
+              </button>
+              <button type="submit" disabled={bookingAction.isPending} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Settle checkout
               </button>
             </div>
-          </div>
-          {bookingAction.isError && <p className="mt-3 text-sm text-red-600">Could not complete checkout.</p>}
-        </form>
+            {bookingAction.isError && <p className="mt-3 text-sm text-red-600">Could not complete checkout.</p>}
+          </form>
+        </ActionModal>
       )}
     </div>
   );

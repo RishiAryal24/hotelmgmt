@@ -21,6 +21,7 @@ import {
   useShifts,
   useUpdateEmployee,
 } from '../hooks/hrms';
+import { usePermissions } from '../hooks/permissions';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
 import { Attendance, Employee, PayrollPeriod, Shift } from '../types/hrms';
 import { downloadCsv } from '../utils/csv';
@@ -113,6 +114,7 @@ const HRMS = () => {
   const cancelPayrollRun = useCancelPayrollRun();
   const postPayrollRun = usePostPayrollRun();
   const settlePayrollRun = useSettlePayrollRun();
+  const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState<HRTab>('employees');
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [employeeForm, setEmployeeForm] = useState(emptyEmployee);
@@ -280,12 +282,14 @@ const HRMS = () => {
           <h1 className="mt-1 text-2xl font-semibold text-slate-900">HRMS</h1>
           <p className="mt-1 text-sm text-slate-600">Employee records, shifts, and daily attendance.</p>
         </div>
-        <button
-          onClick={() => setIsEmployeeModalOpen(true)}
-          className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-        >
-          Add employee
-        </button>
+        {can('hrms.employee.create') && (
+          <button
+            onClick={() => setIsEmployeeModalOpen(true)}
+            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+          >
+            Add employee
+          </button>
+        )}
       </div>
 
       <CompactTabs
@@ -294,7 +298,7 @@ const HRMS = () => {
           { id: 'attendance', label: 'Attendance', count: counts.presentToday },
           { id: 'shifts', label: 'Shifts', count: counts.shifts },
           { id: 'payroll', label: 'Payroll', count: counts.payrollRuns },
-          { id: 'create', label: 'New Employee' },
+          ...(can('hrms.employee.create') ? [{ id: 'create', label: 'New Employee' }] : []),
         ]}
         activeTab={activeTab}
         onChange={handleTabChange}
@@ -352,7 +356,7 @@ const HRMS = () => {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex justify-end gap-2">
-                          {employee.status !== 'on_leave' && employee.status !== 'terminated' && (
+                          {can('hrms.employee.create') && employee.status !== 'on_leave' && employee.status !== 'terminated' && (
                             <button
                               onClick={() => updateEmployee.mutate({ employeeId: employee.id, payload: { status: 'on_leave' } })}
                               className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50"
@@ -360,7 +364,7 @@ const HRMS = () => {
                               Leave
                             </button>
                           )}
-                          {employee.status !== 'active' && employee.status !== 'terminated' && (
+                          {can('hrms.employee.create') && employee.status !== 'active' && employee.status !== 'terminated' && (
                             <button
                               onClick={() => updateEmployee.mutate({ employeeId: employee.id, payload: { status: 'active' } })}
                               className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700"
@@ -381,7 +385,7 @@ const HRMS = () => {
 
       {activeTab === 'attendance' && (
         <section className="grid gap-4 xl:grid-cols-[360px_1fr]">
-          <form onSubmit={handleAttendanceSubmit} className="rounded-2xl border border-slate-200 bg-white p-4">
+          {can('hrms.attendance.create') && <form onSubmit={handleAttendanceSubmit} className="rounded-2xl border border-slate-200 bg-white p-4">
             <h2 className="text-base font-semibold text-slate-900">Schedule attendance</h2>
             <div className="mt-4 grid gap-3">
               <select value={attendanceForm.employee} onChange={(e) => setAttendanceForm({ ...attendanceForm, employee: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required>
@@ -410,7 +414,7 @@ const HRMS = () => {
                 Save attendance
               </button>
             </div>
-          </form>
+          </form>}
 
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
             <div className="border-b border-slate-100 px-4 py-3">
@@ -449,12 +453,12 @@ const HRMS = () => {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex justify-end gap-2">
-                          {!record.clock_in && (
+                          {can('hrms.attendance.create') && !record.clock_in && (
                             <button onClick={() => clockIn.mutate({ employee: record.employee, shift: record.shift, attendance_date: record.attendance_date })} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">
                               Clock in
                             </button>
                           )}
-                          {record.clock_in && !record.clock_out && (
+                          {can('hrms.attendance.create') && record.clock_in && !record.clock_out && (
                             <button onClick={() => clockOut.mutate(record.id)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
                               Clock out
                             </button>
@@ -473,7 +477,7 @@ const HRMS = () => {
 
       {activeTab === 'shifts' && (
         <section className="grid gap-4 xl:grid-cols-[360px_1fr]">
-          <form onSubmit={handleShiftSubmit} className="rounded-2xl border border-slate-200 bg-white p-4">
+          {can('hrms.shift.create') && <form onSubmit={handleShiftSubmit} className="rounded-2xl border border-slate-200 bg-white p-4">
             <h2 className="text-base font-semibold text-slate-900">Create shift</h2>
             <div className="mt-4 grid gap-3">
               <input placeholder="Shift name" value={shiftForm.name} onChange={(e) => setShiftForm({ ...shiftForm, name: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
@@ -494,7 +498,7 @@ const HRMS = () => {
                 Save shift
               </button>
             </div>
-          </form>
+          </form>}
 
           <div className="grid gap-3 md:grid-cols-2">
             {(shifts || []).map((shift) => (
@@ -528,7 +532,7 @@ const HRMS = () => {
       {activeTab === 'payroll' && (
         <section className="grid gap-4 xl:grid-cols-[360px_1fr]">
           <div className="space-y-4">
-            <form onSubmit={handlePayrollPeriodSubmit} className="rounded-2xl border border-slate-200 bg-white p-4">
+            {can('hrms.payroll.create') && <form onSubmit={handlePayrollPeriodSubmit} className="rounded-2xl border border-slate-200 bg-white p-4">
               <h2 className="text-base font-semibold text-slate-900">Create payroll period</h2>
               <div className="mt-4 grid gap-3">
                 <input placeholder="Period name" value={payrollPeriodForm.name} onChange={(e) => setPayrollPeriodForm({ ...payrollPeriodForm, name: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
@@ -541,7 +545,7 @@ const HRMS = () => {
                   Save period
                 </button>
               </div>
-            </form>
+            </form>}
 
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
               <h2 className="text-base font-semibold text-slate-900">Periods</h2>
@@ -552,9 +556,9 @@ const HRMS = () => {
                       <p className="text-sm font-medium text-slate-900">{period.name}</p>
                       <p className="text-xs text-slate-500">{period.start_date} to {period.end_date}</p>
                     </div>
-                    <button onClick={() => generatePayrollRun.mutate(period.id)} className="rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50">
+                    {can('hrms.payroll.create') && <button onClick={() => generatePayrollRun.mutate(period.id)} className="rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50">
                       Generate
-                    </button>
+                    </button>}
                   </div>
                 ))}
                 {(payrollPeriods || []).length === 0 && <p className="text-sm text-slate-600">No payroll periods yet.</p>}
@@ -589,7 +593,7 @@ const HRMS = () => {
                     </p>
                   </div>
                   <div className="flex gap-2">
-                    {['draft', 'approved'].includes(run.status) && (
+                    {can('hrms.payroll.create') && ['draft', 'approved'].includes(run.status) && (
                       <button
                         onClick={() => cancelPayrollRun.mutate(run.id)}
                         className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50"
@@ -597,19 +601,19 @@ const HRMS = () => {
                         Cancel
                       </button>
                     )}
-                    {run.status === 'draft' && (
+                    {can('hrms.payroll.approve') && run.status === 'draft' && (
                       <button onClick={() => approvePayrollRun.mutate(run.id)} className="rounded-lg border border-sky-200 px-3 py-1.5 text-xs font-medium text-sky-700 hover:bg-sky-50">
                         Approve
                       </button>
                     )}
-                    {run.status !== 'posted' && run.status !== 'paid' && (
+                    {can('hrms.payroll.post') && run.status !== 'posted' && run.status !== 'paid' && (
                       <button onClick={() => postPayrollRun.mutate(run.id)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">
                         Post
                       </button>
                     )}
                   </div>
                 </div>
-                {run.status === 'posted' && (
+                {can('hrms.payroll.post') && run.status === 'posted' && (
                   <div className="grid gap-3 border-b border-slate-100 p-4 md:grid-cols-[180px_1fr_auto]">
                     <select value={getSettlementForm(run.id).payment_method} onChange={(e) => updateSettlementForm(run.id, { payment_method: e.target.value as 'cash' | 'bank_transfer' | 'cheque' })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
                       <option value="bank_transfer">Bank Transfer</option>

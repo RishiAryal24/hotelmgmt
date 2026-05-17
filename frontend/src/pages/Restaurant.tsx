@@ -18,6 +18,7 @@ import {
   useRestaurantTables,
   useSettleRestaurantOrder,
 } from '../hooks/restaurant';
+import { usePermissions } from '../hooks/permissions';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
 import { MenuCategory, MenuItem, RestaurantOrder, RestaurantTable } from '../types/restaurant';
 
@@ -62,6 +63,7 @@ const Restaurant: React.FC = () => {
   const orderAction = useRestaurantOrderAction();
   const settleOrder = useSettleRestaurantOrder();
   const ticketAction = useKitchenTicketAction();
+  const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState('orders');
   const [categoryForm, setCategoryForm] = useState<Omit<MenuCategory, 'id'>>(emptyCategory);
   const [itemForm, setItemForm] = useState<Omit<MenuItem, 'id' | 'category_details' | 'inventory_item_details'>>(emptyItem);
@@ -175,7 +177,7 @@ const Restaurant: React.FC = () => {
 
       {activeTab === 'orders' && (
         <section className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <FormPanel title="New Order" onSubmit={handleCreateOrder}>
+          {can('restaurant.order.create') && <FormPanel title="New Order" onSubmit={handleCreateOrder}>
             <select value={orderForm.order_type} onChange={(e) => setOrderForm({ ...orderForm, order_type: e.target.value as typeof emptyOrder.order_type })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
               <option value="dine_in">Dine In</option><option value="takeaway">Takeaway</option><option value="room_service">Room Service</option>
             </select>
@@ -196,7 +198,7 @@ const Restaurant: React.FC = () => {
               </select>
             )}
             <textarea placeholder="Order notes" value={orderForm.notes} onChange={(e) => setOrderForm({ ...orderForm, notes: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2" />
-          </FormPanel>
+          </FormPanel>}
 
           <div className="rounded-3xl bg-white p-5 shadow-sm">
             <div className="overflow-x-auto">
@@ -227,10 +229,10 @@ const Restaurant: React.FC = () => {
                         </td>
                         <td className="py-3 pr-4">
                           <div className="flex flex-wrap gap-2">
-                            <button onClick={() => handleAddLine(order.id)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">Add</button>
-                            {order.lines.length > 0 && ['draft', 'sent_to_kitchen'].includes(order.status) && <button onClick={() => orderAction.mutate({ orderId: order.id, action: 'send_to_kitchen' })} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-medium text-white">Kitchen</button>}
-                            {['sent_to_kitchen', 'preparing'].includes(order.status) && <button onClick={() => orderAction.mutate({ orderId: order.id, action: 'mark_served' })} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-medium text-white">Served</button>}
-                            {order.status === 'served' && <button onClick={() => openSettleOrder(order)} className="rounded-xl bg-slate-800 px-3 py-2 text-xs font-medium text-white">Settle</button>}
+                            {can('restaurant.order.update') && <button onClick={() => handleAddLine(order.id)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">Add</button>}
+                            {can('restaurant.order.update') && order.lines.length > 0 && ['draft', 'sent_to_kitchen'].includes(order.status) && <button onClick={() => orderAction.mutate({ orderId: order.id, action: 'send_to_kitchen' })} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-medium text-white">Kitchen</button>}
+                            {can('restaurant.order.update') && ['sent_to_kitchen', 'preparing'].includes(order.status) && <button onClick={() => orderAction.mutate({ orderId: order.id, action: 'mark_served' })} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-medium text-white">Served</button>}
+                            {can('pos.sale.create') && order.status === 'served' && <button onClick={() => openSettleOrder(order)} className="rounded-xl bg-slate-800 px-3 py-2 text-xs font-medium text-white">Settle</button>}
                           </div>
                         </td>
                       </tr>
@@ -246,7 +248,7 @@ const Restaurant: React.FC = () => {
 
       {activeTab === 'menu' && (
         <section className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <FormPanel title="Add Menu Item" onSubmit={handleCreateItem}>
+          {can('restaurant.order.update') && <FormPanel title="Add Menu Item" onSubmit={handleCreateItem}>
             <select value={itemForm.category} onChange={(e) => setItemForm({ ...itemForm, category: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required>
               <option value="">Select Category</option>{categories?.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
             </select>
@@ -266,7 +268,7 @@ const Restaurant: React.FC = () => {
               <input type="file" accept="image/*" onChange={(e) => setItemImage(e.target.files?.[0] || null)} className="mt-2 w-full text-xs" />
               {itemImage && <span className="mt-1 block text-xs text-[#1F5E3B]">{itemImage.name}</span>}
             </label>
-          </FormPanel>
+          </FormPanel>}
           <RowsTable headers={['Picture', 'Item', 'Category', 'Price', 'Station', 'Inventory Deduction']}>
             {items?.map((item) => (
               <tr key={item.id}>
@@ -291,12 +293,12 @@ const Restaurant: React.FC = () => {
 
       {activeTab === 'categories' && (
         <section className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <FormPanel title="Add Category" onSubmit={handleCreateCategory}>
+          {can('restaurant.order.update') && <FormPanel title="Add Category" onSubmit={handleCreateCategory}>
             <input placeholder="Category Name" value={categoryForm.name} onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
             <input placeholder="Code" value={categoryForm.code} onChange={(e) => setCategoryForm({ ...categoryForm, code: e.target.value.toLowerCase().replace(/\s+/g, '_') })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
             <input type="number" placeholder="Display Order" value={categoryForm.display_order} onChange={(e) => setCategoryForm({ ...categoryForm, display_order: Number(e.target.value) })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
             <textarea placeholder="Description" value={categoryForm.description} onChange={(e) => setCategoryForm({ ...categoryForm, description: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-          </FormPanel>
+          </FormPanel>}
           <RowsTable headers={['Category', 'Code', 'Order', 'Active']}>
             {categories?.map((category) => <tr key={category.id}><td className="py-3 pr-4 font-medium text-slate-900">{category.name}</td><td className="py-3 pr-4">{category.code}</td><td className="py-3 pr-4">{category.display_order}</td><td className="py-3 pr-4">{category.is_active ? 'Yes' : 'No'}</td></tr>)}
             {categories?.length === 0 && <tr><td colSpan={4} className="py-6 text-center text-slate-500">No categories yet.</td></tr>}
@@ -306,14 +308,14 @@ const Restaurant: React.FC = () => {
 
       {activeTab === 'tables' && (
         <section className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <FormPanel title="Add Table" onSubmit={handleCreateTable}>
+          {can('restaurant.order.update') && <FormPanel title="Add Table" onSubmit={handleCreateTable}>
             <input placeholder="Table Number" value={tableForm.table_number} onChange={(e) => setTableForm({ ...tableForm, table_number: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
             <input placeholder="Section" value={tableForm.section} onChange={(e) => setTableForm({ ...tableForm, section: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
             <input type="number" placeholder="Capacity" value={tableForm.capacity} onChange={(e) => setTableForm({ ...tableForm, capacity: Number(e.target.value) })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
             <select value={tableForm.status} onChange={(e) => setTableForm({ ...tableForm, status: e.target.value as RestaurantTable['status'] })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
               <option value="available">Available</option><option value="reserved">Reserved</option><option value="occupied">Occupied</option><option value="cleaning">Cleaning</option><option value="inactive">Inactive</option>
             </select>
-          </FormPanel>
+          </FormPanel>}
           <RowsTable headers={['Table', 'Section', 'Capacity', 'Status', 'Active']}>
             {tables?.map((table) => <tr key={table.id}><td className="py-3 pr-4 font-medium text-slate-900">Table {table.table_number}</td><td className="py-3 pr-4">{table.section || '-'}</td><td className="py-3 pr-4">{table.capacity}</td><td className="py-3 pr-4">{table.status}</td><td className="py-3 pr-4">{table.is_active ? 'Yes' : 'No'}</td></tr>)}
             {tables?.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-slate-500">No tables yet.</td></tr>}
@@ -324,7 +326,7 @@ const Restaurant: React.FC = () => {
       {activeTab === 'kitchen' && (
         <RowsTable headers={['Ticket', 'Order', 'Station', 'Items', 'Status', 'Actions']}>
           {tickets?.map((ticket) => (
-            <tr key={ticket.id}><td className="py-3 pr-4 font-medium text-slate-900">{ticket.ticket_number}</td><td className="py-3 pr-4">{ticket.order_details?.order_number}</td><td className="py-3 pr-4">{ticket.station}</td><td className="py-3 pr-4">{ticket.lines.map((line) => `${line.quantity}x ${line.order_line_details?.menu_item_details?.name}`).join(', ')}</td><td className="py-3 pr-4">{ticket.status}</td><td className="py-3 pr-4"><div className="flex gap-2">{ticket.status === 'open' && <button onClick={() => ticketAction.mutate({ ticketId: ticket.id, action: 'start' })} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-medium text-white">Start</button>}{['open', 'preparing'].includes(ticket.status) && <button onClick={() => ticketAction.mutate({ ticketId: ticket.id, action: 'mark_ready' })} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-medium text-white">Ready</button>}</div></td></tr>
+            <tr key={ticket.id}><td className="py-3 pr-4 font-medium text-slate-900">{ticket.ticket_number}</td><td className="py-3 pr-4">{ticket.order_details?.order_number}</td><td className="py-3 pr-4">{ticket.station}</td><td className="py-3 pr-4">{ticket.lines.map((line) => `${line.quantity}x ${line.order_line_details?.menu_item_details?.name}`).join(', ')}</td><td className="py-3 pr-4">{ticket.status}</td><td className="py-3 pr-4"><div className="flex gap-2">{can('restaurant.kitchen.update') && ticket.status === 'open' && <button onClick={() => ticketAction.mutate({ ticketId: ticket.id, action: 'start' })} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-medium text-white">Start</button>}{can('restaurant.kitchen.update') && ['open', 'preparing'].includes(ticket.status) && <button onClick={() => ticketAction.mutate({ ticketId: ticket.id, action: 'mark_ready' })} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-medium text-white">Ready</button>}</div></td></tr>
           ))}
           {tickets?.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No kitchen tickets yet.</td></tr>}
         </RowsTable>

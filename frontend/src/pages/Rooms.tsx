@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
 import { useCreateRoom, useCreateRoomType, useRoomTypes, useRooms } from '../hooks/bookings';
+import { usePermissions } from '../hooks/permissions';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
 import { Room, RoomType } from '../types/bookings';
 
@@ -35,6 +36,7 @@ const Rooms: React.FC = () => {
   const { data: settings } = useQuery({ queryKey: ['tenant-settings'], queryFn: getTenantSettings });
   const createRoom = useCreateRoom();
   const createRoomType = useCreateRoomType();
+  const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState('rooms');
   const [isCreateRoomOpen, setIsCreateRoomOpen] = useState(false);
   const [isCreateTypeOpen, setIsCreateTypeOpen] = useState(false);
@@ -92,8 +94,7 @@ const Rooms: React.FC = () => {
   const tabs = [
     { id: 'rooms', label: 'Rooms', count: rooms?.length || 0 },
     { id: 'types', label: 'Room Types', count: roomTypes?.length || 0 },
-    { id: 'create-room', label: 'Add Room' },
-    { id: 'create-type', label: 'Add Type' },
+    ...(can('rooms.room.update') ? [{ id: 'create-room', label: 'Add Room' }, { id: 'create-type', label: 'Add Type' }] : []),
   ];
   const roomStatusCounts = {
     available: rooms?.filter((room) => room.status === 'available').length || 0,

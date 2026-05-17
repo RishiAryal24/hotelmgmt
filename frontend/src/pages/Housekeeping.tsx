@@ -4,6 +4,7 @@ import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
 import { useRooms } from '../hooks/bookings';
 import { useCreateHousekeepingTask, useHousekeepingAction, useHousekeepingTasks } from '../hooks/housekeeping';
+import { usePermissions } from '../hooks/permissions';
 import { HousekeepingTask } from '../types/housekeeping';
 
 const taskTypeLabels: Record<HousekeepingTask['task_type'], string> = {
@@ -43,6 +44,7 @@ const Housekeeping: React.FC = () => {
   const { data: rooms } = useRooms();
   const createTask = useCreateHousekeepingTask();
   const taskAction = useHousekeepingAction();
+  const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState<HousekeepingTab>((searchParams.get('status') as HousekeepingTab | null) || 'open');
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
   const [escalationTask, setEscalationTask] = useState<HousekeepingTask | null>(null);
@@ -138,12 +140,14 @@ const Housekeeping: React.FC = () => {
           <h1 className="mt-1 text-2xl font-semibold text-slate-900">Housekeeping</h1>
           <p className="mt-1 text-sm text-slate-600">Track room readiness, cleaning queues, and maintenance escalations.</p>
         </div>
-        <button
-          onClick={() => setIsCreateTaskOpen(true)}
-          className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-        >
-          Create task
-        </button>
+        {can('housekeeping.task.update') && (
+          <button
+            onClick={() => setIsCreateTaskOpen(true)}
+            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+          >
+            Create task
+          </button>
+        )}
       </div>
 
       <CompactTabs
@@ -152,7 +156,7 @@ const Housekeeping: React.FC = () => {
           { id: 'in_progress', label: 'In Progress', count: counts.in_progress },
           { id: 'blocked', label: 'Blocked', count: counts.blocked },
           { id: 'done', label: 'Done', count: counts.done },
-          { id: 'create', label: 'New Task' },
+          ...(can('housekeeping.task.update') ? [{ id: 'create', label: 'New Task' }] : []),
         ]}
         activeTab={activeTab}
         onChange={handleTabChange}
@@ -206,7 +210,7 @@ const Housekeeping: React.FC = () => {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
-                        {['open', 'blocked'].includes(task.status) && (
+                        {can('housekeeping.task.update') && ['open', 'blocked'].includes(task.status) && (
                           <button
                             onClick={() => taskAction.mutate({ taskId: task.id, action: 'start' })}
                             className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700"
@@ -214,7 +218,7 @@ const Housekeeping: React.FC = () => {
                             Start
                           </button>
                         )}
-                        {task.status !== 'done' && (
+                        {can('housekeeping.task.update') && task.status !== 'done' && (
                           <>
                             <button
                               onClick={() => taskAction.mutate({ taskId: task.id, action: 'complete' })}

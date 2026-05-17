@@ -20,6 +20,7 @@ import {
   useRooms,
   useUpdateGuest,
 } from '../hooks/bookings';
+import { usePermissions } from '../hooks/permissions';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
 import { Booking, Guest, GuestCommunication, GuestFolio } from '../types/bookings';
 
@@ -106,6 +107,7 @@ const Bookings: React.FC = () => {
   const createBooking = useCreateBooking();
   const createWalkInBooking = useCreateWalkInBooking();
   const bookingAction = useBookingAction();
+  const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState<BookingTab>((searchParams.get('tab') as BookingTab | null) || 'reservations');
   const [bookingFilter, setBookingFilter] = useState(searchParams.get('filter') || 'all');
   const [checkoutBooking, setCheckoutBooking] = useState<Booking | null>(null);
@@ -301,7 +303,7 @@ const Bookings: React.FC = () => {
     { id: 'guests', label: 'Guests', count: guests?.length || 0 },
     { id: 'availability', label: 'Availability' },
     { id: 'folios', label: 'Folios', count: bookingCounts.openFolios },
-    { id: 'new', label: 'New Booking' },
+    ...(can('bookings.reservation.create') ? [{ id: 'new', label: 'New Booking' }] : []),
   ];
 
   const handleCreateGuest = (e: React.FormEvent) => {
@@ -597,7 +599,7 @@ const Bookings: React.FC = () => {
                         >
                           PDF
                         </button>
-                        {booking.status === 'confirmed' && (
+                        {booking.status === 'confirmed' && can('bookings.reservation.create') && (
                           <>
                             <button
                               onClick={() => openModification(booking)}
@@ -619,26 +621,32 @@ const Bookings: React.FC = () => {
                             </button>
                           </>
                         )}
-                        {booking.status === 'checked_in' && (
+                        {booking.status === 'checked_in' && can(['bookings.reservation.create', 'bookings.reservation.check_out']) && (
                           <>
-                            <button
-                              onClick={() => openExtension(booking)}
-                              className="rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
-                            >
-                              Extend
-                            </button>
-                            <button
-                              onClick={() => openTransfer(booking)}
-                              className="rounded-lg border border-sky-200 px-3 py-1.5 text-xs font-medium text-sky-700 hover:bg-sky-50"
-                            >
-                              Transfer
-                            </button>
-                            <button
-                              onClick={() => openCheckout(booking)}
-                              className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900"
-                            >
-                              Check out
-                            </button>
+                            {can('bookings.reservation.create') && (
+                              <>
+                                <button
+                                  onClick={() => openExtension(booking)}
+                                  className="rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+                                >
+                                  Extend
+                                </button>
+                                <button
+                                  onClick={() => openTransfer(booking)}
+                                  className="rounded-lg border border-sky-200 px-3 py-1.5 text-xs font-medium text-sky-700 hover:bg-sky-50"
+                                >
+                                  Transfer
+                                </button>
+                              </>
+                            )}
+                            {can('bookings.reservation.check_out') && (
+                              <button
+                                onClick={() => openCheckout(booking)}
+                                className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900"
+                              >
+                                Check out
+                              </button>
+                            )}
                           </>
                         )}
                       </div>
@@ -654,7 +662,7 @@ const Bookings: React.FC = () => {
 
       {activeTab === 'guests' && (
         <section className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
-          <form onSubmit={handleCreateGuest} className="rounded-2xl border border-slate-200 bg-white p-4">
+          {can('bookings.reservation.create') && <form onSubmit={handleCreateGuest} className="rounded-2xl border border-slate-200 bg-white p-4">
             <h2 className="text-sm font-semibold text-slate-900">Add Guest</h2>
             <div className="mt-3 grid gap-3">
               <input placeholder="First name" value={guestForm.first_name} onChange={(e) => setGuestForm({ ...guestForm, first_name: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
@@ -681,7 +689,7 @@ const Bookings: React.FC = () => {
             <button type="submit" className="mt-3 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
               Save guest
             </button>
-          </form>
+          </form>}
 
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
             <table className="w-full text-left text-sm">
@@ -724,7 +732,7 @@ const Bookings: React.FC = () => {
                 <p className="text-sm text-slate-600">Loading guest profile...</p>
               ) : (
                 <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
-                  <form onSubmit={handleUpdateGuestProfile} className="space-y-3">
+                  {can('bookings.reservation.create') ? <form onSubmit={handleUpdateGuestProfile} className="space-y-3">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Guest profile</p>
                       <h2 className="mt-1 text-xl font-semibold text-slate-900">
@@ -747,7 +755,16 @@ const Bookings: React.FC = () => {
                       Save profile
                     </button>
                     {updateGuest.isError && <p className="text-sm text-red-600">Could not update guest profile.</p>}
-                  </form>
+                  </form> : (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Guest profile</p>
+                      <h2 className="mt-1 text-xl font-semibold text-slate-900">
+                        {guestHistory.guest.first_name} {guestHistory.guest.last_name}
+                      </h2>
+                      <p className="text-sm text-slate-500">{guestHistory.guest.email}</p>
+                      <p className="mt-3 text-sm text-slate-600">{guestHistory.guest.notes || 'No internal notes recorded.'}</p>
+                    </div>
+                  )}
 
                   <div className="space-y-4">
                     <div className="grid gap-3 md:grid-cols-4">
@@ -764,7 +781,7 @@ const Bookings: React.FC = () => {
                       ))}
                     </div>
                     <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-                      <form onSubmit={handleCreateCommunication} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                      {can('bookings.reservation.create') && <form onSubmit={handleCreateCommunication} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
                         <h3 className="text-sm font-semibold text-slate-900">Log communication</h3>
                         <div className="mt-3 grid gap-2">
                           <select
@@ -834,7 +851,7 @@ const Bookings: React.FC = () => {
                           </button>
                           {createCommunication.isError && <p className="text-sm text-red-600">Could not save communication.</p>}
                         </div>
-                      </form>
+                      </form>}
                       <div className="rounded-xl border border-slate-100 bg-white p-3">
                         <div className="flex items-center justify-between">
                           <h3 className="text-sm font-semibold text-slate-900">Communication timeline</h3>
@@ -954,9 +971,11 @@ const Bookings: React.FC = () => {
           <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-[1fr_1fr_auto]">
             <input type="date" value={availabilityRange.check_in_date} onChange={(e) => setAvailabilityRange({ ...availabilityRange, check_in_date: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
             <input type="date" value={availabilityRange.check_out_date} onChange={(e) => setAvailabilityRange({ ...availabilityRange, check_out_date: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-            <button type="button" onClick={() => setActiveTab('new')} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900">
-              New booking
-            </button>
+            {can('bookings.reservation.create') && (
+              <button type="button" onClick={() => setActiveTab('new')} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900">
+                New booking
+              </button>
+            )}
           </div>
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
             <table className="w-full text-left text-sm">
@@ -1036,7 +1055,7 @@ const Bookings: React.FC = () => {
         </section>
       )}
 
-      {activeTab === 'new' && (
+      {activeTab === 'new' && can('bookings.reservation.create') && (
         <form onSubmit={handleCreateBooking} className="rounded-2xl border border-slate-200 bg-white p-4">
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-3 md:col-span-2">

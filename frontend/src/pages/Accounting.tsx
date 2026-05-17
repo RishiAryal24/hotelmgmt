@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
 import { useAccounts, useCreateJournalEntry, useJournalEntries, useSeedAccounts } from '../hooks/accounting';
+import { usePermissions } from '../hooks/permissions';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
 import { JournalEntry } from '../types/accounting';
 
@@ -73,6 +74,7 @@ const Accounting = () => {
   const { data: journalEntries, isLoading: entriesLoading } = useJournalEntries();
   const seedAccounts = useSeedAccounts();
   const createJournalEntry = useCreateJournalEntry();
+  const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState<AccountingTab>('summary');
   const [isJournalModalOpen, setIsJournalModalOpen] = useState(false);
   const [journalEntryForm, setJournalEntryForm] = useState<JournalEntryForm>(emptyJournalEntry);
@@ -155,18 +157,22 @@ const Accounting = () => {
           <p className="mt-1 text-sm text-slate-600">Review chart of accounts and journal activity in compact rows.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setIsJournalModalOpen(true)}
-            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-          >
-            New journal
-          </button>
-          <button
-            onClick={() => seedAccounts.mutate()}
-            className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Seed accounts
-          </button>
+          {can('accounting.journal.create') && (
+            <button
+              onClick={() => setIsJournalModalOpen(true)}
+              className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+            >
+              New journal
+            </button>
+          )}
+          {can('accounting.journal.create') && (
+            <button
+              onClick={() => seedAccounts.mutate()}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Seed accounts
+            </button>
+          )}
         </div>
       </div>
 
@@ -175,7 +181,7 @@ const Accounting = () => {
           { id: 'summary', label: 'Summary' },
           { id: 'journals', label: 'Journals', count: journalEntries?.length || 0 },
           { id: 'accounts', label: 'Accounts', count: totals.activeAccounts },
-          { id: 'create', label: 'Create Entry' },
+          ...(can('accounting.journal.create') ? [{ id: 'create', label: 'Create Entry' }] : []),
         ]}
         activeTab={activeTab}
         onChange={handleTabChange}

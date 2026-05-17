@@ -4,6 +4,7 @@ import { useFormik } from 'formik';
 import * as yup from 'yup';
 import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
+import { usePermissions } from '../hooks/permissions';
 import apiClient from '../services/api';
 import { AuthRole, AuthUser } from '../services/auth';
 
@@ -31,6 +32,7 @@ const Staff = () => {
   const { data: roles, isLoading: rolesLoading } = useQuery({ queryKey: ['roles'], queryFn: fetchRoles });
   const [activeTab, setActiveTab] = useState<StaffTab>('staff');
   const [isCreateStaffOpen, setIsCreateStaffOpen] = useState(false);
+  const { can } = usePermissions();
 
   const mutation = useMutation({
     mutationFn: async (payload: { email: string; full_name: string; password: string; role_ids: string[] }) => {
@@ -93,19 +95,21 @@ const Staff = () => {
           <h1 className="mt-1 text-2xl font-semibold text-slate-900">Staff & Roles</h1>
           <p className="mt-1 text-sm text-slate-600">Create staff accounts and review role assignments in compact rows.</p>
         </div>
-        <button
-          onClick={() => setIsCreateStaffOpen(true)}
-          className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-        >
-          Create staff
-        </button>
+        {can('users.staff.create') && (
+          <button
+            onClick={() => setIsCreateStaffOpen(true)}
+            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+          >
+            Create staff
+          </button>
+        )}
       </div>
 
       <CompactTabs
         tabs={[
           { id: 'staff', label: 'Staff', count: counts.staff },
           { id: 'roles', label: 'Roles', count: counts.roles },
-          { id: 'create', label: 'New Staff' },
+          ...(can('users.staff.create') ? [{ id: 'create', label: 'New Staff' }] : []),
         ]}
         activeTab={activeTab}
         onChange={handleTabChange}

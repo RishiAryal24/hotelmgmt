@@ -15,6 +15,7 @@ import {
   useStockMovements,
   useVendors,
 } from '../hooks/inventory';
+import { usePermissions } from '../hooks/permissions';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
 import { InventoryItem, PurchaseOrder, Vendor } from '../types/inventory';
 
@@ -62,6 +63,7 @@ const Inventory: React.FC = () => {
   const adjustStock = useAdjustStock();
   const createPurchaseOrder = useCreatePurchaseOrder();
   const purchaseOrderAction = usePurchaseOrderAction();
+  const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState('overview');
   const [vendorForm, setVendorForm] = useState<Omit<Vendor, 'id'>>(emptyVendor);
   const [itemForm, setItemForm] = useState<Omit<InventoryItem, 'id' | 'current_stock' | 'is_low_stock'>>(emptyItem);
@@ -94,9 +96,9 @@ const Inventory: React.FC = () => {
     { id: 'items', label: 'Items', count: items?.length || 0 },
     { id: 'vendors', label: 'Vendors', count: vendors?.length || 0 },
     { id: 'purchase-orders', label: 'Purchase Orders', count: openPurchaseOrders + unpaidPurchaseOrders },
-    { id: 'receive', label: 'Receive' },
+    ...(can('inventory.purchase.create') ? [{ id: 'receive', label: 'Receive' }] : []),
     { id: 'movements', label: 'Movements', count: movements?.length || 0 },
-    { id: 'adjust', label: 'Adjust' },
+    ...(can('inventory.purchase.create') ? [{ id: 'adjust', label: 'Adjust' }] : []),
   ];
 
   const handleCreateVendor = (e: React.FormEvent) => {
@@ -240,7 +242,7 @@ const Inventory: React.FC = () => {
                 <h2 className="text-lg font-bold text-slate-900">Reorder Alerts</h2>
                 <p className="text-sm text-slate-500">Items at or below reorder level, ready for purchase receiving.</p>
               </div>
-              <button
+              {can('inventory.purchase.create') && <button
                 onClick={() => {
                   const firstItem = lowStockItems[0];
                   if (firstItem) {
@@ -252,7 +254,7 @@ const Inventory: React.FC = () => {
                 disabled={!lowStockItems.length}
               >
                 Receive selected
-              </button>
+              </button>}
             </div>
             <InventoryItemsTable items={lowStockItems} currency={settings?.currency} />
           </div>
@@ -269,22 +271,22 @@ const Inventory: React.FC = () => {
 
       {activeTab === 'items' && (
         <section className="rounded-3xl bg-white p-5 shadow-sm">
-          <div className="mb-4 flex justify-end">
+          {can('inventory.purchase.create') && <div className="mb-4 flex justify-end">
             <button type="button" onClick={() => setIsItemModalOpen(true)} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
               Add item
             </button>
-          </div>
+          </div>}
             <InventoryItemsTable items={items || []} currency={settings?.currency} />
         </section>
       )}
 
       {activeTab === 'vendors' && (
         <section className="rounded-3xl bg-white p-5 shadow-sm">
-          <div className="mb-4 flex justify-end">
+          {can('inventory.purchase.create') && <div className="mb-4 flex justify-end">
             <button type="button" onClick={() => setIsVendorModalOpen(true)} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
               Add vendor
             </button>
-          </div>
+          </div>}
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px] text-left text-sm">
                 <thead className="border-b border-slate-200 text-xs uppercase text-slate-500"><tr><th className="py-3 pr-4">Vendor</th><th className="py-3 pr-4">Contact</th><th className="py-3 pr-4">Tax No.</th><th className="py-3 pr-4">Status</th></tr></thead>
@@ -305,9 +307,9 @@ const Inventory: React.FC = () => {
             <div className="mb-4">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <h2 className="font-bold text-slate-900">Purchase Orders</h2>
-              <button type="button" onClick={() => setIsPurchaseOrderModalOpen(true)} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
+              {can('inventory.purchase.create') && <button type="button" onClick={() => setIsPurchaseOrderModalOpen(true)} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
                 Create PO
-              </button>
+              </button>}
               </div>
               <p className="text-sm text-slate-500">Order, receive stock, then pay vendor bills from one queue.</p>
             </div>
@@ -334,16 +336,16 @@ const Inventory: React.FC = () => {
                       </td>
                       <td className="py-3 pr-4">
                         <div className="flex justify-end gap-2">
-                          {order.status === 'draft' && (
+                          {can('inventory.purchase.create') && order.status === 'draft' && (
                             <button onClick={() => purchaseOrderAction.mutate({ purchaseOrderId: order.id, action: 'submit' })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">Order</button>
                           )}
-                          {['draft', 'ordered'].includes(order.status) && (
+                          {can('inventory.purchase.create') && ['draft', 'ordered'].includes(order.status) && (
                             <>
                               <button onClick={() => purchaseOrderAction.mutate({ purchaseOrderId: order.id, action: 'receive' })} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700">Receive</button>
                               <button onClick={() => purchaseOrderAction.mutate({ purchaseOrderId: order.id, action: 'cancel' })} className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50">Cancel</button>
                             </>
                           )}
-                          {order.status === 'received' && order.payment_status === 'unpaid' && (
+                          {can('inventory.purchase.create') && order.status === 'received' && order.payment_status === 'unpaid' && (
                             <>
                               <button onClick={() => purchaseOrderAction.mutate({ purchaseOrderId: order.id, action: 'pay', payload: { payment_method: 'cash' } })} className="rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50">Pay cash</button>
                               <button onClick={() => purchaseOrderAction.mutate({ purchaseOrderId: order.id, action: 'pay', payload: { payment_method: 'bank' } })} className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900">Pay bank</button>

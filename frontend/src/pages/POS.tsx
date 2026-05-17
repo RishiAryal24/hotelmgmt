@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useBookings } from '../hooks/bookings';
+import { usePermissions } from '../hooks/permissions';
 import { useRestaurantOrders, useSettleRestaurantOrder } from '../hooks/restaurant';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
 import { RestaurantOrder } from '../types/restaurant';
@@ -18,6 +19,7 @@ const POS: React.FC = () => {
   const { data: orders, isLoading, error } = useRestaurantOrders();
   const { data: bookings } = useBookings();
   const settleOrder = useSettleRestaurantOrder();
+  const { can } = usePermissions();
   const [paymentForms, setPaymentForms] = useState<
     Record<string, { payment_method: RestaurantOrder['payment_method']; paid_amount: string; booking?: string }>
   >({});
@@ -118,20 +120,22 @@ const POS: React.FC = () => {
                         ))}
                       </select>
                     )}
-                    <button
-                      onClick={() =>
-                        settleOrder.mutate({
-                          orderId: order.id,
-                          payment_method: form.payment_method,
-                          paid_amount: form.paid_amount,
-                          booking: form.booking,
-                        })
-                      }
-                      disabled={form.payment_method === 'room_posting' && !form.booking}
-                      className="mt-3 w-full rounded-xl bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-                    >
-                      Settle Bill
-                    </button>
+                    {can('pos.sale.create') && (
+                      <button
+                        onClick={() =>
+                          settleOrder.mutate({
+                            orderId: order.id,
+                            payment_method: form.payment_method,
+                            paid_amount: form.paid_amount,
+                            booking: form.booking,
+                          })
+                        }
+                        disabled={form.payment_method === 'room_posting' && !form.booking}
+                        className="mt-3 w-full rounded-xl bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+                      >
+                        Settle Bill
+                      </button>
+                    )}
                   </div>
                 </div>
               </article>

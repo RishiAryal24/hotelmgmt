@@ -3,6 +3,7 @@ import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
 import { useRooms } from '../hooks/bookings';
 import { useCreateMaintenanceTicket, useMaintenanceAction, useMaintenanceTickets } from '../hooks/maintenance';
+import { usePermissions } from '../hooks/permissions';
 import { MaintenanceTicket } from '../types/maintenance';
 
 const categoryLabels: Record<MaintenanceTicket['category'], string> = {
@@ -46,6 +47,7 @@ const Maintenance: React.FC = () => {
   const { data: rooms } = useRooms();
   const createTicket = useCreateMaintenanceTicket();
   const ticketAction = useMaintenanceAction();
+  const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState<MaintenanceTab>('open');
   const [isCreateTicketOpen, setIsCreateTicketOpen] = useState(false);
   const [resolvingTicket, setResolvingTicket] = useState<MaintenanceTicket | null>(null);
@@ -127,12 +129,14 @@ const Maintenance: React.FC = () => {
           <h1 className="mt-1 text-2xl font-semibold text-slate-900">Maintenance</h1>
           <p className="mt-1 text-sm text-slate-600">Manage room downtime, repair tickets, and housekeeping escalations.</p>
         </div>
-        <button
-          onClick={() => setIsCreateTicketOpen(true)}
-          className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-        >
-          New ticket
-        </button>
+        {can('maintenance.ticket.update') && (
+          <button
+            onClick={() => setIsCreateTicketOpen(true)}
+            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+          >
+            New ticket
+          </button>
+        )}
       </div>
 
       <div className="grid gap-3 md:grid-cols-3">
@@ -155,7 +159,7 @@ const Maintenance: React.FC = () => {
           { id: 'resolved', label: 'Resolved', count: counts.resolved },
           { id: 'closed', label: 'Closed', count: counts.closed },
           { id: 'canceled', label: 'Canceled', count: counts.canceled },
-          { id: 'create', label: 'New Ticket' },
+          ...(can('maintenance.ticket.update') ? [{ id: 'create', label: 'New Ticket' }] : []),
         ]}
         activeTab={activeTab}
         onChange={handleTabChange}
@@ -216,7 +220,7 @@ const Maintenance: React.FC = () => {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
-                        {ticket.status === 'open' && (
+                        {can('maintenance.ticket.update') && ticket.status === 'open' && (
                           <button
                             onClick={() => ticketAction.mutate({ ticketId: ticket.id, action: 'start' })}
                             className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700"
@@ -224,7 +228,7 @@ const Maintenance: React.FC = () => {
                             Start
                           </button>
                         )}
-                        {['open', 'in_progress'].includes(ticket.status) && (
+                        {can('maintenance.ticket.update') && ['open', 'in_progress'].includes(ticket.status) && (
                           <>
                             <button
                               onClick={() => {
@@ -243,7 +247,7 @@ const Maintenance: React.FC = () => {
                             </button>
                           </>
                         )}
-                        {ticket.status === 'resolved' && (
+                        {can('maintenance.ticket.update') && ticket.status === 'resolved' && (
                           <button
                             onClick={() => ticketAction.mutate({ ticketId: ticket.id, action: 'close' })}
                             className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"

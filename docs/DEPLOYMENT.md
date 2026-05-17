@@ -195,8 +195,8 @@ The repository includes `vercel.json` for the React/Vite frontend.
 
 Vercel build behavior:
 
-- Install command: `cd frontend && npm ci`
-- Build command: `cd frontend && npm run build`
+- Install command: `npm ci --prefix frontend`
+- Build command: `npm run build --prefix frontend`
 - Output directory: `frontend/dist`
 - SPA routing is handled by rewriting all routes to `index.html`.
 

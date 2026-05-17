@@ -152,6 +152,79 @@ Purpose:
 - UI review.
 - API smoke tests.
 
+## Backend Production Environment
+
+Required backend variables:
+
+- `DJANGO_SECRET_KEY`: strong generated secret.
+- `DJANGO_DEBUG`: `False`.
+- `DJANGO_ALLOWED_HOSTS`: backend hostnames, comma-separated.
+- `DATABASE_URL`: managed PostgreSQL connection string.
+- `DJANGO_STATICFILES_STORAGE`: `whitenoise.storage.CompressedManifestStaticFilesStorage`.
+- `DJANGO_SERVE_LOCAL_STATIC`: `False`.
+- `CSRF_TRUSTED_ORIGINS`: HTTPS backend origins, comma-separated.
+- `CORS_ALLOW_ALL_ORIGINS`: `True` for early previews, then replace with explicit origins.
+
+Tenant bootstrap variables for first deploy/demo data:
+
+- `BOOTSTRAP_TENANT_NAME`
+- `BOOTSTRAP_TENANT_DOMAIN`
+- `BOOTSTRAP_TENANT_ADMIN_EMAIL`
+- `BOOTSTRAP_TENANT_ADMIN_PASSWORD`
+- `BOOTSTRAP_TENANT_CURRENCY`
+
+Frontend variables:
+
+- `VITE_API_BASE_URL`: deployed backend API root, for example `https://hotelmgmt-backend.onrender.com/api/v1`.
+
+## Production Smoke Checklist
+
+Run these checks after every first deploy or config change:
+
+1. Backend health returns `200`:
+
+   ```text
+   https://<backend-host>/healthz/
+   ```
+
+2. Django admin login page loads without a `500`:
+
+   ```text
+   https://<backend-host>/admin/login/?next=/admin/
+   ```
+
+3. API documentation loads:
+
+   ```text
+   https://<backend-host>/api/v1/docs/
+   ```
+
+4. Login API returns tokens for the bootstrap admin:
+
+   ```http
+   POST https://<backend-host>/api/v1/auth/login/
+   {
+     "email": "<bootstrap-admin-email>",
+     "password": "<bootstrap-admin-password>"
+   }
+   ```
+
+5. Tenant-scoped API returns data when called with the tenant domain header:
+
+   ```text
+   GET https://<backend-host>/api/v1/bookings/rooms/
+   Authorization: Bearer <access-token>
+   X-Tenant-Domain: <bootstrap-tenant-domain>
+   ```
+
+6. Frontend loads and reaches the deployed backend:
+
+   ```text
+   https://<frontend-host>/
+   ```
+
+7. Frontend login succeeds and dashboard requests return `200`.
+
 ### Cloud Preview With Longer-Lived Database
 
 - Vercel frontend.

@@ -108,23 +108,32 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'hotelmgmt.wsgi.application'
 
+POSTGRES_ENGINE = 'hotelmgmt.postgresql_backend'
+RUNNING_IN_DOCKER = os.path.exists('/.dockerenv') or os.environ.get('RUNNING_IN_DOCKER', '').lower() in ['true', '1', 'yes']
+
+postgres_host = os.environ.get('POSTGRES_HOST')
+if not postgres_host:
+    postgres_host = 'db' if RUNNING_IN_DOCKER else '127.0.0.1'
+elif postgres_host == 'db' and not RUNNING_IN_DOCKER:
+    postgres_host = '127.0.0.1'
+
 DATABASE_URL = os.environ.get('DATABASE_URL')
 if DATABASE_URL:
     DATABASES = {
         'default': dj_database_url.parse(
             DATABASE_URL,
-            engine='django_tenants.postgresql_backend',
+            engine=POSTGRES_ENGINE,
             conn_max_age=600,
         )
     }
 else:
     DATABASES = {
         'default': {
-            'ENGINE': 'django_tenants.postgresql_backend',
+            'ENGINE': POSTGRES_ENGINE,
             'NAME': os.environ.get('POSTGRES_DB', 'hotelmgmt'),
             'USER': os.environ.get('POSTGRES_USER', 'hotelmgmt_user'),
             'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'hotelmgmt_pass'),
-            'HOST': os.environ.get('POSTGRES_HOST', 'db'),
+            'HOST': postgres_host,
             'PORT': os.environ.get('POSTGRES_PORT', '5432'),
         }
     }
@@ -165,7 +174,14 @@ USE_TZ = True
 
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+STATICFILES_STORAGE = os.environ.get(
+    'DJANGO_STATICFILES_STORAGE',
+    'django.contrib.staticfiles.storage.StaticFilesStorage',
+)
+SERVE_LOCAL_STATIC = os.environ.get(
+    'DJANGO_SERVE_LOCAL_STATIC',
+    'False' if DATABASE_URL else 'True',
+).lower() in ['true', '1', 'yes']
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 

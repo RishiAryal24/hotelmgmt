@@ -1,6 +1,6 @@
 $root = Split-Path -Parent $PSScriptRoot
 
-$env:DJANGO_DEBUG = "False"
+$env:DJANGO_DEBUG = "True"
 $env:POSTGRES_HOST = "127.0.0.1"
 $env:POSTGRES_PORT = "5432"
 $env:POSTGRES_DB = "hotelmgmt"
@@ -16,4 +16,3 @@ $env:BOOTSTRAP_TENANT_DOMAIN = "local.hotel.test"
 $env:BOOTSTRAP_TENANT_ADMIN_EMAIL = "admin@local.test"
 $env:BOOTSTRAP_TENANT_ADMIN_PASSWORD = "AdminPass12345"
 $env:BOOTSTRAP_TENANT_CURRENCY = "NPR"
-

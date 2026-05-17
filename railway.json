@@ -16,7 +16,9 @@
   ],
   "env": {
     "DJANGO_SECRET_KEY": "",
-    "DJANGO_DEBUG": "True",
+    "DJANGO_DEBUG": "False",
+    "DJANGO_STATICFILES_STORAGE": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    "DJANGO_SERVE_LOCAL_STATIC": "False",
     "DJANGO_ALLOWED_HOSTS": "*",
     "DATABASE_URL": "",
     "VITE_API_BASE_URL": "",

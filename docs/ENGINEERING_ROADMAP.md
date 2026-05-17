@@ -65,13 +65,18 @@ Completed:
 - Local PostgreSQL startup/check script.
 - Local PostgreSQL setup helper.
 - Local backend/frontend script flow.
+- Local backend startup now checks/starts database services before runserver.
+- Native Windows backend runs use `127.0.0.1` instead of Docker-only `db`.
+- Django tenant PostgreSQL backend patched for debug-mode psycopg 3 cursor recursion.
+- Django admin and admin static files work locally without `collectstatic`.
+- Frontend tenant settings requests include the tenant domain header.
+- Frontend build output is treated as generated output instead of tracked source.
 - Missing bookings and integrations migrations generated.
 - Local README instructions updated.
 
 Remaining:
 
 - Add CI checks for backend tests and frontend build.
-- Add a `.env.example` alignment pass for local and deployment environments.
 - Add optional Redis startup guidance for Celery development.
 - Add a health-check command that verifies DB, backend, frontend, and key API endpoints.
 
@@ -242,14 +247,16 @@ Acceptance criteria:
 
 ### Checkpoint A: Stabilize And Commit
 
-Priority: immediate.
+Priority: in progress.
 
 Tasks:
 
-- Review local-dev script changes.
+- Review local-dev script changes. Done.
 - Review new migrations.
-- Run backend check and migration check.
-- Run frontend build.
+- Run backend check and migration check. Done.
+- Run frontend build. Done.
+- Align production deployment environment variables. Done.
+- Add production smoke checklist. Done.
 - Commit the stabilization checkpoint.
 
 Exit criteria:
@@ -380,3 +387,5 @@ Record major implementation decisions here as they are made.
 | --- | --- | --- |
 | 2026-05-16 | Prefer native Windows scripts plus local PostgreSQL fallback for development. | Docker is not available on PATH in the current environment, but local PostgreSQL is installed and working. |
 | 2026-05-16 | Add a separate engineering roadmap instead of replacing the enhancement document. | Keeps product vision separate from execution workflow. |
+| 2026-05-17 | Keep local static serving separate from production manifest static files. | Local admin must work without `collectstatic`, while production should keep hashed static assets. |
+| 2026-05-17 | Treat `frontend/dist/` as generated output. | Vite builds should be reproducible and should not create source-control churn. |

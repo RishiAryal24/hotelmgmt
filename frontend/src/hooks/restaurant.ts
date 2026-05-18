@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/api';
-import { CashierCounter, CashierShift, KitchenTicket, MenuCategory, MenuItem, RestaurantOrder, RestaurantOrderApproval, RestaurantTable } from '../types/restaurant';
+import { CashierCounter, CashierShift, KitchenTicket, MenuCategory, MenuItem, MenuModifier, MenuModifierGroup, MenuRecipeIngredient, RestaurantOrder, RestaurantOrderApproval, RestaurantTable } from '../types/restaurant';
 
 const getList = <T,>(data: T[] | { results: T[] }) => (Array.isArray(data) ? data : data.results);
 
@@ -19,6 +19,36 @@ export const useMenuItems = () => {
     queryKey: ['menu-items'],
     queryFn: async (): Promise<MenuItem[]> => {
       const response = await apiClient.get<MenuItem[] | { results: MenuItem[] }>('/restaurant/items/');
+      return getList(response.data);
+    },
+  });
+};
+
+export const useMenuModifierGroups = () => {
+  return useQuery({
+    queryKey: ['menu-modifier-groups'],
+    queryFn: async (): Promise<MenuModifierGroup[]> => {
+      const response = await apiClient.get<MenuModifierGroup[] | { results: MenuModifierGroup[] }>('/restaurant/modifier-groups/');
+      return getList(response.data);
+    },
+  });
+};
+
+export const useMenuModifiers = () => {
+  return useQuery({
+    queryKey: ['menu-modifiers'],
+    queryFn: async (): Promise<MenuModifier[]> => {
+      const response = await apiClient.get<MenuModifier[] | { results: MenuModifier[] }>('/restaurant/modifiers/');
+      return getList(response.data);
+    },
+  });
+};
+
+export const useMenuRecipeIngredients = () => {
+  return useQuery({
+    queryKey: ['menu-recipe-ingredients'],
+    queryFn: async (): Promise<MenuRecipeIngredient[]> => {
+      const response = await apiClient.get<MenuRecipeIngredient[] | { results: MenuRecipeIngredient[] }>('/restaurant/recipe-ingredients/');
       return getList(response.data);
     },
   });
@@ -116,6 +146,50 @@ export const useCreateMenuItem = () => {
   });
 };
 
+export const useCreateMenuModifierGroup = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: Omit<MenuModifierGroup, 'id' | 'modifiers'>): Promise<MenuModifierGroup> => {
+      const response = await apiClient.post('/restaurant/modifier-groups/', payload);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['menu-modifier-groups'] });
+      queryClient.invalidateQueries({ queryKey: ['menu-items'] });
+    },
+  });
+};
+
+export const useCreateMenuModifier = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: Omit<MenuModifier, 'id' | 'group_name'>): Promise<MenuModifier> => {
+      const response = await apiClient.post('/restaurant/modifiers/', payload);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['menu-modifiers'] });
+      queryClient.invalidateQueries({ queryKey: ['menu-modifier-groups'] });
+      queryClient.invalidateQueries({ queryKey: ['menu-items'] });
+    },
+  });
+};
+
+export const useCreateMenuRecipeIngredient = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: Omit<MenuRecipeIngredient, 'id' | 'item_details' | 'line_cost'>): Promise<MenuRecipeIngredient> => {
+      const response = await apiClient.post('/restaurant/recipe-ingredients/', payload);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['menu-recipe-ingredients'] });
+      queryClient.invalidateQueries({ queryKey: ['menu-items'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-items'] });
+    },
+  });
+};
+
 export const useCreateRestaurantTable = () => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -189,7 +263,7 @@ export const useRestaurantOrderAction = () => {
       payload,
     }: {
       orderId: string;
-      action: 'add_line' | 'send_to_kitchen' | 'mark_served' | 'split_bill' | 'transfer_table' | 'void_line' | 'apply_discount';
+      action: 'add_line' | 'send_to_kitchen' | 'mark_served' | 'split_bill' | 'transfer_table' | 'merge_table' | 'void_line' | 'apply_discount';
       payload?: Record<string, unknown>;
     }) => {
       const response = await apiClient.post(`/restaurant/orders/${orderId}/${action}/`, payload || {});

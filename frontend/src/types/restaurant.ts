@@ -25,6 +25,45 @@ export interface MenuItem {
   preparation_time_minutes: number;
   is_available: boolean;
   is_active: boolean;
+  modifier_groups?: string[];
+  modifier_groups_details?: MenuModifierGroup[];
+  recipe_ingredients?: MenuRecipeIngredient[];
+  recipe_cost?: string;
+  gross_margin?: string;
+  gross_margin_percent?: string;
+}
+
+export interface MenuModifier {
+  id: string;
+  group: string;
+  group_name?: string;
+  name: string;
+  code: string;
+  price_delta: string;
+  display_order: number;
+  is_active: boolean;
+}
+
+export interface MenuModifierGroup {
+  id: string;
+  name: string;
+  code: string;
+  selection_type: 'single' | 'multiple';
+  is_required: boolean;
+  display_order: number;
+  is_active: boolean;
+  menu_items: string[];
+  modifiers: MenuModifier[];
+}
+
+export interface MenuRecipeIngredient {
+  id: string;
+  menu_item: string;
+  item: string;
+  item_details?: InventoryItem;
+  quantity: string;
+  notes: string;
+  line_cost: string;
 }
 
 export interface RestaurantTable {
@@ -41,6 +80,8 @@ export interface RestaurantOrderLine {
   order: string;
   menu_item: string;
   menu_item_details?: MenuItem;
+  modifiers: string[];
+  modifier_details?: MenuModifier[];
   quantity: number;
   unit_price: string;
   line_total: string;

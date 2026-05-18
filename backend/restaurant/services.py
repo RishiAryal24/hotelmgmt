@@ -121,6 +121,38 @@ def transfer_order_table(order, target_table):
 
 
 @transaction.atomic
+def merge_order_table(source_order, target_order):
+    if source_order.id == target_order.id:
+        raise RestaurantOrderActionError('Select a different target order.')
+    if source_order.order_type != 'dine_in' or target_order.order_type != 'dine_in':
+        raise RestaurantOrderActionError('Only dine-in orders can be merged.')
+    if source_order.status not in ACTIVE_ORDER_STATUSES or target_order.status not in ACTIVE_ORDER_STATUSES:
+        raise RestaurantOrderActionError('Only active orders can be merged.')
+    if not target_order.table_id:
+        raise RestaurantOrderActionError('Target order must be assigned to a table.')
+
+    source_table = source_order.table
+    lines = list(source_order.lines.exclude(status='cancelled').prefetch_related('modifiers'))
+    if not lines:
+        raise RestaurantOrderActionError('Source order has no active items to merge.')
+
+    for line in lines:
+        line.order = target_order
+        line.save(update_fields=['order', 'updated_at'])
+
+    source_order.status = 'cancelled'
+    source_order.notes = f'{source_order.notes}\nMerged into {target_order.order_number}'.strip()
+    source_order.save(update_fields=['status', 'notes', 'updated_at'])
+    source_order.recalculate_totals()
+
+    target_order.notes = f'{target_order.notes}\nMerged from {source_order.order_number}'.strip()
+    target_order.save(update_fields=['notes', 'updated_at'])
+    target_order.recalculate_totals()
+    update_table_status_after_order_move(source_table)
+    return target_order
+
+
+@transaction.atomic
 def split_order_bill(order, line_splits):
     if order.status not in ['draft', 'served']:
         raise RestaurantOrderActionError('Only draft or served orders can be split.')
@@ -174,7 +206,7 @@ def split_order_bill(order, line_splits):
         else:
             line.quantity -= quantity
             line.save(update_fields=['quantity', 'line_total', 'updated_at'])
-            RestaurantOrderLine.objects.create(
+            split_line = RestaurantOrderLine.objects.create(
                 order=split_order,
                 menu_item=line.menu_item,
                 quantity=quantity,
@@ -182,6 +214,8 @@ def split_order_bill(order, line_splits):
                 notes=line.notes,
                 status=line.status,
             )
+            split_line.modifiers.set(line.modifiers.all())
+            split_line.save(update_fields=['line_total', 'updated_at'])
 
     order.recalculate_totals()
     split_order.recalculate_totals()

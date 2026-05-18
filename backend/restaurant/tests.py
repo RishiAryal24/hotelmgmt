@@ -5,7 +5,9 @@ from django_tenants.test.cases import TenantTestCase
 
 from accounting.models import JournalEntry, JournalLine
 from bookings.models import Booking, Guest, GuestFolioLine, Room, RoomType
-from restaurant.models import CashierCounter, CashierShift, MenuCategory, MenuItem, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantTable
+from inventory.models import InventoryItem, StockMovement
+from restaurant.models import CashierCounter, CashierShift, MenuCategory, MenuItem, MenuModifier, MenuModifierGroup, MenuRecipeIngredient, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantTable
+from restaurant.serializers import RestaurantOrderLineSerializer
 from restaurant.services import (
     CashierShiftError,
     RestaurantOrderActionError,
@@ -13,6 +15,7 @@ from restaurant.services import (
     apply_order_discount,
     approve_order_approval,
     close_cashier_shift,
+    merge_order_table,
     open_cashier_shift,
     reject_order_approval,
     request_order_approval,
@@ -153,6 +156,25 @@ class RestaurantRoomPostingTests(TenantTestCase):
         with self.assertRaises(RestaurantOrderActionError):
             transfer_order_table(self.order, target_table)
 
+    def test_dine_in_orders_can_merge_into_one_bill(self):
+        target_table = RestaurantTable.objects.create(table_number=f'MG-{abs(hash(self._testMethodName)) % 1000}', status='occupied')
+        target_order = RestaurantOrder.objects.create(table=target_table, order_type='dine_in', status='served')
+        RestaurantOrderLine.objects.create(order=target_order, menu_item=self.item, quantity=1, unit_price=Decimal('25.00'))
+        self.table.status = 'occupied'
+        self.table.save(update_fields=['status', 'updated_at'])
+
+        merged_order = merge_order_table(self.order, target_order)
+
+        self.order.refresh_from_db()
+        target_order.refresh_from_db()
+        self.table.refresh_from_db()
+        self.assertEqual(merged_order.id, target_order.id)
+        self.assertEqual(self.order.status, 'cancelled')
+        self.assertEqual(self.table.status, 'available')
+        self.assertEqual(target_order.lines.exclude(status='cancelled').count(), 2)
+        self.assertEqual(target_order.grand_total, Decimal('75.00'))
+        self.assertIn(self.order.order_number, target_order.notes)
+
     def test_served_order_can_split_selected_quantities_to_new_bill(self):
         second_item = MenuItem.objects.create(
             category=self.category,
@@ -228,6 +250,70 @@ class RestaurantRoomPostingTests(TenantTestCase):
     def test_order_discount_cannot_exceed_order_total(self):
         with self.assertRaises(RestaurantOrderActionError):
             apply_order_discount(self.order, discount_amount=Decimal('55.00'))
+
+    def test_order_line_modifiers_increase_line_and_order_total(self):
+        group = MenuModifierGroup.objects.create(
+            name=f'Add-ons {self._testMethodName}',
+            code=f'ADD-{abs(hash(self._testMethodName)) % 100000}',
+            selection_type='multiple',
+        )
+        group.menu_items.add(self.item)
+        modifier = MenuModifier.objects.create(
+            group=group,
+            name='Extra Sauce',
+            code='EXTRA-SAUCE',
+            price_delta=Decimal('3.00'),
+        )
+
+        line = RestaurantOrderLine.objects.create(order=self.order, menu_item=self.item, quantity=2, unit_price=Decimal('25.00'))
+        line.modifiers.set([modifier])
+        line.save(update_fields=['line_total', 'updated_at'])
+
+        self.order.refresh_from_db()
+        self.assertEqual(line.line_total, Decimal('56.00'))
+        self.assertEqual(self.order.grand_total, Decimal('106.00'))
+
+    def test_required_single_modifier_is_validated_on_order_line_serializer(self):
+        group = MenuModifierGroup.objects.create(
+            name=f'Temperature {self._testMethodName}',
+            code=f'TEMP-{abs(hash(self._testMethodName)) % 100000}',
+            selection_type='single',
+            is_required=True,
+        )
+        group.menu_items.add(self.item)
+
+        serializer = RestaurantOrderLineSerializer(data={
+            'order': str(self.order.id),
+            'menu_item': str(self.item.id),
+            'quantity': 1,
+        })
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn('Select a modifier', str(serializer.errors))
+
+    def test_menu_recipe_cost_and_margin_use_ingredient_costs(self):
+        suffix = abs(hash(self._testMethodName)) % 100000
+        rice = InventoryItem.objects.create(sku=f'RICE-{suffix}', name='Rice', unit='kg', cost_price=Decimal('4.00'))
+        spice = InventoryItem.objects.create(sku=f'SPICE-{suffix}', name='Spice', unit='g', cost_price=Decimal('0.05'))
+        MenuRecipeIngredient.objects.create(menu_item=self.item, item=rice, quantity=Decimal('0.200'))
+        MenuRecipeIngredient.objects.create(menu_item=self.item, item=spice, quantity=Decimal('10.000'))
+
+        self.assertEqual(self.item.recipe_cost, Decimal('1.30000'))
+        self.assertEqual(self.item.gross_margin, Decimal('23.70000'))
+
+    def test_restaurant_settlement_deducts_recipe_ingredients(self):
+        suffix = abs(hash(self._testMethodName)) % 100000
+        rice = InventoryItem.objects.create(sku=f'RICES-{suffix}', name='Rice Sale', unit='kg', cost_price=Decimal('4.00'))
+        spice = InventoryItem.objects.create(sku=f'SPICES-{suffix}', name='Spice Sale', unit='g', cost_price=Decimal('0.05'))
+        MenuRecipeIngredient.objects.create(menu_item=self.item, item=rice, quantity=Decimal('0.200'))
+        MenuRecipeIngredient.objects.create(menu_item=self.item, item=spice, quantity=Decimal('10.000'))
+
+        settle_restaurant_order(self.order, payment_method='cash', paid_amount=Decimal('50.00'))
+
+        rice_movement = StockMovement.objects.get(item=rice, source_module='restaurant_recipe_ingredient')
+        spice_movement = StockMovement.objects.get(item=spice, source_module='restaurant_recipe_ingredient')
+        self.assertEqual(rice_movement.quantity, Decimal('0.400'))
+        self.assertEqual(spice_movement.quantity, Decimal('20.000'))
 
     def test_void_line_approval_applies_only_after_approval(self):
         line = self.order.lines.get()

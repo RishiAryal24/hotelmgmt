@@ -138,6 +138,8 @@ Completed:
 - Item-quantity split bills.
 - Active dine-in table transfer.
 - Void, discount, and complimentary approval workflow.
+- Menu modifiers with line-level price impact.
+- Recipe/BOM costing with multi-ingredient stock deduction.
 - Inventory item linkage for menu items.
 - Stock deduction from restaurant sales.
 - Vendors, stock receiving, stock adjustments.
@@ -150,8 +152,6 @@ Remaining:
 
 - Merged bills.
 - Amount-based split payments.
-- Menu modifiers.
-- Recipe/BOM costing.
 
 ## Phase 4: Accounting ERP
 

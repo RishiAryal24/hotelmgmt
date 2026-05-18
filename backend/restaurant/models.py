@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models
 
 from core.models import UUIDModel
@@ -48,6 +50,84 @@ class MenuItem(UUIDModel):
 
     class Meta:
         ordering = ['category__display_order', 'name']
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def recipe_cost(self):
+        if not self.pk:
+            return Decimal('0.00')
+        recipe_lines = list(self.recipe_ingredients.select_related('item').all())
+        if recipe_lines:
+            return sum((line.quantity * line.item.cost_price for line in recipe_lines), Decimal('0.00'))
+        if self.inventory_item_id and self.inventory_quantity_per_unit:
+            return self.inventory_quantity_per_unit * self.inventory_item.cost_price
+        return Decimal('0.00')
+
+    @property
+    def gross_margin(self):
+        return Decimal(str(self.price or 0)) - self.recipe_cost
+
+    @property
+    def gross_margin_percent(self):
+        if not self.price:
+            return Decimal('0.00')
+        return (self.gross_margin / Decimal(str(self.price))) * 100
+
+
+class MenuRecipeIngredient(UUIDModel):
+    menu_item = models.ForeignKey(MenuItem, on_delete=models.CASCADE, related_name='recipe_ingredients')
+    item = models.ForeignKey('inventory.InventoryItem', on_delete=models.PROTECT, related_name='recipe_ingredients')
+    quantity = models.DecimalField(max_digits=12, decimal_places=3)
+    notes = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ['item__name']
+        unique_together = [('menu_item', 'item')]
+
+    def __str__(self):
+        return f'{self.menu_item.name} - {self.quantity} {self.item.unit} {self.item.name}'
+
+    @property
+    def line_cost(self):
+        return self.quantity * self.item.cost_price
+
+
+class MenuModifierGroup(UUIDModel):
+    name = models.CharField(max_length=120, unique=True)
+    code = models.CharField(max_length=50, unique=True)
+    selection_type = models.CharField(
+        max_length=20,
+        choices=[
+            ('single', 'Single'),
+            ('multiple', 'Multiple'),
+        ],
+        default='single',
+    )
+    is_required = models.BooleanField(default=False)
+    display_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    menu_items = models.ManyToManyField(MenuItem, related_name='modifier_groups', blank=True)
+
+    class Meta:
+        ordering = ['display_order', 'name']
+
+    def __str__(self):
+        return self.name
+
+
+class MenuModifier(UUIDModel):
+    group = models.ForeignKey(MenuModifierGroup, on_delete=models.CASCADE, related_name='modifiers')
+    name = models.CharField(max_length=120)
+    code = models.CharField(max_length=50)
+    price_delta = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    display_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['group__display_order', 'display_order', 'name']
+        unique_together = [('group', 'code')]
 
     def __str__(self):
         return self.name
@@ -150,6 +230,7 @@ class RestaurantOrderLine(UUIDModel):
 
     order = models.ForeignKey(RestaurantOrder, on_delete=models.CASCADE, related_name='lines')
     menu_item = models.ForeignKey(MenuItem, on_delete=models.PROTECT, related_name='order_lines')
+    modifiers = models.ManyToManyField(MenuModifier, related_name='order_lines', blank=True)
     quantity = models.PositiveIntegerField(default=1)
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
     line_total = models.DecimalField(max_digits=10, decimal_places=2, default=0)
@@ -161,7 +242,8 @@ class RestaurantOrderLine(UUIDModel):
 
     def save(self, *args, **kwargs):
         self.unit_price = self.unit_price or self.menu_item.price
-        self.line_total = self.quantity * self.unit_price
+        modifier_total = sum(modifier.price_delta for modifier in self.modifiers.all()) if self.pk else 0
+        self.line_total = self.quantity * (self.unit_price + modifier_total)
         super().save(*args, **kwargs)
         self.order.recalculate_totals()
 

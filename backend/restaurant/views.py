@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAuthenticated
 
-from restaurant.models import KitchenTicket, KitchenTicketLine, MenuCategory, MenuItem, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantTable
+from restaurant.models import KitchenTicket, KitchenTicketLine, MenuCategory, MenuItem, MenuModifier, MenuModifierGroup, MenuRecipeIngredient, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantTable
 from restaurant.models import CashierCounter, CashierShift
 from restaurant.serializers import (
     ApplyOrderDiscountSerializer,
@@ -16,6 +16,10 @@ from restaurant.serializers import (
     KitchenTicketSerializer,
     MenuCategorySerializer,
     MenuItemSerializer,
+    MergeOrderSerializer,
+    MenuModifierGroupSerializer,
+    MenuModifierSerializer,
+    MenuRecipeIngredientSerializer,
     RestaurantOrderLineSerializer,
     RestaurantOrderApprovalDecisionSerializer,
     RestaurantOrderApprovalRequestSerializer,
@@ -34,6 +38,7 @@ from restaurant.services import (
     approve_order_approval,
     close_cashier_shift,
     get_open_cashier_shift,
+    merge_order_table,
     open_cashier_shift,
     reject_order_approval,
     request_order_approval,
@@ -64,7 +69,7 @@ class MenuCategoryViewSet(viewsets.ModelViewSet):
 
 
 class MenuItemViewSet(viewsets.ModelViewSet):
-    queryset = MenuItem.objects.select_related('category').all()
+    queryset = MenuItem.objects.select_related('category', 'inventory_item').prefetch_related('modifier_groups', 'modifier_groups__modifiers', 'recipe_ingredients', 'recipe_ingredients__item').all()
     serializer_class = MenuItemSerializer
     permission_classes = [IsAuthenticated, HasActionPermission]
     permission_map = {
@@ -79,6 +84,60 @@ class MenuItemViewSet(viewsets.ModelViewSet):
     filterset_fields = ['category', 'preparation_station', 'is_available', 'is_active']
     search_fields = ['name', 'sku', 'description']
     ordering_fields = ['name', 'price', 'preparation_time_minutes']
+
+
+class MenuModifierGroupViewSet(viewsets.ModelViewSet):
+    queryset = MenuModifierGroup.objects.prefetch_related('modifiers', 'menu_items').all()
+    serializer_class = MenuModifierGroupSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': ['restaurant.order.create', 'restaurant.order.update', 'restaurant.kitchen.update', 'pos.sale.create'],
+        'retrieve': ['restaurant.order.create', 'restaurant.order.update', 'restaurant.kitchen.update', 'pos.sale.create'],
+        'create': 'restaurant.order.update',
+        'update': 'restaurant.order.update',
+        'partial_update': 'restaurant.order.update',
+        'destroy': 'restaurant.order.update',
+    }
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['selection_type', 'is_required', 'is_active', 'menu_items']
+    search_fields = ['name', 'code']
+    ordering_fields = ['display_order', 'name']
+
+
+class MenuModifierViewSet(viewsets.ModelViewSet):
+    queryset = MenuModifier.objects.select_related('group').all()
+    serializer_class = MenuModifierSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': ['restaurant.order.create', 'restaurant.order.update', 'restaurant.kitchen.update', 'pos.sale.create'],
+        'retrieve': ['restaurant.order.create', 'restaurant.order.update', 'restaurant.kitchen.update', 'pos.sale.create'],
+        'create': 'restaurant.order.update',
+        'update': 'restaurant.order.update',
+        'partial_update': 'restaurant.order.update',
+        'destroy': 'restaurant.order.update',
+    }
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['group', 'is_active']
+    search_fields = ['name', 'code', 'group__name']
+    ordering_fields = ['group__display_order', 'display_order', 'name', 'price_delta']
+
+
+class MenuRecipeIngredientViewSet(viewsets.ModelViewSet):
+    queryset = MenuRecipeIngredient.objects.select_related('menu_item', 'item').all()
+    serializer_class = MenuRecipeIngredientSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': ['restaurant.order.create', 'restaurant.order.update', 'inventory.stock.read'],
+        'retrieve': ['restaurant.order.create', 'restaurant.order.update', 'inventory.stock.read'],
+        'create': 'restaurant.order.update',
+        'update': 'restaurant.order.update',
+        'partial_update': 'restaurant.order.update',
+        'destroy': 'restaurant.order.update',
+    }
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['menu_item', 'item']
+    search_fields = ['menu_item__name', 'item__name', 'item__sku', 'notes']
+    ordering_fields = ['menu_item__name', 'item__name', 'quantity']
 
 
 class RestaurantTableViewSet(viewsets.ModelViewSet):
@@ -168,7 +227,7 @@ class CashierCounterViewSet(viewsets.ModelViewSet):
 
 
 class RestaurantOrderViewSet(viewsets.ModelViewSet):
-    queryset = RestaurantOrder.objects.select_related('table', 'waiter').prefetch_related('lines', 'lines__menu_item').all()
+    queryset = RestaurantOrder.objects.select_related('table', 'waiter').prefetch_related('lines', 'lines__menu_item', 'lines__modifiers').all()
     serializer_class = RestaurantOrderSerializer
     permission_classes = [IsAuthenticated, HasActionPermission]
     permission_map = {
@@ -183,6 +242,7 @@ class RestaurantOrderViewSet(viewsets.ModelViewSet):
         'mark_served': 'restaurant.order.update',
         'split_bill': 'restaurant.order.update',
         'transfer_table': 'restaurant.order.update',
+        'merge_table': 'restaurant.order.update',
         'void_line': 'restaurant.order.approve',
         'apply_discount': 'restaurant.order.approve',
         'request_void_line': 'restaurant.order.update',
@@ -219,7 +279,7 @@ class RestaurantOrderViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Order has no items'}, status=status.HTTP_400_BAD_REQUEST)
 
         stations = {}
-        for line in order.lines.filter(status='ordered'):
+        for line in order.lines.filter(status='ordered').prefetch_related('modifiers'):
             stations.setdefault(line.menu_item.preparation_station, []).append(line)
             line.status = 'preparing'
             line.save(update_fields=['status', 'updated_at'])
@@ -271,6 +331,17 @@ class RestaurantOrderViewSet(viewsets.ModelViewSet):
         except RestaurantOrderActionError as exc:
             return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(RestaurantOrderSerializer(order).data)
+
+    @action(detail=True, methods=['post'])
+    def merge_table(self, request, pk=None):
+        order = self.get_object()
+        serializer = MergeOrderSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            target_order = merge_order_table(order, serializer.validated_data['target_order'])
+        except RestaurantOrderActionError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(RestaurantOrderSerializer(target_order).data)
 
     @action(detail=True, methods=['post'])
     def void_line(self, request, pk=None):

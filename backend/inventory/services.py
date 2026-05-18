@@ -105,25 +105,43 @@ def pay_purchase_order(purchase_order: PurchaseOrder, payment_method='cash', pos
 
 def deduct_restaurant_order_inventory(order, posted_by=None):
     movements = []
-    for line in order.lines.select_related('menu_item', 'menu_item__inventory_item').exclude(status='cancelled'):
-        inventory_item = line.menu_item.inventory_item
-        quantity_per_unit = line.menu_item.inventory_quantity_per_unit
-        if not inventory_item or not quantity_per_unit:
+    for line in order.lines.select_related('menu_item', 'menu_item__inventory_item').prefetch_related('menu_item__recipe_ingredients', 'menu_item__recipe_ingredients__item').exclude(status='cancelled'):
+        recipe_ingredients = list(line.menu_item.recipe_ingredients.all())
+        if recipe_ingredients:
+            for ingredient in recipe_ingredients:
+                movement, created = StockMovement.objects.get_or_create(
+                    item=ingredient.item,
+                    movement_type='sale',
+                    source_module='restaurant_recipe_ingredient',
+                    source_id=f'{line.id}:{ingredient.id}',
+                    defaults={
+                        'quantity': line.quantity * ingredient.quantity,
+                        'unit_cost': ingredient.item.cost_price,
+                        'reference': order.order_number,
+                        'notes': f'Recipe deduction for {line.quantity} x {line.menu_item.name}',
+                        'created_by': posted_by,
+                    },
+                )
+                if created:
+                    movements.append(movement)
             continue
 
-        movement, created = StockMovement.objects.get_or_create(
-            item=inventory_item,
-            movement_type='sale',
-            source_module='restaurant_order_line',
-            source_id=str(line.id),
-            defaults={
-                'quantity': line.quantity * quantity_per_unit,
-                'unit_cost': inventory_item.cost_price,
-                'reference': order.order_number,
-                'notes': f'Stock deduction for {line.quantity} x {line.menu_item.name}',
-                'created_by': posted_by,
-            },
-        )
-        if created:
-            movements.append(movement)
+        inventory_item = line.menu_item.inventory_item
+        quantity_per_unit = line.menu_item.inventory_quantity_per_unit
+        if inventory_item and quantity_per_unit:
+            movement, created = StockMovement.objects.get_or_create(
+                item=inventory_item,
+                movement_type='sale',
+                source_module='restaurant_order_line',
+                source_id=str(line.id),
+                defaults={
+                    'quantity': line.quantity * quantity_per_unit,
+                    'unit_cost': inventory_item.cost_price,
+                    'reference': order.order_number,
+                    'notes': f'Stock deduction for {line.quantity} x {line.menu_item.name}',
+                    'created_by': posted_by,
+                },
+            )
+            if created:
+                movements.append(movement)
     return movements

@@ -7,6 +7,9 @@ import { useInventoryItems } from '../hooks/inventory';
 import {
   useCreateMenuCategory,
   useCreateMenuItem,
+  useCreateMenuModifier,
+  useCreateMenuModifierGroup,
+  useCreateMenuRecipeIngredient,
   useCreateRestaurantOrder,
   useCreateRestaurantTable,
   useCurrentCashierShift,
@@ -14,6 +17,9 @@ import {
   useKitchenTickets,
   useMenuCategories,
   useMenuItems,
+  useMenuModifierGroups,
+  useMenuModifiers,
+  useMenuRecipeIngredients,
   useRequestRestaurantOrderApproval,
   useRestaurantOrderApprovalDecision,
   useRestaurantOrderApprovals,
@@ -24,9 +30,32 @@ import {
 } from '../hooks/restaurant';
 import { usePermissions } from '../hooks/permissions';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
-import { MenuCategory, MenuItem, RestaurantOrder, RestaurantTable } from '../types/restaurant';
+import { MenuCategory, MenuItem, MenuModifier, MenuModifierGroup, MenuRecipeIngredient, RestaurantOrder, RestaurantTable } from '../types/restaurant';
 
 const emptyCategory = { name: '', code: '', description: '', display_order: 0, is_active: true };
+const emptyModifierGroup = {
+  name: '',
+  code: '',
+  selection_type: 'single' as MenuModifierGroup['selection_type'],
+  is_required: false,
+  display_order: 0,
+  is_active: true,
+  menu_items: [] as string[],
+};
+const emptyModifier = {
+  group: '',
+  name: '',
+  code: '',
+  price_delta: '0.00',
+  display_order: 0,
+  is_active: true,
+};
+const emptyRecipeIngredient = {
+  menu_item: '',
+  item: '',
+  quantity: '',
+  notes: '',
+};
 const emptyItem = {
   category: '',
   inventory_item: '',
@@ -48,7 +77,7 @@ const emptyOrder: { table: string; room_booking: string; order_type: RestaurantO
   order_type: 'dine_in',
   notes: '',
 };
-const emptyOrderLine = { menu_item: '', quantity: 1, notes: '' };
+const emptyOrderLine = { menu_item: '', quantity: 1, notes: '', modifiers: [] as string[] };
 const emptySettleForm = { payment_method: 'cash' as RestaurantOrder['payment_method'], paid_amount: '', booking: '' };
 const emptyVoidForm = { line: '', reason: '' };
 const emptyDiscountForm = { discount_amount: '', reason: '' };
@@ -58,6 +87,9 @@ const Restaurant: React.FC = () => {
   const { data: settings } = useQuery({ queryKey: ['tenant-settings'], queryFn: getTenantSettings });
   const { data: categories } = useMenuCategories();
   const { data: items } = useMenuItems();
+  const { data: modifierGroups } = useMenuModifierGroups();
+  const { data: modifiers } = useMenuModifiers();
+  const { data: recipeIngredients } = useMenuRecipeIngredients();
   const { data: inventoryItems, isLoading: inventoryLoading } = useInventoryItems();
   const { data: tables } = useRestaurantTables();
   const { data: orders } = useRestaurantOrders();
@@ -67,6 +99,9 @@ const Restaurant: React.FC = () => {
   const { data: bookings } = useBookings();
   const createCategory = useCreateMenuCategory();
   const createItem = useCreateMenuItem();
+  const createModifierGroup = useCreateMenuModifierGroup();
+  const createModifier = useCreateMenuModifier();
+  const createRecipeIngredient = useCreateMenuRecipeIngredient();
   const createTable = useCreateRestaurantTable();
   const createOrder = useCreateRestaurantOrder();
   const orderAction = useRestaurantOrderAction();
@@ -77,6 +112,9 @@ const Restaurant: React.FC = () => {
   const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState('orders');
   const [categoryForm, setCategoryForm] = useState<Omit<MenuCategory, 'id'>>(emptyCategory);
+  const [modifierGroupForm, setModifierGroupForm] = useState<Omit<MenuModifierGroup, 'id' | 'modifiers'>>(emptyModifierGroup);
+  const [modifierForm, setModifierForm] = useState<Omit<MenuModifier, 'id' | 'group_name'>>(emptyModifier);
+  const [recipeIngredientForm, setRecipeIngredientForm] = useState<Omit<MenuRecipeIngredient, 'id' | 'item_details' | 'line_cost'>>(emptyRecipeIngredient);
   const [itemForm, setItemForm] = useState<Omit<MenuItem, 'id' | 'category_details' | 'inventory_item_details'>>(emptyItem);
   const [itemImage, setItemImage] = useState<File | null>(null);
   const [tableForm, setTableForm] = useState<Omit<RestaurantTable, 'id'>>(emptyTable);
@@ -86,6 +124,8 @@ const Restaurant: React.FC = () => {
   const [settlingOrder, setSettlingOrder] = useState<RestaurantOrder | null>(null);
   const [transferOrder, setTransferOrder] = useState<RestaurantOrder | null>(null);
   const [transferForm, setTransferForm] = useState({ table: '' });
+  const [mergeOrder, setMergeOrder] = useState<RestaurantOrder | null>(null);
+  const [mergeForm, setMergeForm] = useState({ target_order: '' });
   const [splitOrder, setSplitOrder] = useState<RestaurantOrder | null>(null);
   const [splitQuantities, setSplitQuantities] = useState<Record<string, number>>({});
   const [voidingOrder, setVoidingOrder] = useState<RestaurantOrder | null>(null);
@@ -120,6 +160,12 @@ const Restaurant: React.FC = () => {
   const pendingApprovals = approvals?.filter((approval) => approval.status === 'pending') || [];
   const availableTransferTables =
     tables?.filter((table) => table.is_active && ['available', 'reserved'].includes(table.status) && table.id !== transferOrder?.table) || [];
+  const availableMergeOrders = activeOrders.filter(
+    (order) =>
+      order.id !== mergeOrder?.id &&
+      order.order_type === 'dine_in' &&
+      ['draft', 'sent_to_kitchen', 'preparing', 'served'].includes(order.status),
+  );
   const tabs = [
     { id: 'orders', label: 'Orders', count: activeOrders.length },
     { id: 'menu', label: 'Menu', count: items?.length || 0 },
@@ -133,6 +179,21 @@ const Restaurant: React.FC = () => {
   const handleCreateCategory = (e: React.FormEvent) => {
     e.preventDefault();
     createCategory.mutate(categoryForm, { onSuccess: () => setCategoryForm(emptyCategory) });
+  };
+
+  const handleCreateModifierGroup = (e: React.FormEvent) => {
+    e.preventDefault();
+    createModifierGroup.mutate(modifierGroupForm, { onSuccess: () => setModifierGroupForm(emptyModifierGroup) });
+  };
+
+  const handleCreateModifier = (e: React.FormEvent) => {
+    e.preventDefault();
+    createModifier.mutate(modifierForm, { onSuccess: () => setModifierForm(emptyModifier) });
+  };
+
+  const handleCreateRecipeIngredient = (e: React.FormEvent) => {
+    e.preventDefault();
+    createRecipeIngredient.mutate(recipeIngredientForm, { onSuccess: () => setRecipeIngredientForm(emptyRecipeIngredient) });
   };
 
   const handleCreateItem = (e: React.FormEvent) => {
@@ -175,7 +236,7 @@ const Restaurant: React.FC = () => {
   const handleAddLine = (orderId: string) => {
     const lineForm = lineForms[orderId] || emptyOrderLine;
     if (!lineForm.menu_item) return;
-    orderAction.mutate({ orderId, action: 'add_line', payload: { menu_item: lineForm.menu_item, quantity: lineForm.quantity, notes: lineForm.notes } });
+    orderAction.mutate({ orderId, action: 'add_line', payload: { menu_item: lineForm.menu_item, quantity: lineForm.quantity, notes: lineForm.notes, modifiers: lineForm.modifiers } });
     setLineForms({ ...lineForms, [orderId]: emptyOrderLine });
   };
 
@@ -222,6 +283,20 @@ const Restaurant: React.FC = () => {
     orderAction.mutate(
       { orderId: transferOrder.id, action: 'transfer_table', payload: transferForm },
       { onSuccess: () => setTransferOrder(null) },
+    );
+  };
+
+  const openMergeOrder = (order: RestaurantOrder) => {
+    setMergeOrder(order);
+    setMergeForm({ target_order: '' });
+  };
+
+  const handleMergeOrder = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mergeOrder || !mergeForm.target_order) return;
+    orderAction.mutate(
+      { orderId: mergeOrder.id, action: 'merge_table', payload: mergeForm },
+      { onSuccess: () => setMergeOrder(null) },
     );
   };
 
@@ -294,6 +369,21 @@ const Restaurant: React.FC = () => {
     : 0;
   const selectedSplitQuantity = splitOrder ? Object.values(splitQuantities).reduce((total, quantity) => total + Number(quantity || 0), 0) : 0;
   const splitOrderQuantity = splitOrder ? splitOrder.lines.filter((line) => line.status !== 'cancelled').reduce((total, line) => total + line.quantity, 0) : 0;
+  const getItemModifierGroups = (menuItemId: string) => {
+    const item = items?.find((menuItem) => menuItem.id === menuItemId);
+    return item?.modifier_groups_details?.filter((group) => group.is_active) || [];
+  };
+  const toggleLineModifier = (orderId: string, modifierGroup: MenuModifierGroup, modifierId: string, checked: boolean) => {
+    const form = lineForms[orderId] || emptyOrderLine;
+    const groupModifierIds = modifierGroup.modifiers.map((modifier) => modifier.id);
+    const withoutGroupSingle = modifierGroup.selection_type === 'single'
+      ? form.modifiers.filter((selectedId) => !groupModifierIds.includes(selectedId))
+      : form.modifiers;
+    const nextModifiers = checked
+      ? Array.from(new Set([...withoutGroupSingle, modifierId]))
+      : form.modifiers.filter((selectedId) => selectedId !== modifierId);
+    setLineForms({ ...lineForms, [orderId]: { ...form, modifiers: nextModifiers } });
+  };
 
   return (
     <div className="space-y-5">
@@ -342,23 +432,46 @@ const Restaurant: React.FC = () => {
                   {activeOrders.map((order) => {
                     const lineForm = lineForms[order.id] || emptyOrderLine;
                     const activeLines = order.lines.filter((line) => line.status !== 'cancelled');
+                    const itemModifierGroups = getItemModifierGroups(lineForm.menu_item);
                     return (
                       <tr key={order.id}>
                         <td className="py-3 pr-4"><p className="font-medium text-slate-900">{order.order_number}</p><p className="text-xs text-slate-500">{order.order_type} {order.table_details ? `| Table ${order.table_details.table_number}` : ''}{order.room_number ? ` | Room ${order.room_number}` : ''}</p></td>
                         <td className="py-3 pr-4"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{order.status}</span></td>
                         <td className="py-3 pr-4">
-                          {activeLines.length ? activeLines.map((line) => `${line.quantity}x ${line.menu_item_details?.name}`).join(', ') : 'No active items'}
+                          {activeLines.length ? activeLines.map((line) => `${line.quantity}x ${line.menu_item_details?.name}${line.modifier_details?.length ? ` (${line.modifier_details.map((modifier) => modifier.name).join(', ')})` : ''}`).join(', ') : 'No active items'}
                           {order.lines.some((line) => line.status === 'cancelled') && <p className="text-xs text-slate-400">Voided items hidden from total</p>}
                         </td>
                         <td className="py-3 pr-4 font-medium">{formatMoney(order.grand_total, settings?.currency)}</td>
                         <td className="py-3 pr-4">
                           <div className="grid min-w-[260px] grid-cols-[1fr_64px] gap-2">
-                            <select value={lineForm.menu_item} onChange={(e) => setLineForms({ ...lineForms, [order.id]: { ...lineForm, menu_item: e.target.value } })} className="rounded-xl border border-slate-200 px-2 py-2 text-xs">
+                            <select value={lineForm.menu_item} onChange={(e) => setLineForms({ ...lineForms, [order.id]: { ...lineForm, menu_item: e.target.value, modifiers: [] } })} className="rounded-xl border border-slate-200 px-2 py-2 text-xs">
                               <option value="">Select item</option>
                               {items?.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                             </select>
                             <input type="number" value={lineForm.quantity} min="1" onChange={(e) => setLineForms({ ...lineForms, [order.id]: { ...lineForm, quantity: Number(e.target.value) } })} className="rounded-xl border border-slate-200 px-2 py-2 text-xs" />
                           </div>
+                          {itemModifierGroups.length > 0 && (
+                            <div className="mt-2 grid min-w-[260px] gap-2 rounded-xl border border-slate-100 bg-slate-50 p-2">
+                              {itemModifierGroups.map((group) => (
+                                <div key={group.id}>
+                                  <p className="text-[11px] font-semibold uppercase text-slate-500">{group.name}{group.is_required ? ' *' : ''}</p>
+                                  <div className="mt-1 flex flex-wrap gap-1">
+                                    {group.modifiers.filter((modifier) => modifier.is_active).map((modifier) => (
+                                      <label key={modifier.id} className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-[11px] text-slate-700">
+                                        <input
+                                          type={group.selection_type === 'single' ? 'radio' : 'checkbox'}
+                                          name={`${order.id}-${group.id}`}
+                                          checked={lineForm.modifiers.includes(modifier.id)}
+                                          onChange={(e) => toggleLineModifier(order.id, group, modifier.id, e.target.checked)}
+                                        />
+                                        {modifier.name}{Number(modifier.price_delta) > 0 ? ` +${formatMoney(modifier.price_delta, settings?.currency)}` : ''}
+                                      </label>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </td>
                         <td className="py-3 pr-4">
                           <span className="text-xs text-slate-500">{order.status === 'served' ? 'Ready to settle' : 'Mark served first'}</span>
@@ -369,6 +482,7 @@ const Restaurant: React.FC = () => {
                             {can('restaurant.order.update') && activeLines.length > 0 && ['draft', 'sent_to_kitchen'].includes(order.status) && <button onClick={() => orderAction.mutate({ orderId: order.id, action: 'send_to_kitchen' })} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-medium text-white">Kitchen</button>}
                             {can('restaurant.order.update') && ['sent_to_kitchen', 'preparing'].includes(order.status) && <button onClick={() => orderAction.mutate({ orderId: order.id, action: 'mark_served' })} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-medium text-white">Served</button>}
                             {can('restaurant.order.update') && order.order_type === 'dine_in' && ['draft', 'sent_to_kitchen', 'preparing', 'served'].includes(order.status) && <button onClick={() => openTransferOrder(order)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">Transfer</button>}
+                            {can('restaurant.order.update') && order.order_type === 'dine_in' && ['draft', 'sent_to_kitchen', 'preparing', 'served'].includes(order.status) && <button onClick={() => openMergeOrder(order)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">Merge</button>}
                             {can('restaurant.order.update') && ['draft', 'served'].includes(order.status) && activeLines.length > 0 && <button onClick={() => openSplitOrder(order)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">Split</button>}
                             {can('restaurant.order.update') && activeLines.length > 0 && <button onClick={() => openVoidOrderLine(order)} className="rounded-xl border border-rose-200 px-3 py-2 text-xs font-medium text-rose-700 hover:bg-rose-50">Void</button>}
                             {can('restaurant.order.update') && activeLines.length > 0 && <button onClick={() => openDiscountOrder(order)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">Discount</button>}
@@ -389,28 +503,82 @@ const Restaurant: React.FC = () => {
 
       {activeTab === 'menu' && (
         <section className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
-          {can('restaurant.order.update') && <FormPanel title="Add Menu Item" onSubmit={handleCreateItem}>
-            <select value={itemForm.category} onChange={(e) => setItemForm({ ...itemForm, category: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required>
-              <option value="">Select Category</option>{categories?.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-            </select>
-            <input placeholder="Item Name" value={itemForm.name} onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
-            <input placeholder="SKU" value={itemForm.sku} onChange={(e) => setItemForm({ ...itemForm, sku: e.target.value.toUpperCase().replace(/\s+/g, '-') })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
-            <input type="number" step="0.01" placeholder="Price" value={itemForm.price} onChange={(e) => setItemForm({ ...itemForm, price: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
-            <select value={itemForm.preparation_station} onChange={(e) => setItemForm({ ...itemForm, preparation_station: e.target.value as MenuItem['preparation_station'] })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
-              <option value="kitchen">Kitchen</option><option value="bar">Bar</option><option value="pastry">Pastry</option><option value="counter">Counter</option>
-            </select>
-            <input type="number" placeholder="Prep Time" value={itemForm.preparation_time_minutes} onChange={(e) => setItemForm({ ...itemForm, preparation_time_minutes: Number(e.target.value) })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-            <select value={itemForm.inventory_item || ''} onChange={(e) => setItemForm({ ...itemForm, inventory_item: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
-              <option value="">{inventoryLoading ? 'Loading inventory...' : 'No inventory deduction'}</option>{inventoryItems?.map((inventoryItem) => <option key={inventoryItem.id} value={inventoryItem.id}>{inventoryItem.sku} - {inventoryItem.name}</option>)}
-            </select>
-            <input type="number" step="0.001" placeholder="Inventory Qty per Sale" value={itemForm.inventory_quantity_per_unit} onChange={(e) => setItemForm({ ...itemForm, inventory_quantity_per_unit: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
-            <label className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-600 md:col-span-2">
-              <span className="block font-medium text-slate-700">Menu Picture</span>
-              <input type="file" accept="image/*" onChange={(e) => setItemImage(e.target.files?.[0] || null)} className="mt-2 w-full text-xs" />
-              {itemImage && <span className="mt-1 block text-xs text-[#1F5E3B]">{itemImage.name}</span>}
-            </label>
-          </FormPanel>}
-          <RowsTable headers={['Picture', 'Item', 'Category', 'Price', 'Station', 'Inventory Deduction']}>
+          {can('restaurant.order.update') && (
+            <div className="grid gap-5">
+              <FormPanel title="Add Menu Item" onSubmit={handleCreateItem}>
+                <select value={itemForm.category} onChange={(e) => setItemForm({ ...itemForm, category: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required>
+                  <option value="">Select Category</option>{categories?.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+                </select>
+                <input placeholder="Item Name" value={itemForm.name} onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+                <input placeholder="SKU" value={itemForm.sku} onChange={(e) => setItemForm({ ...itemForm, sku: e.target.value.toUpperCase().replace(/\s+/g, '-') })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+                <input type="number" step="0.01" placeholder="Price" value={itemForm.price} onChange={(e) => setItemForm({ ...itemForm, price: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+                <select value={itemForm.preparation_station} onChange={(e) => setItemForm({ ...itemForm, preparation_station: e.target.value as MenuItem['preparation_station'] })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                  <option value="kitchen">Kitchen</option><option value="bar">Bar</option><option value="pastry">Pastry</option><option value="counter">Counter</option>
+                </select>
+                <input type="number" placeholder="Prep Time" value={itemForm.preparation_time_minutes} onChange={(e) => setItemForm({ ...itemForm, preparation_time_minutes: Number(e.target.value) })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                <select value={itemForm.inventory_item || ''} onChange={(e) => setItemForm({ ...itemForm, inventory_item: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                  <option value="">{inventoryLoading ? 'Loading inventory...' : 'No inventory deduction'}</option>{inventoryItems?.map((inventoryItem) => <option key={inventoryItem.id} value={inventoryItem.id}>{inventoryItem.sku} - {inventoryItem.name}</option>)}
+                </select>
+                <input type="number" step="0.001" placeholder="Inventory Qty per Sale" value={itemForm.inventory_quantity_per_unit} onChange={(e) => setItemForm({ ...itemForm, inventory_quantity_per_unit: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                <label className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-600 md:col-span-2">
+                  <span className="block font-medium text-slate-700">Menu Picture</span>
+                  <input type="file" accept="image/*" onChange={(e) => setItemImage(e.target.files?.[0] || null)} className="mt-2 w-full text-xs" />
+                  {itemImage && <span className="mt-1 block text-xs text-[#1F5E3B]">{itemImage.name}</span>}
+                </label>
+              </FormPanel>
+
+              <FormPanel title="Add Modifier Group" onSubmit={handleCreateModifierGroup}>
+                <input placeholder="Group name" value={modifierGroupForm.name} onChange={(e) => setModifierGroupForm({ ...modifierGroupForm, name: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+                <input placeholder="Code" value={modifierGroupForm.code} onChange={(e) => setModifierGroupForm({ ...modifierGroupForm, code: e.target.value.toUpperCase().replace(/\s+/g, '-') })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+                <select value={modifierGroupForm.selection_type} onChange={(e) => setModifierGroupForm({ ...modifierGroupForm, selection_type: e.target.value as MenuModifierGroup['selection_type'] })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                  <option value="single">Single choice</option><option value="multiple">Multiple choice</option>
+                </select>
+                <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                  <input type="checkbox" checked={modifierGroupForm.is_required} onChange={(e) => setModifierGroupForm({ ...modifierGroupForm, is_required: e.target.checked })} />
+                  Required
+                </label>
+                <div className="grid gap-2 rounded-xl border border-slate-100 bg-slate-50 p-3 md:col-span-2">
+                  <p className="text-xs font-semibold uppercase text-slate-500">Menu items</p>
+                  <div className="flex max-h-28 flex-wrap gap-2 overflow-y-auto">
+                    {(items || []).map((item) => (
+                      <label key={item.id} className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-xs text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={modifierGroupForm.menu_items.includes(item.id)}
+                          onChange={(e) => {
+                            const nextItems = e.target.checked ? [...modifierGroupForm.menu_items, item.id] : modifierGroupForm.menu_items.filter((id) => id !== item.id);
+                            setModifierGroupForm({ ...modifierGroupForm, menu_items: nextItems });
+                          }}
+                        />
+                        {item.name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </FormPanel>
+
+              <FormPanel title="Add Modifier" onSubmit={handleCreateModifier}>
+                <select value={modifierForm.group} onChange={(e) => setModifierForm({ ...modifierForm, group: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required>
+                  <option value="">Select group</option>{modifierGroups?.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                </select>
+                <input placeholder="Modifier name" value={modifierForm.name} onChange={(e) => setModifierForm({ ...modifierForm, name: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+                <input placeholder="Code" value={modifierForm.code} onChange={(e) => setModifierForm({ ...modifierForm, code: e.target.value.toUpperCase().replace(/\s+/g, '-') })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+                <input type="number" step="0.01" placeholder="Price add-on" value={modifierForm.price_delta} onChange={(e) => setModifierForm({ ...modifierForm, price_delta: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+              </FormPanel>
+
+              <FormPanel title="Add Recipe Ingredient" onSubmit={handleCreateRecipeIngredient}>
+                <select value={recipeIngredientForm.menu_item} onChange={(e) => setRecipeIngredientForm({ ...recipeIngredientForm, menu_item: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required>
+                  <option value="">Select menu item</option>{items?.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
+                <select value={recipeIngredientForm.item} onChange={(e) => setRecipeIngredientForm({ ...recipeIngredientForm, item: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required>
+                  <option value="">Select inventory item</option>{inventoryItems?.map((inventoryItem) => <option key={inventoryItem.id} value={inventoryItem.id}>{inventoryItem.sku} - {inventoryItem.name} ({inventoryItem.unit})</option>)}
+                </select>
+                <input type="number" step="0.001" placeholder="Quantity per sale" value={recipeIngredientForm.quantity} onChange={(e) => setRecipeIngredientForm({ ...recipeIngredientForm, quantity: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+                <input placeholder="Notes" value={recipeIngredientForm.notes} onChange={(e) => setRecipeIngredientForm({ ...recipeIngredientForm, notes: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+              </FormPanel>
+            </div>
+          )}
+          <RowsTable headers={['Picture', 'Item', 'Category', 'Price', 'Food Cost', 'Margin', 'Recipe / Deduction']}>
             {items?.map((item) => (
               <tr key={item.id}>
                 <td className="py-3 pr-4">
@@ -423,11 +591,20 @@ const Restaurant: React.FC = () => {
                 <td className="py-3 pr-4 font-medium text-slate-900">{item.name}<p className="text-xs text-slate-500">{item.sku}</p></td>
                 <td className="py-3 pr-4">{item.category_details?.name}</td>
                 <td className="py-3 pr-4">{formatMoney(item.price, settings?.currency)}</td>
-                <td className="py-3 pr-4">{item.preparation_station}</td>
-                <td className="py-3 pr-4">{item.inventory_item_details ? `${item.inventory_quantity_per_unit} ${item.inventory_item_details.unit} ${item.inventory_item_details.name}` : '-'}</td>
+                <td className="py-3 pr-4">{formatMoney(item.recipe_cost || '0.00', settings?.currency)}</td>
+                <td className="py-3 pr-4">
+                  <p className="font-medium text-slate-900">{formatMoney(item.gross_margin || '0.00', settings?.currency)}</p>
+                  <p className="text-xs text-slate-500">{Number(item.gross_margin_percent || 0).toFixed(1)}%</p>
+                </td>
+                <td className="py-3 pr-4 text-xs text-slate-600">
+                  {item.recipe_ingredients?.length
+                    ? item.recipe_ingredients.map((line) => `${line.quantity} ${line.item_details?.unit || ''} ${line.item_details?.name || 'item'}`).join(', ')
+                    : item.inventory_item_details ? `${item.inventory_quantity_per_unit} ${item.inventory_item_details.unit} ${item.inventory_item_details.name}` : '-'}
+                  {item.modifier_groups_details?.length ? <p className="mt-1 text-slate-400">Modifiers: {item.modifier_groups_details.map((group) => group.name).join(', ')}</p> : null}
+                </td>
               </tr>
             ))}
-            {items?.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No menu items yet.</td></tr>}
+            {items?.length === 0 && <tr><td colSpan={7} className="py-6 text-center text-slate-500">No menu items yet.</td></tr>}
           </RowsTable>
         </section>
       )}
@@ -520,7 +697,7 @@ const Restaurant: React.FC = () => {
       {activeTab === 'kitchen' && (
         <RowsTable headers={['Ticket', 'Order', 'Station', 'Items', 'Status', 'Actions']}>
           {tickets?.map((ticket) => (
-            <tr key={ticket.id}><td className="py-3 pr-4 font-medium text-slate-900">{ticket.ticket_number}</td><td className="py-3 pr-4">{ticket.order_details?.order_number}</td><td className="py-3 pr-4">{ticket.station}</td><td className="py-3 pr-4">{ticket.lines.map((line) => `${line.quantity}x ${line.order_line_details?.menu_item_details?.name}`).join(', ')}</td><td className="py-3 pr-4">{ticket.status}</td><td className="py-3 pr-4"><div className="flex gap-2">{can('restaurant.kitchen.update') && ticket.status === 'open' && <button onClick={() => ticketAction.mutate({ ticketId: ticket.id, action: 'start' })} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-medium text-white">Start</button>}{can('restaurant.kitchen.update') && ['open', 'preparing'].includes(ticket.status) && <button onClick={() => ticketAction.mutate({ ticketId: ticket.id, action: 'mark_ready' })} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-medium text-white">Ready</button>}</div></td></tr>
+            <tr key={ticket.id}><td className="py-3 pr-4 font-medium text-slate-900">{ticket.ticket_number}</td><td className="py-3 pr-4">{ticket.order_details?.order_number}</td><td className="py-3 pr-4">{ticket.station}</td><td className="py-3 pr-4">{ticket.lines.map((line) => `${line.quantity}x ${line.order_line_details?.menu_item_details?.name}${line.order_line_details?.modifier_details?.length ? ` (${line.order_line_details.modifier_details.map((modifier) => modifier.name).join(', ')})` : ''}`).join(', ')}</td><td className="py-3 pr-4">{ticket.status}</td><td className="py-3 pr-4"><div className="flex gap-2">{can('restaurant.kitchen.update') && ticket.status === 'open' && <button onClick={() => ticketAction.mutate({ ticketId: ticket.id, action: 'start' })} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-medium text-white">Start</button>}{can('restaurant.kitchen.update') && ['open', 'preparing'].includes(ticket.status) && <button onClick={() => ticketAction.mutate({ ticketId: ticket.id, action: 'mark_ready' })} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-medium text-white">Ready</button>}</div></td></tr>
           ))}
           {tickets?.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No kitchen tickets yet.</td></tr>}
         </RowsTable>
@@ -681,6 +858,46 @@ const Restaurant: React.FC = () => {
               </button>
             </div>
             {orderAction.isError && <p className="mt-3 text-sm text-red-600">Could not transfer order. Check table availability.</p>}
+          </form>
+        </ActionModal>
+      )}
+
+      {mergeOrder && (
+        <ActionModal
+          title={`Merge ${mergeOrder.order_number}`}
+          description="Move this order into another active dine-in bill."
+          onClose={() => setMergeOrder(null)}
+        >
+          <form onSubmit={handleMergeOrder}>
+            <div className="grid gap-3">
+              <label className="text-sm font-medium text-slate-700" htmlFor="merge-order">
+                Target bill
+              </label>
+              <select
+                id="merge-order"
+                value={mergeForm.target_order}
+                onChange={(e) => setMergeForm({ target_order: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                required
+              >
+                <option value="">Select active order</option>
+                {availableMergeOrders.map((order) => (
+                  <option key={order.id} value={order.id}>
+                    {order.order_number} - Table {order.table_details?.table_number || '-'} - {formatMoney(order.grand_total, settings?.currency)}
+                  </option>
+                ))}
+              </select>
+              {availableMergeOrders.length === 0 && <p className="text-sm text-amber-700">No other active dine-in orders are available to merge.</p>}
+            </div>
+            <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button type="button" onClick={() => setMergeOrder(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Cancel
+              </button>
+              <button type="submit" disabled={orderAction.isPending || !mergeForm.target_order} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Merge order
+              </button>
+            </div>
+            {orderAction.isError && <p className="mt-3 text-sm text-red-600">Could not merge order. Check the target bill status.</p>}
           </form>
         </ActionModal>
       )}
@@ -894,6 +1111,11 @@ const ReceiptView = ({ order, currency }: { order: RestaurantOrder; currency?: s
               <div>
                 <p className="font-medium text-slate-900">{line.menu_item_details?.name || 'Menu item'}</p>
                 <p className="text-xs text-slate-500">{line.quantity} x {formatMoney(line.unit_price, currency)}</p>
+                {line.modifier_details?.length ? (
+                  <p className="text-xs text-slate-500">
+                    {line.modifier_details.map((modifier) => `${modifier.name}${Number(modifier.price_delta) > 0 ? ` +${formatMoney(modifier.price_delta, currency)}` : ''}`).join(', ')}
+                  </p>
+                ) : null}
               </div>
               <p className="font-medium text-slate-900">{formatMoney(line.line_total, currency)}</p>
             </div>

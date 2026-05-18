@@ -149,13 +149,13 @@ Completed:
 - Table transfer for active dine-in orders.
 - Void, discount, and complimentary approval workflow.
 - Order and item notes.
+- Menu modifier groups and price-impacting modifiers.
+- Recipe/BOM costing with multi-ingredient inventory deduction.
 
 Next slices:
 
-1. Modifiers.
-2. Recipe/BOM costing.
-3. Table merge.
-4. Amount-based split payments.
+1. Table merge.
+2. Amount-based split payments.
 
 Acceptance criteria:
 

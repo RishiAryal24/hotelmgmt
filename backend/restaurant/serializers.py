@@ -10,6 +10,9 @@ from restaurant.models import (
     KitchenTicketLine,
     MenuCategory,
     MenuItem,
+    MenuModifier,
+    MenuModifierGroup,
+    MenuRecipeIngredient,
     RestaurantOrder,
     RestaurantOrderApproval,
     RestaurantOrderLine,
@@ -23,9 +26,39 @@ class MenuCategorySerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class MenuModifierSerializer(serializers.ModelSerializer):
+    group_name = serializers.CharField(source='group.name', read_only=True)
+
+    class Meta:
+        model = MenuModifier
+        fields = '__all__'
+
+
+class MenuModifierGroupSerializer(serializers.ModelSerializer):
+    modifiers = MenuModifierSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = MenuModifierGroup
+        fields = '__all__'
+
+
+class MenuRecipeIngredientSerializer(serializers.ModelSerializer):
+    item_details = InventoryItemSerializer(source='item', read_only=True)
+    line_cost = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = MenuRecipeIngredient
+        fields = '__all__'
+
+
 class MenuItemSerializer(serializers.ModelSerializer):
     category_details = MenuCategorySerializer(source='category', read_only=True)
     inventory_item_details = InventoryItemSerializer(source='inventory_item', read_only=True)
+    modifier_groups_details = MenuModifierGroupSerializer(source='modifier_groups', many=True, read_only=True)
+    recipe_ingredients = MenuRecipeIngredientSerializer(many=True, read_only=True)
+    recipe_cost = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    gross_margin = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    gross_margin_percent = serializers.DecimalField(max_digits=7, decimal_places=2, read_only=True)
 
     class Meta:
         model = MenuItem
@@ -40,15 +73,45 @@ class RestaurantTableSerializer(serializers.ModelSerializer):
 
 class RestaurantOrderLineSerializer(serializers.ModelSerializer):
     menu_item_details = MenuItemSerializer(source='menu_item', read_only=True)
+    modifier_details = MenuModifierSerializer(source='modifiers', many=True, read_only=True)
+    modifiers = serializers.PrimaryKeyRelatedField(queryset=MenuModifier.objects.filter(is_active=True), many=True, required=False)
 
     class Meta:
         model = RestaurantOrderLine
         fields = '__all__'
         read_only_fields = ['unit_price', 'line_total']
 
+    def validate(self, attrs):
+        menu_item = attrs.get('menu_item') or getattr(self.instance, 'menu_item', None)
+        modifiers = attrs.get('modifiers', [])
+        if not menu_item:
+            return attrs
+
+        item_groups = list(menu_item.modifier_groups.filter(is_active=True).prefetch_related('modifiers'))
+        item_group_ids = {group.id for group in item_groups}
+        selected_by_group = {}
+        for modifier in modifiers:
+            if modifier.group_id not in item_group_ids:
+                raise serializers.ValidationError('Selected modifier is not available for this menu item.')
+            selected_by_group.setdefault(modifier.group_id, []).append(modifier)
+
+        for group in item_groups:
+            selected = selected_by_group.get(group.id, [])
+            if group.is_required and not selected:
+                raise serializers.ValidationError(f'Select a modifier for {group.name}.')
+            if group.selection_type == 'single' and len(selected) > 1:
+                raise serializers.ValidationError(f'Select only one modifier for {group.name}.')
+
+        return attrs
+
     def create(self, validated_data):
+        modifiers = validated_data.pop('modifiers', [])
         validated_data['unit_price'] = validated_data['menu_item'].price
-        return super().create(validated_data)
+        line = super().create(validated_data)
+        if modifiers:
+            line.modifiers.set(modifiers)
+            line.save(update_fields=['line_total', 'updated_at'])
+        return line
 
 
 class SplitBillLineSerializer(serializers.Serializer):
@@ -62,6 +125,10 @@ class SplitBillSerializer(serializers.Serializer):
 
 class TransferTableSerializer(serializers.Serializer):
     table = serializers.PrimaryKeyRelatedField(queryset=RestaurantTable.objects.all())
+
+
+class MergeOrderSerializer(serializers.Serializer):
+    target_order = serializers.PrimaryKeyRelatedField(queryset=RestaurantOrder.objects.all())
 
 
 class VoidOrderLineSerializer(serializers.Serializer):

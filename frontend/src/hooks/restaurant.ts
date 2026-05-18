@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/api';
-import { KitchenTicket, MenuCategory, MenuItem, RestaurantOrder, RestaurantTable } from '../types/restaurant';
+import { CashierCounter, CashierShift, KitchenTicket, MenuCategory, MenuItem, RestaurantOrder, RestaurantTable } from '../types/restaurant';
 
 const getList = <T,>(data: T[] | { results: T[] }) => (Array.isArray(data) ? data : data.results);
 
@@ -54,6 +54,36 @@ export const useKitchenTickets = () => {
   });
 };
 
+export const useCashierShifts = () => {
+  return useQuery({
+    queryKey: ['cashier-shifts'],
+    queryFn: async (): Promise<CashierShift[]> => {
+      const response = await apiClient.get<CashierShift[] | { results: CashierShift[] }>('/restaurant/cashier-shifts/');
+      return getList(response.data);
+    },
+  });
+};
+
+export const useCashierCounters = () => {
+  return useQuery({
+    queryKey: ['cashier-counters'],
+    queryFn: async (): Promise<CashierCounter[]> => {
+      const response = await apiClient.get<CashierCounter[] | { results: CashierCounter[] }>('/restaurant/cashier-counters/');
+      return getList(response.data);
+    },
+  });
+};
+
+export const useCurrentCashierShift = () => {
+  return useQuery({
+    queryKey: ['cashier-shift-current'],
+    queryFn: async (): Promise<CashierShift | null> => {
+      const response = await apiClient.get<CashierShift | null>('/restaurant/cashier-shifts/current/');
+      return response.data;
+    },
+  });
+};
+
 export const useCreateMenuCategory = () => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -101,6 +131,45 @@ export const useCreateRestaurantOrder = () => {
   });
 };
 
+export const useOpenCashierShift = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: { counter: string; opening_cash: string; business_date?: string; notes?: string }): Promise<CashierShift> => {
+      const response = await apiClient.post('/restaurant/cashier-shifts/', payload);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cashier-shifts'] });
+      queryClient.invalidateQueries({ queryKey: ['cashier-shift-current'] });
+    },
+  });
+};
+
+export const useCreateCashierCounter = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: Omit<CashierCounter, 'id'>): Promise<CashierCounter> => {
+      const response = await apiClient.post('/restaurant/cashier-counters/', payload);
+      return response.data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cashier-counters'] }),
+  });
+};
+
+export const useCloseCashierShift = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ shiftId, actual_cash, notes }: { shiftId: string; actual_cash: string; notes?: string }): Promise<CashierShift> => {
+      const response = await apiClient.post(`/restaurant/cashier-shifts/${shiftId}/close/`, { actual_cash, notes });
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cashier-shifts'] });
+      queryClient.invalidateQueries({ queryKey: ['cashier-shift-current'] });
+    },
+  });
+};
+
 export const useRestaurantOrderAction = () => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -110,7 +179,7 @@ export const useRestaurantOrderAction = () => {
       payload,
     }: {
       orderId: string;
-      action: 'add_line' | 'send_to_kitchen' | 'mark_served';
+      action: 'add_line' | 'send_to_kitchen' | 'mark_served' | 'split_bill' | 'transfer_table' | 'void_line' | 'apply_discount';
       payload?: Record<string, unknown>;
     }) => {
       const response = await apiClient.post(`/restaurant/orders/${orderId}/${action}/`, payload || {});
@@ -132,16 +201,19 @@ export const useSettleRestaurantOrder = () => {
       payment_method,
       paid_amount,
       booking,
+      cashier_shift,
     }: {
       orderId: string;
       payment_method: RestaurantOrder['payment_method'];
       paid_amount: string;
       booking?: string;
+      cashier_shift?: string;
     }) => {
       const response = await apiClient.post(`/restaurant/orders/${orderId}/settle/`, {
         payment_method,
         paid_amount,
         booking,
+        cashier_shift,
       });
       return response.data;
     },
@@ -153,6 +225,8 @@ export const useSettleRestaurantOrder = () => {
       queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-items'] });
       queryClient.invalidateQueries({ queryKey: ['stock-movements'] });
+      queryClient.invalidateQueries({ queryKey: ['cashier-shifts'] });
+      queryClient.invalidateQueries({ queryKey: ['cashier-shift-current'] });
     },
   });
 };

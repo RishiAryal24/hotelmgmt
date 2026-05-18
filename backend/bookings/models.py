@@ -136,6 +136,7 @@ class GuestFolio(UUIDModel):
     payment_method = models.CharField(max_length=30, choices=PAYMENT_METHOD_CHOICES, blank=True)
     paid_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     paid_at = models.DateTimeField(null=True, blank=True)
+    cashier_shift = models.ForeignKey('restaurant.CashierShift', on_delete=models.SET_NULL, related_name='guest_folios', null=True, blank=True)
 
     class Meta:
         ordering = ['-created_at']
@@ -162,12 +163,13 @@ class GuestFolio(UUIDModel):
         self.grand_total = self.subtotal + self.tax_total + self.service_charge_total + line_total
         super().save(*args, **kwargs)
 
-    def settle(self, *, payment_method: str, paid_amount=None):
+    def settle(self, *, payment_method: str, paid_amount=None, cashier_shift=None):
         self.payment_method = payment_method
         self.paid_amount = paid_amount if paid_amount is not None else self.grand_total
         self.status = 'paid'
         self.paid_at = timezone.now()
-        self.save(update_fields=['payment_method', 'paid_amount', 'status', 'paid_at', 'grand_total', 'updated_at'])
+        self.cashier_shift = cashier_shift
+        self.save(update_fields=['payment_method', 'paid_amount', 'status', 'paid_at', 'cashier_shift', 'grand_total', 'updated_at'])
 
 
 class GuestFolioLine(UUIDModel):

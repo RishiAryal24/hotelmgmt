@@ -1,7 +1,11 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from inventory.serializers import InventoryItemSerializer
 from restaurant.models import (
+    CashierCounter,
+    CashierShift,
     KitchenTicket,
     KitchenTicketLine,
     MenuCategory,
@@ -44,6 +48,79 @@ class RestaurantOrderLineSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data['unit_price'] = validated_data['menu_item'].price
         return super().create(validated_data)
+
+
+class SplitBillLineSerializer(serializers.Serializer):
+    line = serializers.UUIDField()
+    quantity = serializers.IntegerField(min_value=1)
+
+
+class SplitBillSerializer(serializers.Serializer):
+    lines = SplitBillLineSerializer(many=True)
+
+
+class TransferTableSerializer(serializers.Serializer):
+    table = serializers.PrimaryKeyRelatedField(queryset=RestaurantTable.objects.all())
+
+
+class VoidOrderLineSerializer(serializers.Serializer):
+    line = serializers.PrimaryKeyRelatedField(queryset=RestaurantOrderLine.objects.all())
+    reason = serializers.CharField(required=False, allow_blank=True)
+
+
+class ApplyOrderDiscountSerializer(serializers.Serializer):
+    discount_amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0.00'))
+    reason = serializers.CharField(required=False, allow_blank=True)
+
+
+class CashierShiftSerializer(serializers.ModelSerializer):
+    counter_details = serializers.SerializerMethodField()
+    cashier_email = serializers.EmailField(source='cashier.email', read_only=True)
+    live_totals = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CashierShift
+        fields = '__all__'
+        read_only_fields = [
+            'cashier',
+            'expected_cash',
+            'expected_card',
+            'expected_wallet',
+            'expected_bank_transfer',
+            'expected_room_posting',
+            'expected_total',
+            'actual_cash',
+            'cash_variance',
+            'opened_at',
+            'closed_at',
+            'status',
+        ]
+
+    def get_live_totals(self, obj):
+        from restaurant.services import calculate_cashier_shift_totals
+
+        return calculate_cashier_shift_totals(obj)
+
+    def get_counter_details(self, obj):
+        return CashierCounterSerializer(obj.counter).data
+
+
+class CashierCounterSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CashierCounter
+        fields = '__all__'
+
+
+class CashierShiftOpenSerializer(serializers.Serializer):
+    counter = serializers.PrimaryKeyRelatedField(queryset=CashierCounter.objects.filter(is_active=True))
+    opening_cash = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.00'))
+    business_date = serializers.DateField(required=False)
+    notes = serializers.CharField(required=False, allow_blank=True)
+
+
+class CashierShiftCloseSerializer(serializers.Serializer):
+    actual_cash = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.00'))
+    notes = serializers.CharField(required=False, allow_blank=True)
 
 
 class RestaurantOrderSerializer(serializers.ModelSerializer):

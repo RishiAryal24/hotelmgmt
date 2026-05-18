@@ -6,15 +6,36 @@ from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAuthenticated
 
 from restaurant.models import KitchenTicket, KitchenTicketLine, MenuCategory, MenuItem, RestaurantOrder, RestaurantOrderLine, RestaurantTable
+from restaurant.models import CashierCounter, CashierShift
 from restaurant.serializers import (
+    ApplyOrderDiscountSerializer,
+    CashierCounterSerializer,
+    CashierShiftCloseSerializer,
+    CashierShiftOpenSerializer,
+    CashierShiftSerializer,
     KitchenTicketSerializer,
     MenuCategorySerializer,
     MenuItemSerializer,
     RestaurantOrderLineSerializer,
     RestaurantOrderSerializer,
     RestaurantTableSerializer,
+    SplitBillSerializer,
+    TransferTableSerializer,
+    VoidOrderLineSerializer,
 )
-from restaurant.services import RestaurantSettlementError, settle_restaurant_order
+from restaurant.services import (
+    RestaurantOrderActionError,
+    RestaurantSettlementError,
+    CashierShiftError,
+    apply_order_discount,
+    close_cashier_shift,
+    get_open_cashier_shift,
+    open_cashier_shift,
+    settle_restaurant_order,
+    split_order_bill,
+    transfer_order_table,
+    void_order_line,
+)
 from users.permissions import HasActionPermission
 
 
@@ -72,6 +93,74 @@ class RestaurantTableViewSet(viewsets.ModelViewSet):
     ordering_fields = ['section', 'table_number', 'capacity']
 
 
+class CashierShiftViewSet(viewsets.ModelViewSet):
+    queryset = CashierShift.objects.select_related('cashier').all()
+    serializer_class = CashierShiftSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'pos.sale.create',
+        'retrieve': 'pos.sale.create',
+        'create': 'pos.sale.create',
+        'current': 'pos.sale.create',
+        'close': 'pos.sale.create',
+    }
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['status', 'business_date', 'cashier']
+    search_fields = ['cashier__email', 'notes']
+    ordering_fields = ['business_date', 'opened_at', 'closed_at', 'expected_total', 'cash_variance']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        if getattr(self.request.user, 'is_tenant_admin', False) or getattr(self.request.user, 'is_platform_admin', False):
+            return queryset
+        return queryset.filter(cashier=self.request.user)
+
+    def create(self, request, *args, **kwargs):
+        serializer = CashierShiftOpenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            shift = open_cashier_shift(cashier=request.user, **serializer.validated_data)
+        except CashierShiftError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(CashierShiftSerializer(shift).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['get'])
+    def current(self, request):
+        shift = CashierShift.objects.filter(cashier=request.user, status='open').select_related('cashier').first()
+        if not shift:
+            return Response(None)
+        return Response(CashierShiftSerializer(shift).data)
+
+    @action(detail=True, methods=['post'])
+    def close(self, request, pk=None):
+        shift = self.get_object()
+        serializer = CashierShiftCloseSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            shift = close_cashier_shift(shift, **serializer.validated_data)
+        except CashierShiftError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(CashierShiftSerializer(shift).data)
+
+
+class CashierCounterViewSet(viewsets.ModelViewSet):
+    queryset = CashierCounter.objects.all()
+    serializer_class = CashierCounterSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'pos.sale.create',
+        'retrieve': 'pos.sale.create',
+        'create': 'pos.sale.create',
+        'update': 'pos.sale.create',
+        'partial_update': 'pos.sale.create',
+        'destroy': 'pos.sale.create',
+    }
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['outlet_type', 'is_active']
+    search_fields = ['name', 'code', 'notes']
+    ordering_fields = ['name', 'outlet_type']
+
+
 class RestaurantOrderViewSet(viewsets.ModelViewSet):
     queryset = RestaurantOrder.objects.select_related('table', 'waiter').prefetch_related('lines', 'lines__menu_item').all()
     serializer_class = RestaurantOrderSerializer
@@ -86,6 +175,10 @@ class RestaurantOrderViewSet(viewsets.ModelViewSet):
         'add_line': 'restaurant.order.update',
         'send_to_kitchen': 'restaurant.order.update',
         'mark_served': 'restaurant.order.update',
+        'split_bill': 'restaurant.order.update',
+        'transfer_table': 'restaurant.order.update',
+        'void_line': 'restaurant.order.update',
+        'apply_discount': 'restaurant.order.update',
         'settle': 'pos.sale.create',
     }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -141,16 +234,82 @@ class RestaurantOrderViewSet(viewsets.ModelViewSet):
         return Response(RestaurantOrderSerializer(order).data)
 
     @action(detail=True, methods=['post'])
+    def split_bill(self, request, pk=None):
+        order = self.get_object()
+        serializer = SplitBillSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            split_order = split_order_bill(order, serializer.validated_data['lines'])
+        except RestaurantOrderActionError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        order.refresh_from_db()
+        return Response(
+            {
+                'original_order': RestaurantOrderSerializer(order).data,
+                'split_order': RestaurantOrderSerializer(split_order).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=['post'])
+    def transfer_table(self, request, pk=None):
+        order = self.get_object()
+        serializer = TransferTableSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            order = transfer_order_table(order, serializer.validated_data['table'])
+        except RestaurantOrderActionError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(RestaurantOrderSerializer(order).data)
+
+    @action(detail=True, methods=['post'])
+    def void_line(self, request, pk=None):
+        order = self.get_object()
+        serializer = VoidOrderLineSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            order = void_order_line(
+                order,
+                serializer.validated_data['line'],
+                reason=serializer.validated_data.get('reason', ''),
+            )
+        except RestaurantOrderActionError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(RestaurantOrderSerializer(order).data)
+
+    @action(detail=True, methods=['post'])
+    def apply_discount(self, request, pk=None):
+        order = self.get_object()
+        serializer = ApplyOrderDiscountSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            order = apply_order_discount(
+                order,
+                discount_amount=serializer.validated_data['discount_amount'],
+                reason=serializer.validated_data.get('reason', ''),
+            )
+        except RestaurantOrderActionError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(RestaurantOrderSerializer(order).data)
+
+    @action(detail=True, methods=['post'])
     def settle(self, request, pk=None):
         order = self.get_object()
         try:
+            cashier_shift = None
+            if request.data.get('cashier_shift'):
+                cashier_shift = get_open_cashier_shift(cashier=request.user, cashier_shift_id=request.data.get('cashier_shift'))
             settle_restaurant_order(
                 order,
                 payment_method=request.data.get('payment_method'),
                 paid_amount=request.data.get('paid_amount') or order.grand_total,
                 booking_id=request.data.get('booking'),
                 posted_by=request.user,
+                cashier_shift=cashier_shift,
             )
+        except CashierShift.DoesNotExist:
+            return Response({'error': 'Select an open cashier shift for settlement'}, status=status.HTTP_400_BAD_REQUEST)
         except RestaurantSettlementError as exc:
             return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 

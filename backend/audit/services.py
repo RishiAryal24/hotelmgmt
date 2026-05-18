@@ -2,6 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
+from django.db.models.fields.files import FieldFile
 from django.utils.timezone import is_aware
 
 from audit.context import get_current_request, get_current_user
@@ -9,6 +10,8 @@ from audit.models import AuditLog
 
 
 def serialize_value(value):
+    if isinstance(value, FieldFile):
+        return value.name or ''
     if isinstance(value, Decimal):
         return str(value)
     if isinstance(value, UUID):

@@ -1,4 +1,5 @@
 from decimal import Decimal
+from uuid import uuid4
 
 from django.http import HttpResponse
 from django.db import transaction
@@ -9,11 +10,12 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.permissions import IsAuthenticated
-from bookings.models import Booking, Guest, GuestCommunication, GuestFolio, GuestPoints, LoyaltyProgram, Package, RatePlan, Room, RoomType
+from bookings.models import Booking, Guest, GuestCommunication, GuestFolio, GuestFolioLine, GuestPoints, LoyaltyProgram, Package, RatePlan, Room, RoomType
 from bookings.pdf import booking_confirmation_pdf, guest_folio_pdf
 from bookings.serializers import (
     BookingSerializer,
     GuestCommunicationSerializer,
+    GuestFolioChargeSerializer,
     GuestFolioSerializer,
     GuestPointsSerializer,
     GuestSerializer,
@@ -198,7 +200,16 @@ class BookingViewSet(viewsets.ModelViewSet):
                 if paid_amount != folio.grand_total:
                     return Response({'error': 'Partial hotel folio payments are not enabled yet'}, status=status.HTTP_400_BAD_REQUEST)
 
-                folio.settle(payment_method=payment_method, paid_amount=paid_amount)
+                cashier_shift = None
+                if request.data.get('cashier_shift'):
+                    from restaurant.services import get_open_cashier_shift
+
+                    try:
+                        cashier_shift = get_open_cashier_shift(cashier=request.user, cashier_shift_id=request.data.get('cashier_shift'))
+                    except Exception:
+                        return Response({'error': 'Select an open cashier shift for settlement'}, status=status.HTTP_400_BAD_REQUEST)
+
+                folio.settle(payment_method=payment_method, paid_amount=paid_amount, cashier_shift=cashier_shift)
                 from accounting.services import post_room_payment
 
                 post_room_payment(folio, posted_by=request.user)
@@ -350,6 +361,7 @@ class GuestFolioViewSet(viewsets.ReadOnlyModelViewSet):
         'list': 'bookings.reservation.read',
         'retrieve': 'bookings.reservation.read',
         'settle': 'bookings.reservation.check_out',
+        'add_charge': 'bookings.reservation.check_out',
     }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'booking']
@@ -371,12 +383,38 @@ class GuestFolioViewSet(viewsets.ReadOnlyModelViewSet):
             return Response({'error': 'Partial hotel folio payments are not enabled yet'}, status=status.HTTP_400_BAD_REQUEST)
 
         with transaction.atomic():
-            folio.settle(payment_method=payment_method, paid_amount=paid_amount)
+            cashier_shift = None
+            if request.data.get('cashier_shift'):
+                from restaurant.services import get_open_cashier_shift
+
+                try:
+                    cashier_shift = get_open_cashier_shift(cashier=request.user, cashier_shift_id=request.data.get('cashier_shift'))
+                except Exception:
+                    return Response({'error': 'Select an open cashier shift for settlement'}, status=status.HTTP_400_BAD_REQUEST)
+            folio.settle(payment_method=payment_method, paid_amount=paid_amount, cashier_shift=cashier_shift)
             from accounting.services import post_room_payment
 
             post_room_payment(folio, posted_by=request.user)
 
         return Response(GuestFolioSerializer(folio).data)
+
+    @action(detail=True, methods=['post'], url_path='add-charge')
+    def add_charge(self, request, pk=None):
+        folio = self.get_object()
+        if folio.status != 'open':
+            return Response({'error': 'Only open folios can receive charges'}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = GuestFolioChargeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        charge = GuestFolioLine.objects.create(
+            folio=folio,
+            source_module=serializer.validated_data.get('source_module') or 'facility_charge',
+            source_id=str(uuid4()),
+            description=serializer.validated_data['description'],
+            amount=serializer.validated_data['amount'],
+        )
+        folio.recalculate_totals()
+        return Response(GuestFolioSerializer(folio).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'], url_path='pdf')
     def pdf(self, request, pk=None):

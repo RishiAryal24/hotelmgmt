@@ -9,6 +9,7 @@ import {
   useCreateMenuItem,
   useCreateRestaurantOrder,
   useCreateRestaurantTable,
+  useCurrentCashierShift,
   useKitchenTicketAction,
   useKitchenTickets,
   useMenuCategories,
@@ -46,6 +47,8 @@ const emptyOrder: { table: string; room_booking: string; order_type: RestaurantO
 };
 const emptyOrderLine = { menu_item: '', quantity: 1, notes: '' };
 const emptySettleForm = { payment_method: 'cash' as RestaurantOrder['payment_method'], paid_amount: '', booking: '' };
+const emptyVoidForm = { line: '', reason: '' };
+const emptyDiscountForm = { discount_amount: '', reason: '' };
 
 const Restaurant: React.FC = () => {
   const { data: settings } = useQuery({ queryKey: ['tenant-settings'], queryFn: getTenantSettings });
@@ -55,6 +58,7 @@ const Restaurant: React.FC = () => {
   const { data: tables } = useRestaurantTables();
   const { data: orders } = useRestaurantOrders();
   const { data: tickets } = useKitchenTickets();
+  const { data: currentShift } = useCurrentCashierShift();
   const { data: bookings } = useBookings();
   const createCategory = useCreateMenuCategory();
   const createItem = useCreateMenuItem();
@@ -73,15 +77,45 @@ const Restaurant: React.FC = () => {
   const [lineForms, setLineForms] = useState<Record<string, typeof emptyOrderLine>>({});
   const [settleForms, setSettleForms] = useState<Record<string, typeof emptySettleForm>>({});
   const [settlingOrder, setSettlingOrder] = useState<RestaurantOrder | null>(null);
+  const [transferOrder, setTransferOrder] = useState<RestaurantOrder | null>(null);
+  const [transferForm, setTransferForm] = useState({ table: '' });
+  const [splitOrder, setSplitOrder] = useState<RestaurantOrder | null>(null);
+  const [splitQuantities, setSplitQuantities] = useState<Record<string, number>>({});
+  const [voidingOrder, setVoidingOrder] = useState<RestaurantOrder | null>(null);
+  const [voidForm, setVoidForm] = useState(emptyVoidForm);
+  const [discountOrder, setDiscountOrder] = useState<RestaurantOrder | null>(null);
+  const [discountForm, setDiscountForm] = useState(emptyDiscountForm);
+  const [receiptOrder, setReceiptOrder] = useState<RestaurantOrder | null>(null);
+  const [historySearch, setHistorySearch] = useState('');
 
   const activeOrders = orders?.filter((order) => order.status !== 'paid' && order.status !== 'cancelled') || [];
+  const historyOrders =
+    orders?.filter((order) => {
+      if (!['paid', 'cancelled'].includes(order.status)) return false;
+      const query = historySearch.trim().toLowerCase();
+      if (!query) return true;
+      return [
+        order.order_number,
+        order.order_type,
+        order.status,
+        order.table_details?.table_number,
+        order.room_number,
+        order.guest_name,
+        order.payment_method,
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query));
+    }) || [];
   const inHouseBookings = bookings?.filter((booking) => booking.status === 'checked_in') || [];
+  const availableTransferTables =
+    tables?.filter((table) => table.is_active && ['available', 'reserved'].includes(table.status) && table.id !== transferOrder?.table) || [];
   const tabs = [
     { id: 'orders', label: 'Orders', count: activeOrders.length },
     { id: 'menu', label: 'Menu', count: items?.length || 0 },
     { id: 'categories', label: 'Categories', count: categories?.length || 0 },
     { id: 'tables', label: 'Tables', count: tables?.length || 0 },
     { id: 'kitchen', label: 'Kitchen', count: tickets?.filter((ticket) => ticket.status !== 'served').length || 0 },
+    { id: 'history', label: 'History', count: historyOrders.length },
   ];
 
   const handleCreateCategory = (e: React.FormEvent) => {
@@ -141,11 +175,13 @@ const Restaurant: React.FC = () => {
         payment_method: form.payment_method,
         paid_amount: form.paid_amount,
         booking: form.payment_method === 'room_posting' ? form.booking : undefined,
+        cashier_shift: currentShift?.id,
       },
       {
-        onSuccess: () => {
+        onSuccess: (settledOrder) => {
           setSettleForms({ ...settleForms, [orderId]: emptySettleForm });
           setSettlingOrder(null);
+          setReceiptOrder(settledOrder as RestaurantOrder);
         },
       },
     );
@@ -162,6 +198,76 @@ const Restaurant: React.FC = () => {
     });
     setSettlingOrder(order);
   };
+
+  const openTransferOrder = (order: RestaurantOrder) => {
+    setTransferOrder(order);
+    setTransferForm({ table: '' });
+  };
+
+  const handleTransferOrder = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!transferOrder || !transferForm.table) return;
+    orderAction.mutate(
+      { orderId: transferOrder.id, action: 'transfer_table', payload: transferForm },
+      { onSuccess: () => setTransferOrder(null) },
+    );
+  };
+
+  const openSplitOrder = (order: RestaurantOrder) => {
+    setSplitOrder(order);
+    setSplitQuantities(Object.fromEntries(order.lines.filter((line) => line.status !== 'cancelled').map((line) => [line.id, 0])));
+  };
+
+  const handleSplitOrder = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!splitOrder) return;
+    const lines = splitOrder.lines
+      .map((line) => ({ line: line.id, quantity: Number(splitQuantities[line.id] || 0) }))
+      .filter((line) => line.quantity > 0);
+    if (!lines.length) return;
+    orderAction.mutate(
+      { orderId: splitOrder.id, action: 'split_bill', payload: { lines } },
+      { onSuccess: () => setSplitOrder(null) },
+    );
+  };
+
+  const openVoidOrderLine = (order: RestaurantOrder) => {
+    const activeLines = order.lines.filter((line) => line.status !== 'cancelled');
+    setVoidingOrder(order);
+    setVoidForm({ line: activeLines[0]?.id || '', reason: '' });
+  };
+
+  const handleVoidOrderLine = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!voidingOrder || !voidForm.line) return;
+    orderAction.mutate(
+      { orderId: voidingOrder.id, action: 'void_line', payload: voidForm },
+      { onSuccess: () => setVoidingOrder(null) },
+    );
+  };
+
+  const openDiscountOrder = (order: RestaurantOrder) => {
+    setDiscountOrder(order);
+    setDiscountForm({ discount_amount: order.discount_total && order.discount_total !== '0.00' ? order.discount_total : '', reason: '' });
+  };
+
+  const handleApplyDiscount = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!discountOrder) return;
+    orderAction.mutate(
+      { orderId: discountOrder.id, action: 'apply_discount', payload: { ...discountForm, discount_amount: discountForm.discount_amount || '0.00' } },
+      { onSuccess: () => setDiscountOrder(null) },
+    );
+  };
+
+  const selectedSplitTotal = splitOrder
+    ? splitOrder.lines.filter((line) => line.status !== 'cancelled').reduce((total, line) => {
+        const quantity = Math.min(Number(splitQuantities[line.id] || 0), line.quantity);
+        return total + quantity * Number(line.unit_price || 0);
+      }, 0)
+    : 0;
+  const selectedSplitQuantity = splitOrder ? Object.values(splitQuantities).reduce((total, quantity) => total + Number(quantity || 0), 0) : 0;
+  const splitOrderQuantity = splitOrder ? splitOrder.lines.filter((line) => line.status !== 'cancelled').reduce((total, line) => total + line.quantity, 0) : 0;
 
   return (
     <div className="space-y-5">
@@ -209,11 +315,15 @@ const Restaurant: React.FC = () => {
                 <tbody className="divide-y divide-slate-100">
                   {activeOrders.map((order) => {
                     const lineForm = lineForms[order.id] || emptyOrderLine;
+                    const activeLines = order.lines.filter((line) => line.status !== 'cancelled');
                     return (
                       <tr key={order.id}>
                         <td className="py-3 pr-4"><p className="font-medium text-slate-900">{order.order_number}</p><p className="text-xs text-slate-500">{order.order_type} {order.table_details ? `| Table ${order.table_details.table_number}` : ''}{order.room_number ? ` | Room ${order.room_number}` : ''}</p></td>
                         <td className="py-3 pr-4"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{order.status}</span></td>
-                        <td className="py-3 pr-4">{order.lines.length ? order.lines.map((line) => `${line.quantity}x ${line.menu_item_details?.name}`).join(', ') : 'No items'}</td>
+                        <td className="py-3 pr-4">
+                          {activeLines.length ? activeLines.map((line) => `${line.quantity}x ${line.menu_item_details?.name}`).join(', ') : 'No active items'}
+                          {order.lines.some((line) => line.status === 'cancelled') && <p className="text-xs text-slate-400">Voided items hidden from total</p>}
+                        </td>
                         <td className="py-3 pr-4 font-medium">{formatMoney(order.grand_total, settings?.currency)}</td>
                         <td className="py-3 pr-4">
                           <div className="grid min-w-[260px] grid-cols-[1fr_64px] gap-2">
@@ -230,8 +340,12 @@ const Restaurant: React.FC = () => {
                         <td className="py-3 pr-4">
                           <div className="flex flex-wrap gap-2">
                             {can('restaurant.order.update') && <button onClick={() => handleAddLine(order.id)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">Add</button>}
-                            {can('restaurant.order.update') && order.lines.length > 0 && ['draft', 'sent_to_kitchen'].includes(order.status) && <button onClick={() => orderAction.mutate({ orderId: order.id, action: 'send_to_kitchen' })} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-medium text-white">Kitchen</button>}
+                            {can('restaurant.order.update') && activeLines.length > 0 && ['draft', 'sent_to_kitchen'].includes(order.status) && <button onClick={() => orderAction.mutate({ orderId: order.id, action: 'send_to_kitchen' })} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-medium text-white">Kitchen</button>}
                             {can('restaurant.order.update') && ['sent_to_kitchen', 'preparing'].includes(order.status) && <button onClick={() => orderAction.mutate({ orderId: order.id, action: 'mark_served' })} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-medium text-white">Served</button>}
+                            {can('restaurant.order.update') && order.order_type === 'dine_in' && ['draft', 'sent_to_kitchen', 'preparing', 'served'].includes(order.status) && <button onClick={() => openTransferOrder(order)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">Transfer</button>}
+                            {can('restaurant.order.update') && ['draft', 'served'].includes(order.status) && activeLines.length > 0 && <button onClick={() => openSplitOrder(order)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">Split</button>}
+                            {can('restaurant.order.update') && activeLines.length > 0 && <button onClick={() => openVoidOrderLine(order)} className="rounded-xl border border-rose-200 px-3 py-2 text-xs font-medium text-rose-700 hover:bg-rose-50">Void</button>}
+                            {can('restaurant.order.update') && activeLines.length > 0 && <button onClick={() => openDiscountOrder(order)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">Discount</button>}
                             {can('pos.sale.create') && order.status === 'served' && <button onClick={() => openSettleOrder(order)} className="rounded-xl bg-slate-800 px-3 py-2 text-xs font-medium text-white">Settle</button>}
                           </div>
                         </td>
@@ -332,6 +446,51 @@ const Restaurant: React.FC = () => {
         </RowsTable>
       )}
 
+      {activeTab === 'history' && (
+        <section className="rounded-3xl bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="font-bold text-slate-900">Order History</h2>
+              <p className="mt-1 text-sm text-slate-500">Paid and cancelled restaurant orders.</p>
+            </div>
+            <input
+              type="search"
+              value={historySearch}
+              onChange={(e) => setHistorySearch(e.target.value)}
+              placeholder="Search orders, table, room, guest"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm md:w-80"
+            />
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-left text-sm">
+              <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
+                <tr><th className="py-3 pr-4">Order</th><th className="py-3 pr-4">Location</th><th className="py-3 pr-4">Status</th><th className="py-3 pr-4">Payment</th><th className="py-3 pr-4">Total</th><th className="py-3 pr-4">Actions</th></tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {historyOrders.map((order) => (
+                  <tr key={order.id}>
+                    <td className="py-3 pr-4">
+                      <p className="font-medium text-slate-900">{order.order_number}</p>
+                      <p className="text-xs text-slate-500">{order.order_type}</p>
+                    </td>
+                    <td className="py-3 pr-4">{getOrderLocation(order)}</td>
+                    <td className="py-3 pr-4"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{order.status}</span></td>
+                    <td className="py-3 pr-4">{order.payment_method || '-'}</td>
+                    <td className="py-3 pr-4 font-medium">{formatMoney(order.grand_total, settings?.currency)}</td>
+                    <td className="py-3 pr-4">
+                      <button onClick={() => setReceiptOrder(order)} className="rounded-xl bg-slate-800 px-3 py-2 text-xs font-medium text-white hover:bg-slate-900">
+                        Receipt
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {historyOrders.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No historical restaurant orders found.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {settlingOrder && (
         <ActionModal
           title={`Settle order ${settlingOrder.order_number}`}
@@ -405,6 +564,255 @@ const Restaurant: React.FC = () => {
           })()}
         </ActionModal>
       )}
+
+      {transferOrder && (
+        <ActionModal
+          title={`Transfer ${transferOrder.order_number}`}
+          description={`Move this dine-in order from Table ${transferOrder.table_details?.table_number || '-'}.`}
+          onClose={() => setTransferOrder(null)}
+        >
+          <form onSubmit={handleTransferOrder}>
+            <div className="grid gap-3">
+              <label className="text-sm font-medium text-slate-700" htmlFor="transfer-table">
+                Target table
+              </label>
+              <select
+                id="transfer-table"
+                value={transferForm.table}
+                onChange={(e) => setTransferForm({ table: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                required
+              >
+                <option value="">Select available table</option>
+                {availableTransferTables.map((table) => (
+                  <option key={table.id} value={table.id}>
+                    Table {table.table_number} - {table.section || 'No section'} - {table.status}
+                  </option>
+                ))}
+              </select>
+              {availableTransferTables.length === 0 && <p className="text-sm text-amber-700">No available or reserved tables are ready for transfer.</p>}
+            </div>
+            <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button type="button" onClick={() => setTransferOrder(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Cancel
+              </button>
+              <button type="submit" disabled={orderAction.isPending || !transferForm.table} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Transfer order
+              </button>
+            </div>
+            {orderAction.isError && <p className="mt-3 text-sm text-red-600">Could not transfer order. Check table availability.</p>}
+          </form>
+        </ActionModal>
+      )}
+
+      {splitOrder && (
+        <ActionModal
+          title={`Split bill ${splitOrder.order_number}`}
+          description="Choose the quantities to move into a separate bill."
+          onClose={() => setSplitOrder(null)}
+        >
+          <form onSubmit={handleSplitOrder}>
+            <div className="space-y-3">
+              {splitOrder.lines.filter((line) => line.status !== 'cancelled').map((line) => {
+                const quantity = splitQuantities[line.id] || 0;
+                return (
+                  <div key={line.id} className="grid gap-3 rounded-2xl border border-slate-100 p-3 md:grid-cols-[minmax(0,1fr)_120px] md:items-center">
+                    <div>
+                      <p className="font-medium text-slate-900">{line.menu_item_details?.name || 'Menu item'}</p>
+                      <p className="text-xs text-slate-500">
+                        {line.quantity} available at {formatMoney(line.unit_price, settings?.currency)}
+                      </p>
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      max={line.quantity}
+                      value={quantity}
+                      onChange={(e) => {
+                        const nextQuantity = Math.max(0, Math.min(Number(e.target.value), line.quantity));
+                        setSplitQuantities({ ...splitQuantities, [line.id]: nextQuantity });
+                      }}
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm font-medium text-slate-700">Split total: {formatMoney(String(selectedSplitTotal.toFixed(2)), settings?.currency)}</p>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setSplitOrder(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                  Cancel
+                </button>
+                <button type="submit" disabled={orderAction.isPending || selectedSplitTotal <= 0 || selectedSplitQuantity >= splitOrderQuantity} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300">
+                  Create split bill
+                </button>
+              </div>
+            </div>
+            {orderAction.isError && <p className="mt-3 text-sm text-red-600">Could not split bill. Leave at least one item on the original order.</p>}
+          </form>
+        </ActionModal>
+      )}
+
+      {voidingOrder && (
+        <ActionModal
+          title={`Void item ${voidingOrder.order_number}`}
+          description="Select the item to remove from the payable bill."
+          onClose={() => setVoidingOrder(null)}
+        >
+          <form onSubmit={handleVoidOrderLine}>
+            <div className="grid gap-3">
+              <label className="text-sm font-medium text-slate-700" htmlFor="void-line">
+                Order item
+              </label>
+              <select
+                id="void-line"
+                value={voidForm.line}
+                onChange={(e) => setVoidForm({ ...voidForm, line: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                required
+              >
+                <option value="">Select item</option>
+                {voidingOrder.lines.filter((line) => line.status !== 'cancelled').map((line) => (
+                  <option key={line.id} value={line.id}>
+                    {line.quantity}x {line.menu_item_details?.name} - {formatMoney(line.line_total, settings?.currency)}
+                  </option>
+                ))}
+              </select>
+              <textarea
+                placeholder="Reason"
+                value={voidForm.reason}
+                onChange={(e) => setVoidForm({ ...voidForm, reason: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button type="button" onClick={() => setVoidingOrder(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Cancel
+              </button>
+              <button type="submit" disabled={orderAction.isPending || !voidForm.line} className="rounded-xl bg-rose-700 px-4 py-2 text-sm font-medium text-white hover:bg-rose-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Void item
+              </button>
+            </div>
+            {orderAction.isError && <p className="mt-3 text-sm text-red-600">Could not void item. Check order status and try again.</p>}
+          </form>
+        </ActionModal>
+      )}
+
+      {discountOrder && (
+        <ActionModal
+          title={`Discount ${discountOrder.order_number}`}
+          description={`Current bill total ${formatMoney(discountOrder.grand_total, settings?.currency)}`}
+          onClose={() => setDiscountOrder(null)}
+        >
+          <form onSubmit={handleApplyDiscount}>
+            <div className="grid gap-3 md:grid-cols-2">
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Discount amount"
+                value={discountForm.discount_amount}
+                onChange={(e) => setDiscountForm({ ...discountForm, discount_amount: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              />
+              <textarea
+                placeholder="Reason"
+                value={discountForm.reason}
+                onChange={(e) => setDiscountForm({ ...discountForm, reason: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2"
+              />
+            </div>
+            <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button type="button" onClick={() => setDiscountOrder(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Cancel
+              </button>
+              <button type="submit" disabled={orderAction.isPending} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Apply discount
+              </button>
+            </div>
+            {orderAction.isError && <p className="mt-3 text-sm text-red-600">Could not apply discount. It cannot exceed the active order total.</p>}
+          </form>
+        </ActionModal>
+      )}
+
+      {receiptOrder && (
+        <ActionModal
+          title={`Receipt ${receiptOrder.order_number}`}
+          description={getOrderLocation(receiptOrder)}
+          onClose={() => setReceiptOrder(null)}
+          maxWidthClassName="max-w-xl"
+        >
+          <ReceiptView order={receiptOrder} currency={settings?.currency} />
+          <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4 print:hidden">
+            <button type="button" onClick={() => setReceiptOrder(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Close
+            </button>
+            <button type="button" onClick={() => window.print()} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900">
+              Print
+            </button>
+          </div>
+        </ActionModal>
+      )}
+    </div>
+  );
+};
+
+const getOrderLocation = (order: RestaurantOrder) => {
+  if (order.table_details) return `Table ${order.table_details.table_number}`;
+  if (order.room_number) return `Room ${order.room_number}${order.guest_name ? ` - ${order.guest_name}` : ''}`;
+  return order.order_type;
+};
+
+const ReceiptView = ({ order, currency }: { order: RestaurantOrder; currency?: string }) => {
+  const activeLines = order.lines.filter((line) => line.status !== 'cancelled');
+  const voidedLines = order.lines.filter((line) => line.status === 'cancelled');
+
+  return (
+    <div className="receipt-print rounded-2xl border border-slate-200 p-4 text-sm text-slate-800">
+      <div className="border-b border-dashed border-slate-300 pb-3 text-center">
+        <p className="text-lg font-bold text-slate-950">Restaurant Receipt</p>
+        <p className="mt-1 text-xs text-slate-500">{order.order_number}</p>
+      </div>
+      <div className="grid gap-2 border-b border-dashed border-slate-300 py-3 text-xs text-slate-600">
+        <div className="flex justify-between gap-4"><span>Location</span><span className="text-right font-medium text-slate-900">{getOrderLocation(order)}</span></div>
+        <div className="flex justify-between gap-4"><span>Status</span><span className="text-right font-medium text-slate-900">{order.status}</span></div>
+        <div className="flex justify-between gap-4"><span>Payment</span><span className="text-right font-medium text-slate-900">{order.payment_method || '-'}</span></div>
+        {order.paid_at && <div className="flex justify-between gap-4"><span>Paid at</span><span className="text-right font-medium text-slate-900">{new Date(order.paid_at).toLocaleString()}</span></div>}
+      </div>
+      <div className="border-b border-dashed border-slate-300 py-3">
+        <div className="space-y-2">
+          {activeLines.map((line) => (
+            <div key={line.id} className="grid grid-cols-[1fr_auto] gap-3">
+              <div>
+                <p className="font-medium text-slate-900">{line.menu_item_details?.name || 'Menu item'}</p>
+                <p className="text-xs text-slate-500">{line.quantity} x {formatMoney(line.unit_price, currency)}</p>
+              </div>
+              <p className="font-medium text-slate-900">{formatMoney(line.line_total, currency)}</p>
+            </div>
+          ))}
+          {activeLines.length === 0 && <p className="text-center text-slate-500">No payable items.</p>}
+        </div>
+        {voidedLines.length > 0 && (
+          <div className="mt-3 border-t border-slate-100 pt-3">
+            <p className="mb-2 text-xs font-semibold uppercase text-slate-400">Voided</p>
+            {voidedLines.map((line) => (
+              <div key={line.id} className="flex justify-between gap-3 text-xs text-slate-500">
+                <span>{line.quantity}x {line.menu_item_details?.name || 'Menu item'}</span>
+                <span>{formatMoney(line.line_total, currency)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="space-y-2 pt-3">
+        <div className="flex justify-between gap-4"><span>Subtotal</span><span>{formatMoney(order.subtotal, currency)}</span></div>
+        {Number(order.tax_total) > 0 && <div className="flex justify-between gap-4"><span>Tax</span><span>{formatMoney(order.tax_total, currency)}</span></div>}
+        {Number(order.service_charge_total) > 0 && <div className="flex justify-between gap-4"><span>Service</span><span>{formatMoney(order.service_charge_total, currency)}</span></div>}
+        {Number(order.discount_total) > 0 && <div className="flex justify-between gap-4 text-rose-700"><span>Discount</span><span>-{formatMoney(order.discount_total, currency)}</span></div>}
+        <div className="flex justify-between gap-4 border-t border-slate-200 pt-2 text-base font-bold text-slate-950"><span>Total</span><span>{formatMoney(order.grand_total, currency)}</span></div>
+        {Number(order.paid_amount) > 0 && <div className="flex justify-between gap-4 text-sm font-medium"><span>Paid</span><span>{formatMoney(order.paid_amount, currency)}</span></div>}
+      </div>
     </div>
   );
 };

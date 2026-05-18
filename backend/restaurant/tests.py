@@ -5,8 +5,20 @@ from django_tenants.test.cases import TenantTestCase
 
 from accounting.models import JournalEntry, JournalLine
 from bookings.models import Booking, Guest, GuestFolioLine, Room, RoomType
-from restaurant.models import MenuCategory, MenuItem, RestaurantOrder, RestaurantOrderLine, RestaurantTable
-from restaurant.services import RestaurantSettlementError, settle_restaurant_order
+from restaurant.models import CashierCounter, CashierShift, MenuCategory, MenuItem, RestaurantOrder, RestaurantOrderLine, RestaurantTable
+from restaurant.services import (
+    CashierShiftError,
+    RestaurantOrderActionError,
+    RestaurantSettlementError,
+    apply_order_discount,
+    close_cashier_shift,
+    open_cashier_shift,
+    settle_restaurant_order,
+    split_order_bill,
+    transfer_order_table,
+    void_order_line,
+)
+from users.models import PlatformUser
 
 
 class RestaurantRoomPostingTests(TenantTestCase):
@@ -65,6 +77,12 @@ class RestaurantRoomPostingTests(TenantTestCase):
         self.order = RestaurantOrder.objects.create(table=self.table, order_type='dine_in', status='served')
         RestaurantOrderLine.objects.create(order=self.order, menu_item=self.item, quantity=2, unit_price=Decimal('25.00'))
         self.order.refresh_from_db()
+        self.cashier = PlatformUser.objects.create_user(email=f'cashier-{suffix}@example.com', password='testpass123')
+        self.counter = CashierCounter.objects.create(
+            name=f'Restaurant Counter {suffix}',
+            code=f'REST-{suffix}',
+            outlet_type='restaurant',
+        )
 
     def test_room_posting_creates_folio_line_and_ar_journal(self):
         settled_order = settle_restaurant_order(
@@ -108,3 +126,138 @@ class RestaurantRoomPostingTests(TenantTestCase):
                 self.order,
                 payment_method='room_posting',
             )
+
+    def test_dine_in_order_can_transfer_to_available_table(self):
+        target_table = RestaurantTable.objects.create(table_number=f'TR-{abs(hash(self._testMethodName)) % 1000}')
+        self.table.status = 'occupied'
+        self.table.save(update_fields=['status', 'updated_at'])
+
+        transfer_order_table(self.order, target_table)
+
+        self.order.refresh_from_db()
+        self.table.refresh_from_db()
+        target_table.refresh_from_db()
+        self.assertEqual(self.order.table_id, target_table.id)
+        self.assertEqual(target_table.status, 'occupied')
+        self.assertEqual(self.table.status, 'available')
+
+    def test_table_transfer_requires_available_target(self):
+        target_table = RestaurantTable.objects.create(
+            table_number=f'BUSY-{abs(hash(self._testMethodName)) % 1000}',
+            status='occupied',
+        )
+
+        with self.assertRaises(RestaurantOrderActionError):
+            transfer_order_table(self.order, target_table)
+
+    def test_served_order_can_split_selected_quantities_to_new_bill(self):
+        second_item = MenuItem.objects.create(
+            category=self.category,
+            name=f'Dessert {abs(hash(self._testMethodName)) % 1000}',
+            sku=f'DESSERT-{abs(hash(self._testMethodName)) % 1000}',
+            price='10.00',
+        )
+        second_line = RestaurantOrderLine.objects.create(
+            order=self.order,
+            menu_item=second_item,
+            quantity=3,
+            unit_price=Decimal('10.00'),
+        )
+        self.order.refresh_from_db()
+
+        split_order = split_order_bill(
+            self.order,
+            [
+                {'line': str(second_line.id), 'quantity': 1},
+            ],
+        )
+
+        self.order.refresh_from_db()
+        second_line.refresh_from_db()
+        split_line = split_order.lines.get()
+
+        self.assertEqual(split_order.status, 'served')
+        self.assertEqual(split_order.table_id, self.order.table_id)
+        self.assertEqual(split_order.grand_total, Decimal('10.00'))
+        self.assertEqual(second_line.quantity, 2)
+        self.assertEqual(self.order.grand_total, Decimal('70.00'))
+        self.assertEqual(split_line.menu_item_id, second_item.id)
+        self.assertEqual(split_line.quantity, 1)
+
+    def test_split_bill_must_leave_item_on_original_order(self):
+        only_line = self.order.lines.get()
+
+        with self.assertRaises(RestaurantOrderActionError):
+            split_order_bill(
+                self.order,
+                [
+                    {'line': str(only_line.id), 'quantity': only_line.quantity},
+                ],
+            )
+
+    def test_order_line_can_be_voided_and_removed_from_total(self):
+        line = self.order.lines.get()
+
+        void_order_line(self.order, line, reason='Guest changed mind')
+
+        self.order.refresh_from_db()
+        line.refresh_from_db()
+        self.assertEqual(line.status, 'cancelled')
+        self.assertIn('Guest changed mind', line.notes)
+        self.assertEqual(self.order.subtotal, Decimal('0.00'))
+        self.assertEqual(self.order.grand_total, Decimal('0.00'))
+
+    def test_void_line_requires_order_ownership(self):
+        other_order = RestaurantOrder.objects.create(table=self.table, order_type='dine_in', status='served')
+        line = self.order.lines.get()
+
+        with self.assertRaises(RestaurantOrderActionError):
+            void_order_line(other_order, line)
+
+    def test_order_discount_reduces_grand_total(self):
+        apply_order_discount(self.order, discount_amount=Decimal('5.00'), reason='Service recovery')
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.discount_total, Decimal('5.00'))
+        self.assertEqual(self.order.grand_total, Decimal('45.00'))
+        self.assertIn('Service recovery', self.order.notes)
+
+    def test_order_discount_cannot_exceed_order_total(self):
+        with self.assertRaises(RestaurantOrderActionError):
+            apply_order_discount(self.order, discount_amount=Decimal('55.00'))
+
+    def test_cashier_shift_closing_totals_restaurant_payments(self):
+        shift = open_cashier_shift(cashier=self.cashier, counter=self.counter, opening_cash=Decimal('100.00'))
+        settle_restaurant_order(self.order, payment_method='cash', paid_amount=Decimal('50.00'), cashier_shift=shift)
+
+        card_order = RestaurantOrder.objects.create(table=self.table, order_type='dine_in', status='served')
+        RestaurantOrderLine.objects.create(order=card_order, menu_item=self.item, quantity=1, unit_price=Decimal('25.00'))
+        card_order.refresh_from_db()
+        settle_restaurant_order(card_order, payment_method='card', paid_amount=Decimal('25.00'), cashier_shift=shift)
+
+        close_cashier_shift(shift, actual_cash=Decimal('150.00'), notes='Balanced')
+
+        shift.refresh_from_db()
+        self.assertEqual(shift.status, 'closed')
+        self.assertEqual(shift.expected_cash, Decimal('150.00'))
+        self.assertEqual(shift.expected_card, Decimal('25.00'))
+        self.assertEqual(shift.expected_total, Decimal('175.00'))
+        self.assertEqual(shift.cash_variance, Decimal('0.00'))
+        self.assertIn('Balanced', shift.notes)
+
+    def test_cashier_shift_prevents_duplicate_open_shift(self):
+        open_cashier_shift(cashier=self.cashier, counter=self.counter, opening_cash=Decimal('25.00'))
+
+        with self.assertRaises(CashierShiftError):
+            open_cashier_shift(cashier=self.cashier, counter=self.counter, opening_cash=Decimal('10.00'))
+
+        self.assertEqual(CashierShift.objects.filter(cashier=self.cashier, status='open').count(), 1)
+
+    def test_cashier_shift_prevents_duplicate_open_counter(self):
+        other_cashier = PlatformUser.objects.create_user(email=f'other-{self.cashier.email}', password='testpass123')
+        open_cashier_shift(cashier=self.cashier, counter=self.counter, opening_cash=Decimal('25.00'))
+
+        with self.assertRaises(CashierShiftError):
+            open_cashier_shift(cashier=other_cashier, counter=self.counter, opening_cash=Decimal('10.00'))
+
+        self.assertEqual(CashierShift.objects.filter(counter=self.counter, status='open').count(), 1)

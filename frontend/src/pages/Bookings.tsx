@@ -21,6 +21,7 @@ import {
   useUpdateGuest,
 } from '../hooks/bookings';
 import { usePermissions } from '../hooks/permissions';
+import { useCurrentCashierShift } from '../hooks/restaurant';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
 import { Booking, Guest, GuestCommunication, GuestFolio } from '../types/bookings';
 
@@ -97,6 +98,7 @@ const formatWeekday = (date: string) => {
 const Bookings: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: settings } = useQuery({ queryKey: ['tenant-settings'], queryFn: getTenantSettings });
+  const { data: currentShift } = useCurrentCashierShift();
   const { data: bookings, isLoading, error } = useBookings();
   const { data: guests } = useGuests();
   const { data: folios } = useGuestFolios();
@@ -446,7 +448,7 @@ const Bookings: React.FC = () => {
       {
         bookingId: checkoutBooking.id,
         action: 'check_out',
-        payload: checkoutPayment,
+        payload: { ...checkoutPayment, cashier_shift: currentShift?.id },
       },
       {
         onSuccess: () => setCheckoutBooking(null),

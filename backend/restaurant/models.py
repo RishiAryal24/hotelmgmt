@@ -115,6 +115,7 @@ class RestaurantOrder(UUIDModel):
     paid_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     payment_method = models.CharField(max_length=30, choices=PAYMENT_METHOD_CHOICES, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True)
+    cashier_shift = models.ForeignKey('restaurant.CashierShift', on_delete=models.SET_NULL, related_name='restaurant_orders', null=True, blank=True)
     notes = models.TextField(blank=True)
 
     class Meta:
@@ -126,10 +127,13 @@ class RestaurantOrder(UUIDModel):
         super().save(*args, **kwargs)
 
     def recalculate_totals(self):
-        subtotal = sum(line.line_total for line in self.lines.all())
+        subtotal = sum(line.line_total for line in self.lines.exclude(status='cancelled'))
+        max_discount = subtotal + self.tax_total + self.service_charge_total
+        if self.discount_total > max_discount:
+            self.discount_total = max_discount
         self.subtotal = subtotal
         self.grand_total = subtotal + self.tax_total + self.service_charge_total - self.discount_total
-        self.save(update_fields=['subtotal', 'grand_total', 'updated_at'])
+        self.save(update_fields=['subtotal', 'discount_total', 'grand_total', 'updated_at'])
 
     def __str__(self):
         return self.order_number
@@ -198,3 +202,57 @@ class KitchenTicketLine(UUIDModel):
 
     class Meta:
         ordering = ['created_at']
+
+
+class CashierCounter(UUIDModel):
+    OUTLET_TYPE_CHOICES = [
+        ('reception', 'Reception'),
+        ('restaurant', 'Restaurant'),
+        ('pool', 'Pool'),
+        ('spa', 'Spa'),
+        ('bar', 'Bar'),
+        ('banquet', 'Banquet'),
+        ('other', 'Other'),
+    ]
+
+    name = models.CharField(max_length=120, unique=True)
+    code = models.CharField(max_length=50, unique=True)
+    outlet_type = models.CharField(max_length=30, choices=OUTLET_TYPE_CHOICES, default='other')
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['outlet_type', 'name']
+
+    def __str__(self):
+        return self.name
+
+
+class CashierShift(UUIDModel):
+    STATUS_CHOICES = [
+        ('open', 'Open'),
+        ('closed', 'Closed'),
+    ]
+
+    counter = models.ForeignKey(CashierCounter, on_delete=models.PROTECT, related_name='shifts')
+    cashier = models.ForeignKey('users.PlatformUser', on_delete=models.PROTECT, related_name='cashier_shifts')
+    business_date = models.DateField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    opening_cash = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    expected_cash = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    expected_card = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    expected_wallet = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    expected_bank_transfer = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    expected_room_posting = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    expected_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    actual_cash = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    cash_variance = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    opened_at = models.DateTimeField(auto_now_add=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-opened_at']
+
+    def __str__(self):
+        return f'{self.cashier} - {self.business_date} - {self.status}'

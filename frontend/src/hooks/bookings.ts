@@ -199,6 +199,8 @@ export const useBookingAction = () => {
       queryClient.invalidateQueries({ queryKey: ['rooms'] });
       queryClient.invalidateQueries({ queryKey: ['guest-folios'] });
       queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+      queryClient.invalidateQueries({ queryKey: ['cashier-shifts'] });
+      queryClient.invalidateQueries({ queryKey: ['cashier-shift-current'] });
     },
   });
 };
@@ -236,14 +238,17 @@ export const useSettleGuestFolio = () => {
       folioId,
       payment_method,
       paid_amount,
+      cashier_shift,
     }: {
       folioId: string;
       payment_method: GuestFolio['payment_method'];
       paid_amount: string;
+      cashier_shift?: string;
     }): Promise<GuestFolio> => {
       const response = await apiClient.post(`/bookings/folios/${folioId}/settle/`, {
         payment_method,
         paid_amount,
+        cashier_shift,
       });
       return response.data;
     },
@@ -251,6 +256,36 @@ export const useSettleGuestFolio = () => {
       queryClient.invalidateQueries({ queryKey: ['guest-folios'] });
       queryClient.invalidateQueries({ queryKey: ['bookings'] });
       queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+      queryClient.invalidateQueries({ queryKey: ['cashier-shifts'] });
+      queryClient.invalidateQueries({ queryKey: ['cashier-shift-current'] });
+    },
+  });
+};
+
+export const useAddGuestFolioCharge = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      folioId,
+      description,
+      amount,
+      source_module,
+    }: {
+      folioId: string;
+      description: string;
+      amount: string;
+      source_module?: string;
+    }): Promise<GuestFolio> => {
+      const response = await apiClient.post(`/bookings/folios/${folioId}/add-charge/`, {
+        description,
+        amount,
+        source_module,
+      });
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['guest-folios'] });
+      queryClient.invalidateQueries({ queryKey: ['bookings'] });
     },
   });
 };

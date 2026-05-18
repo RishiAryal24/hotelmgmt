@@ -81,6 +81,12 @@ class GuestFolioLineSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class GuestFolioChargeSerializer(serializers.Serializer):
+    description = serializers.CharField(max_length=255)
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0)
+    source_module = serializers.CharField(max_length=80, required=False, allow_blank=True)
+
+
 class GuestFolioSerializer(serializers.ModelSerializer):
     lines = GuestFolioLineSerializer(many=True, read_only=True)
     guest_name = serializers.SerializerMethodField()

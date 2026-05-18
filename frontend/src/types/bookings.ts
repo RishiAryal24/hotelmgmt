@@ -66,6 +66,7 @@ export interface GuestFolio {
   payment_method: '' | 'cash' | 'card' | 'wallet' | 'bank_transfer';
   paid_amount: string;
   paid_at?: string | null;
+  cashier_shift?: string | null;
   guest_name: string;
   room_number: string;
   booking_status: Booking['status'];

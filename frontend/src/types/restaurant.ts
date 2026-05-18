@@ -89,3 +89,47 @@ export interface KitchenTicket {
   status: 'open' | 'preparing' | 'ready' | 'served';
   lines: KitchenTicketLine[];
 }
+
+export interface CashierShiftTotals {
+  restaurant_cash: string;
+  folio_cash: string;
+  facility_charges: string;
+  expected_cash: string;
+  expected_card: string;
+  expected_wallet: string;
+  expected_bank_transfer: string;
+  expected_room_posting: string;
+  expected_total: string;
+}
+
+export interface CashierCounter {
+  id: string;
+  name: string;
+  code: string;
+  outlet_type: 'reception' | 'restaurant' | 'pool' | 'spa' | 'bar' | 'banquet' | 'other';
+  is_active: boolean;
+  notes: string;
+}
+
+export interface CashierShift {
+  id: string;
+  counter: string;
+  counter_details?: CashierCounter;
+  cashier: string;
+  cashier_email?: string;
+  business_date: string;
+  status: 'open' | 'closed';
+  opening_cash: string;
+  expected_cash: string;
+  expected_card: string;
+  expected_wallet: string;
+  expected_bank_transfer: string;
+  expected_room_posting: string;
+  expected_total: string;
+  actual_cash: string;
+  cash_variance: string;
+  opened_at: string;
+  closed_at: string | null;
+  notes: string;
+  live_totals?: CashierShiftTotals;
+}

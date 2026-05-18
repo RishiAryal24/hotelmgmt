@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
-import { useAddGuestFolioCharge, useBookings, useCreateFacilityAmenity, useCreateFacilityService, useFacilityAmenities, useFacilityServices, useGuestFolios } from '../hooks/bookings';
+import { useAddGuestFolioCharge, useBookings, useCreateFacilityAmenity, useCreateFacilityService, useFacilityAmenities, useFacilityServices, useGuestFolios, useSettleGuestFolio } from '../hooks/bookings';
 import { usePermissions } from '../hooks/permissions';
 import {
   useCashierCounters,
@@ -15,8 +15,8 @@ import {
   useSettleRestaurantOrder,
 } from '../hooks/restaurant';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
-import { FacilityAmenity, FacilityService } from '../types/bookings';
-import { CashierCounter, RestaurantOrder } from '../types/restaurant';
+import { FacilityAmenity, FacilityService, GuestFolio } from '../types/bookings';
+import { CashierCounter, CashierShift, RestaurantOrder } from '../types/restaurant';
 
 const paymentMethods = [
   { value: 'cash', label: 'Cash' },
@@ -25,6 +25,10 @@ const paymentMethods = [
   { value: 'room_posting', label: 'Room Posting' },
   { value: 'bank_transfer', label: 'Bank Transfer' },
 ];
+
+const folioPaymentMethods = paymentMethods.filter((method) => method.value !== 'room_posting');
+const splitPaymentMethods = folioPaymentMethods;
+const restaurantPaymentMethods = [...paymentMethods, { value: 'split', label: 'Split Payment' }];
 
 const getAmenityCategory = (amenity?: FacilityAmenity): FacilityService['category'] => {
   const value = `${amenity?.code || ''} ${amenity?.name || ''}`.toLowerCase();
@@ -38,6 +42,23 @@ const getAmenityCategory = (amenity?: FacilityAmenity): FacilityService['categor
   return 'other';
 };
 
+const formatFolioLineSource = (line: { source_module: string }) => {
+  if (line.source_module === 'restaurant_order') return 'Restaurant order';
+  if (line.source_module === 'room_charge') return 'Room charge';
+  if (line.source_module === 'room_transfer') return 'Room transfer';
+  if (line.source_module === 'booking_extension') return 'Stay extension';
+  if (line.source_module.startsWith('facility_')) {
+    return line.source_module
+      .replace('facility_', '')
+      .split('-')
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  }
+  return line.source_module
+    .replace(/[_-]/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
 const POS: React.FC = () => {
   const { data: settings } = useQuery({ queryKey: ['tenant-settings'], queryFn: getTenantSettings });
   const { data: orders, isLoading, error } = useRestaurantOrders();
@@ -49,6 +70,7 @@ const POS: React.FC = () => {
   const { data: facilityAmenities } = useFacilityAmenities();
   const { data: facilityServices } = useFacilityServices();
   const addFolioCharge = useAddGuestFolioCharge();
+  const settleGuestFolio = useSettleGuestFolio();
   const settleOrder = useSettleRestaurantOrder();
   const openCashierShift = useOpenCashierShift();
   const closeCashierShift = useCloseCashierShift();
@@ -57,8 +79,9 @@ const POS: React.FC = () => {
   const createFacilityService = useCreateFacilityService();
   const { can } = usePermissions();
   const [paymentForms, setPaymentForms] = useState<
-    Record<string, { payment_method: RestaurantOrder['payment_method']; paid_amount: string; booking?: string }>
+    Record<string, { payment_method: RestaurantOrder['payment_method']; paid_amount: string; booking?: string; split_payments: { payment_method: RestaurantOrder['payment_method']; amount: string }[] }>
   >({});
+  const [folioPaymentForms, setFolioPaymentForms] = useState<Record<string, { payment_method: GuestFolio['payment_method']; paid_amount: string }>>({});
   const [openShiftForm, setOpenShiftForm] = useState({ counter: '', opening_cash: '0.00', notes: '' });
   const [counterForm, setCounterForm] = useState({ name: '', code: '', outlet_type: 'restaurant' as CashierCounter['outlet_type'], is_active: true, notes: '' });
   const [addingCounter, setAddingCounter] = useState(false);
@@ -66,6 +89,10 @@ const POS: React.FC = () => {
   const [addingFacilityService, setAddingFacilityService] = useState(false);
   const [closingShift, setClosingShift] = useState(false);
   const [closeShiftForm, setCloseShiftForm] = useState({ actual_cash: '', notes: '' });
+  const [closedShiftReport, setClosedShiftReport] = useState<CashierShift | null>(null);
+  const [selectedFolioReport, setSelectedFolioReport] = useState<GuestFolio | null>(null);
+  const [folioPaymentReceipt, setFolioPaymentReceipt] = useState<GuestFolio | null>(null);
+  const [restaurantPaymentReceipt, setRestaurantPaymentReceipt] = useState<RestaurantOrder | null>(null);
   const [activeTab, setActiveTab] = useState('settlement');
   const [facilityChargeForm, setFacilityChargeForm] = useState({
     folioId: '',
@@ -105,6 +132,7 @@ const POS: React.FC = () => {
     .reverse();
   const tabs = [
     { id: 'settlement', label: 'Settlement', count: payableOrders.length },
+    { id: 'folios', label: 'Folios', count: openFolios.length + payableOrders.length },
     { id: 'facilities', label: 'Facilities', count: facilityChargeLines.length },
     { id: 'catalog', label: 'Catalog', count: (facilityAmenities?.length || 0) + (facilityServices?.length || 0) },
     { id: 'counters', label: 'Counters', count: cashierCounters?.length || 0 },
@@ -114,6 +142,7 @@ const POS: React.FC = () => {
   const activeBookings = bookings?.filter((booking) => booking.status === 'checked_in') || [];
   const liveTotals = currentShift?.live_totals;
   const expectedCash = liveTotals?.expected_cash || currentShift?.expected_cash || '0.00';
+  const expectedTotal = liveTotals?.expected_total || currentShift?.expected_total || '0.00';
   const closeVariance =
     closeShiftForm.actual_cash === ''
       ? null
@@ -124,7 +153,20 @@ const POS: React.FC = () => {
       payment_method: 'cash' as RestaurantOrder['payment_method'],
       paid_amount: order.grand_total,
       booking: '',
+      split_payments: [
+        { payment_method: 'cash' as RestaurantOrder['payment_method'], amount: order.grand_total },
+        { payment_method: 'card' as RestaurantOrder['payment_method'], amount: '0.00' },
+      ],
     };
+
+  const getFolioPaymentForm = (folio: GuestFolio) =>
+    folioPaymentForms[folio.id] || {
+      payment_method: 'cash' as GuestFolio['payment_method'],
+      paid_amount: folio.grand_total,
+    };
+
+  const getSplitPaymentTotal = (form: { split_payments: { amount: string }[] }) =>
+    form.split_payments.reduce((total, payment) => total + Number(payment.amount || 0), 0);
 
   const selectedFacilityService = activeFacilityServices.find((service) => service.id === facilityChargeForm.facility_service);
   const selectedFacilityAmenity = activeFacilityAmenities.find((amenity) => amenity.id === facilityChargeForm.amenity);
@@ -208,12 +250,15 @@ const POS: React.FC = () => {
             </div>
           </div>
           {currentShift ? (
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <ShiftMetric label="Expected Cash" value={formatMoney(expectedCash, settings?.currency)} />
               <ShiftMetric label="Card" value={formatMoney(liveTotals?.expected_card || '0.00', settings?.currency)} />
               <ShiftMetric label="Wallet" value={formatMoney(liveTotals?.expected_wallet || '0.00', settings?.currency)} />
               <ShiftMetric label="Bank" value={formatMoney(liveTotals?.expected_bank_transfer || '0.00', settings?.currency)} />
               <ShiftMetric label="Room Posting" value={formatMoney(liveTotals?.expected_room_posting || '0.00', settings?.currency)} />
+              <ShiftMetric label="Facility Charges" value={formatMoney(liveTotals?.facility_charges || '0.00', settings?.currency)} />
+              <ShiftMetric label="Restaurant Cash" value={formatMoney(liveTotals?.restaurant_cash || '0.00', settings?.currency)} />
+              <ShiftMetric label="Expected Total" value={formatMoney(expectedTotal, settings?.currency)} />
             </div>
           ) : (
             <form
@@ -293,17 +338,22 @@ const POS: React.FC = () => {
                 </td>
                 <td className="py-3 pr-4 font-semibold text-slate-900">{formatMoney(order.grand_total, settings?.currency)}</td>
                 <td className="py-3 pr-4">
-                    <select
-                      value={form.payment_method}
-                      onChange={(e) =>
-                        setPaymentForms({
-                          ...paymentForms,
-                          [order.id]: { ...form, payment_method: e.target.value as RestaurantOrder['payment_method'] },
-                        })
-                      }
-                      className="w-40 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                    >
-                      {paymentMethods.map((method) => (
+                      <select
+                        value={form.payment_method}
+                        onChange={(e) =>
+                          setPaymentForms({
+                            ...paymentForms,
+                            [order.id]: {
+                              ...form,
+                              payment_method: e.target.value as RestaurantOrder['payment_method'],
+                              paid_amount: e.target.value === 'split' ? order.grand_total : form.paid_amount,
+                              booking: e.target.value === 'room_posting' ? form.booking : '',
+                            },
+                          })
+                        }
+                        className="w-40 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                      >
+                      {restaurantPaymentMethods.map((method) => (
                         <option key={method.value} value={method.value}>
                           {method.label}
                         </option>
@@ -311,19 +361,57 @@ const POS: React.FC = () => {
                     </select>
                 </td>
                 <td className="py-3 pr-4">
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={form.paid_amount}
-                      disabled={form.payment_method === 'room_posting'}
-                      onChange={(e) =>
-                        setPaymentForms({
-                          ...paymentForms,
-                          [order.id]: { ...form, paid_amount: e.target.value },
-                        })
-                      }
-                      className="w-32 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                    />
+                    {form.payment_method === 'split' ? (
+                      <div className="grid min-w-[260px] gap-2">
+                        {form.split_payments.map((payment, index) => (
+                          <div key={index} className="flex gap-2">
+                            <select
+                              value={payment.payment_method}
+                              onChange={(e) => {
+                                const next = [...form.split_payments];
+                                next[index] = { ...payment, payment_method: e.target.value as RestaurantOrder['payment_method'] };
+                                setPaymentForms({ ...paymentForms, [order.id]: { ...form, split_payments: next } });
+                              }}
+                              className="w-32 rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs"
+                            >
+                              {splitPaymentMethods.map((method) => <option key={method.value} value={method.value}>{method.label}</option>)}
+                            </select>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={payment.amount}
+                              onChange={(e) => {
+                                const next = [...form.split_payments];
+                                next[index] = { ...payment, amount: e.target.value };
+                                setPaymentForms({ ...paymentForms, [order.id]: { ...form, split_payments: next } });
+                              }}
+                              className="w-24 rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs"
+                            />
+                            {form.split_payments.length > 1 && <button type="button" onClick={() => setPaymentForms({ ...paymentForms, [order.id]: { ...form, split_payments: form.split_payments.filter((_, rowIndex) => rowIndex !== index) } })} className="rounded-xl border border-slate-200 px-2 text-xs text-slate-600">Remove</button>}
+                          </div>
+                        ))}
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <button type="button" onClick={() => setPaymentForms({ ...paymentForms, [order.id]: { ...form, split_payments: [...form.split_payments, { payment_method: 'cash', amount: '0.00' }] } })} className="font-medium text-emerald-700 hover:underline">Add payment</button>
+                          <span className={Math.abs(getSplitPaymentTotal(form) - Number(order.grand_total || 0)) < 0.01 ? 'text-emerald-700' : 'text-rose-700'}>
+                            {formatMoney(getSplitPaymentTotal(form).toFixed(2), settings?.currency)}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={form.paid_amount}
+                        disabled={form.payment_method === 'room_posting'}
+                        onChange={(e) =>
+                          setPaymentForms({
+                            ...paymentForms,
+                            [order.id]: { ...form, paid_amount: e.target.value },
+                          })
+                        }
+                        className="w-32 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                      />
+                    )}
                 </td>
                 <td className="py-3 pr-4">
                     {form.payment_method === 'room_posting' && (
@@ -358,9 +446,10 @@ const POS: React.FC = () => {
                             paid_amount: form.paid_amount,
                             booking: form.booking,
                             cashier_shift: currentShift?.id,
-                          })
+                            payments: form.payment_method === 'split' ? form.split_payments.filter((payment) => Number(payment.amount || 0) > 0).map((payment) => ({ payment_method: payment.payment_method, amount: payment.amount })) : undefined,
+                          }, { onSuccess: (settledOrder) => setRestaurantPaymentReceipt(settledOrder as RestaurantOrder) })
                         }
-                        disabled={!currentShift || (form.payment_method === 'room_posting' && !form.booking)}
+                        disabled={!currentShift || (form.payment_method === 'room_posting' && !form.booking) || (form.payment_method === 'split' && Math.abs(getSplitPaymentTotal(form) - Number(order.grand_total || 0)) >= 0.01)}
                         className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                       >
                         Settle
@@ -377,6 +466,94 @@ const POS: React.FC = () => {
           </div>
         </div>
       </section>}
+
+      {activeTab === 'folios' && (
+        <section className="grid gap-5 xl:grid-cols-2">
+          <RowsTable headers={['Room Folio', 'Guest', 'Status', 'Due', 'Payment', 'Actions']} minWidthClassName="min-w-[980px]">
+            {(folios || []).map((folio) => {
+              const form = getFolioPaymentForm(folio);
+              return (
+                <tr key={folio.id}>
+                  <td className="py-3 pr-4">
+                    <button onClick={() => setSelectedFolioReport(folio)} className="text-left font-medium text-emerald-700 hover:underline">
+                      {folio.folio_number}
+                      <span className="block text-xs text-slate-500">Room {folio.room_number}</span>
+                    </button>
+                  </td>
+                  <td className="py-3 pr-4">{folio.guest_name}</td>
+                  <td className="py-3 pr-4 capitalize">{folio.status}</td>
+                  <td className="py-3 pr-4 font-semibold text-slate-900">{formatMoney(folio.grand_total, settings?.currency)}</td>
+                  <td className="py-3 pr-4">
+                    {folio.status === 'open' ? (
+                      <div className="flex flex-wrap gap-2">
+                        <select
+                          value={form.payment_method}
+                          onChange={(e) => setFolioPaymentForms({ ...folioPaymentForms, [folio.id]: { ...form, payment_method: e.target.value as GuestFolio['payment_method'] } })}
+                          className="w-36 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
+                        >
+                          {folioPaymentMethods.map((method) => <option key={method.value} value={method.value}>{method.label}</option>)}
+                        </select>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={form.paid_amount}
+                          onChange={(e) => setFolioPaymentForms({ ...folioPaymentForms, [folio.id]: { ...form, paid_amount: e.target.value } })}
+                          className="w-28 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
+                        />
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-500">{folio.payment_method || '-'}</span>
+                    )}
+                  </td>
+                  <td className="py-3 pr-4">
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => setSelectedFolioReport(folio)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                        View/Print
+                      </button>
+                      {folio.status === 'open' && (
+                        <button
+                          onClick={() =>
+                            settleGuestFolio.mutate(
+                              { folioId: folio.id, payment_method: form.payment_method, paid_amount: form.paid_amount, cashier_shift: currentShift?.id },
+                              { onSuccess: (settledFolio) => setFolioPaymentReceipt(settledFolio) },
+                            )
+                          }
+                          disabled={!currentShift || settleGuestFolio.isPending}
+                          className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                        >
+                          Settle
+                        </button>
+                      )}
+                    </div>
+                    {folio.status === 'open' && !currentShift && <p className="mt-2 text-xs text-amber-700">Open a cashier shift to settle.</p>}
+                  </td>
+                </tr>
+              );
+            })}
+            {!folios?.length && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No room folios yet. They appear after guest check-in.</td></tr>}
+          </RowsTable>
+
+          <RowsTable headers={['Restaurant Folio', 'Location', 'Status', 'Due', 'Actions']} minWidthClassName="min-w-[760px]">
+            {payableOrders.map((order) => (
+              <tr key={order.id}>
+                <td className="py-3 pr-4">
+                  <p className="font-medium text-slate-900">{order.order_number}</p>
+                  <p className="text-xs text-slate-500">{order.lines.filter((line) => line.status !== 'cancelled').map((line) => `${line.quantity}x ${line.menu_item_details?.name}`).join(', ') || 'No active items'}</p>
+                </td>
+                <td className="py-3 pr-4">{order.table_details ? `Table ${order.table_details.table_number}` : order.room_number ? `Room ${order.room_number}` : order.order_type}</td>
+                <td className="py-3 pr-4 capitalize">{order.status}</td>
+                <td className="py-3 pr-4 font-semibold text-slate-900">{formatMoney(order.grand_total, settings?.currency)}</td>
+                <td className="py-3 pr-4">
+                  <button onClick={() => setActiveTab('settlement')} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700">
+                    Settle
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {payableOrders.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-slate-500">Restaurant folios appear after orders are served from kitchen.</td></tr>}
+          </RowsTable>
+        </section>
+      )}
 
       {activeTab === 'facilities' && (
         <section className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
@@ -434,7 +611,11 @@ const POS: React.FC = () => {
               </div>
               {selectedFolio && (
                 <p className="mt-3 text-xs text-slate-500">
-                  Posting to {selectedFolio.folio_number} for Room {selectedFolio.room_number}.
+                  Posting to{' '}
+                  <button type="button" onClick={() => setSelectedFolioReport(selectedFolio)} className="font-semibold text-emerald-700 hover:underline">
+                    {selectedFolio.folio_number}
+                  </button>{' '}
+                  for Room {selectedFolio.room_number}.
                 </p>
               )}
               {activeFacilityServices.length === 0 && (
@@ -455,11 +636,16 @@ const POS: React.FC = () => {
           <RowsTable headers={['Room', 'Guest', 'Charge', 'Amount']} minWidthClassName="min-w-[760px]">
             {facilityChargeLines.map((line) => (
               <tr key={line.id}>
-                <td className="py-3 pr-4 font-medium text-slate-900">Room {line.folio.room_number}</td>
+                <td className="py-3 pr-4">
+                  <button onClick={() => setSelectedFolioReport(line.folio)} className="text-left font-medium text-emerald-700 hover:underline">
+                    Room {line.folio.room_number}
+                    <span className="block text-xs text-slate-500">{line.folio.folio_number}</span>
+                  </button>
+                </td>
                 <td className="py-3 pr-4">{line.folio.guest_name}</td>
                 <td className="py-3 pr-4">
                   <p className="font-medium text-slate-900">{line.description}</p>
-                  <p className="text-xs text-slate-500">{line.source_module}</p>
+                  <p className="text-xs text-slate-500">{formatFolioLineSource(line)}</p>
                 </td>
                 <td className="py-3 pr-4 font-semibold text-slate-900">{formatMoney(line.amount, settings?.currency)}</td>
               </tr>
@@ -618,7 +804,7 @@ const POS: React.FC = () => {
       )}
 
       {activeTab === 'paid' && (
-        <RowsTable headers={['Order', 'Location', 'Payment', 'Paid', 'Status']}>
+        <RowsTable headers={['Order', 'Location', 'Payment', 'Paid', 'Status', 'Actions']}>
           {paidOrders.slice(0, 10).map((order) => (
             <tr key={order.id}>
               <td className="py-3 pr-4 font-medium text-slate-900">{order.order_number}</td>
@@ -626,9 +812,14 @@ const POS: React.FC = () => {
               <td className="py-3 pr-4">{order.payment_method || '-'}</td>
               <td className="py-3 pr-4 font-semibold text-slate-900">{formatMoney(order.paid_amount, settings?.currency)}</td>
               <td className="py-3 pr-4"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{order.status}</span></td>
+              <td className="py-3 pr-4">
+                <button onClick={() => setRestaurantPaymentReceipt(order)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                  Receipt
+                </button>
+              </td>
             </tr>
           ))}
-          {paidOrders.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-slate-500">No paid orders yet.</td></tr>}
+          {paidOrders.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No paid orders yet.</td></tr>}
         </RowsTable>
       )}
 
@@ -644,9 +835,10 @@ const POS: React.FC = () => {
               closeCashierShift.mutate(
                 { shiftId: currentShift.id, actual_cash: closeShiftForm.actual_cash, notes: closeShiftForm.notes },
                 {
-                  onSuccess: () => {
+                  onSuccess: (shift) => {
                     setClosingShift(false);
                     setCloseShiftForm({ actual_cash: '', notes: '' });
+                    setClosedShiftReport(shift);
                   },
                 },
               );
@@ -654,7 +846,9 @@ const POS: React.FC = () => {
           >
             <div className="grid gap-3 md:grid-cols-2">
               <ShiftMetric label="Expected Cash" value={formatMoney(expectedCash, settings?.currency)} />
-              <ShiftMetric label="Expected Total" value={formatMoney(liveTotals?.expected_total || '0.00', settings?.currency)} />
+              <ShiftMetric label="Expected Total" value={formatMoney(expectedTotal, settings?.currency)} />
+              <ShiftMetric label="Card" value={formatMoney(liveTotals?.expected_card || '0.00', settings?.currency)} />
+              <ShiftMetric label="Room Posting" value={formatMoney(liveTotals?.expected_room_posting || '0.00', settings?.currency)} />
               <input
                 type="number"
                 min="0"
@@ -687,6 +881,203 @@ const POS: React.FC = () => {
             </div>
             {closeCashierShift.isError && <p className="mt-3 text-sm text-red-600">Could not close shift.</p>}
           </form>
+        </ActionModal>
+      )}
+
+      {closedShiftReport && (
+        <ActionModal
+          title="Shift close report"
+          description={`${closedShiftReport.counter_details?.name || 'Counter'} | ${new Date(closedShiftReport.opened_at).toLocaleString()} - ${closedShiftReport.closed_at ? new Date(closedShiftReport.closed_at).toLocaleString() : 'Closed'}`}
+          onClose={() => setClosedShiftReport(null)}
+        >
+          <div className="grid gap-3 md:grid-cols-2">
+            <ShiftMetric label="Opening Cash" value={formatMoney(closedShiftReport.opening_cash, settings?.currency)} />
+            <ShiftMetric label="Expected Cash" value={formatMoney(closedShiftReport.expected_cash, settings?.currency)} />
+            <ShiftMetric label="Actual Cash" value={formatMoney(closedShiftReport.actual_cash, settings?.currency)} />
+            <ShiftMetric label="Variance" value={formatMoney(closedShiftReport.cash_variance, settings?.currency)} />
+            <ShiftMetric label="Card" value={formatMoney(closedShiftReport.expected_card, settings?.currency)} />
+            <ShiftMetric label="Wallet" value={formatMoney(closedShiftReport.expected_wallet, settings?.currency)} />
+            <ShiftMetric label="Bank" value={formatMoney(closedShiftReport.expected_bank_transfer, settings?.currency)} />
+            <ShiftMetric label="Room Posting" value={formatMoney(closedShiftReport.expected_room_posting, settings?.currency)} />
+            <div className="rounded-2xl bg-slate-50 p-3 md:col-span-2">
+              <p className="text-xs font-medium uppercase text-slate-500">Expected Total</p>
+              <p className="mt-1 text-xl font-semibold text-slate-900">{formatMoney(closedShiftReport.expected_total, settings?.currency)}</p>
+            </div>
+            {closedShiftReport.notes && <p className="text-sm text-slate-600 md:col-span-2">{closedShiftReport.notes}</p>}
+          </div>
+          <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+            <button type="button" onClick={() => setClosedShiftReport(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Close
+            </button>
+            <button type="button" onClick={() => window.print()} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900">
+              Print
+            </button>
+          </div>
+        </ActionModal>
+      )}
+
+      {folioPaymentReceipt && (
+        <ActionModal
+          title={`Payment receipt ${folioPaymentReceipt.folio_number}`}
+          description={`Room ${folioPaymentReceipt.room_number} | ${folioPaymentReceipt.guest_name}`}
+          onClose={() => setFolioPaymentReceipt(null)}
+        >
+          <div className="grid gap-4">
+            <div className="border-b border-slate-200 pb-3 text-center">
+              <h2 className="text-xl font-bold text-slate-900">{settings?.name || 'Hotel'}</h2>
+              <p className="mt-1 text-xs text-slate-500">Printed {new Date().toLocaleString()}</p>
+              <p className="mt-3 text-sm font-semibold text-slate-900">Payment Receipt</p>
+              <p className="mt-1 text-xs text-slate-600">Folio {folioPaymentReceipt.folio_number}</p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <ShiftMetric label="Guest" value={folioPaymentReceipt.guest_name} />
+              <ShiftMetric label="Room" value={folioPaymentReceipt.room_number} />
+              <ShiftMetric label="Payment Method" value={folioPaymentReceipt.payment_method || '-'} />
+              <ShiftMetric label="Paid Amount" value={formatMoney(folioPaymentReceipt.paid_amount || '0.00', settings?.currency)} />
+              <ShiftMetric label="Folio Total" value={formatMoney(folioPaymentReceipt.grand_total, settings?.currency)} />
+              <ShiftMetric label="Paid At" value={folioPaymentReceipt.paid_at ? new Date(folioPaymentReceipt.paid_at).toLocaleString() : '-'} />
+              <ShiftMetric label="Counter" value={currentShift?.counter_details?.name || '-'} />
+              <ShiftMetric label="Cashier" value={currentShift?.cashier_email || '-'} />
+            </div>
+          </div>
+          <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+            <button type="button" onClick={() => setSelectedFolioReport(folioPaymentReceipt)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Full folio
+            </button>
+            <button type="button" onClick={() => setFolioPaymentReceipt(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Close
+            </button>
+            <button type="button" onClick={() => window.print()} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900">
+              Print receipt
+            </button>
+          </div>
+        </ActionModal>
+      )}
+
+      {restaurantPaymentReceipt && (
+        <ActionModal
+          title={`Restaurant receipt ${restaurantPaymentReceipt.order_number}`}
+          description={restaurantPaymentReceipt.table_details ? `Table ${restaurantPaymentReceipt.table_details.table_number}` : restaurantPaymentReceipt.room_number ? `Room ${restaurantPaymentReceipt.room_number}` : restaurantPaymentReceipt.order_type}
+          onClose={() => setRestaurantPaymentReceipt(null)}
+        >
+          <div className="grid gap-4">
+            <div className="border-b border-slate-200 pb-3 text-center">
+              <h2 className="text-xl font-bold text-slate-900">{settings?.name || 'Hotel'}</h2>
+              <p className="mt-1 text-xs text-slate-500">Printed {new Date().toLocaleString()}</p>
+              <p className="mt-3 text-sm font-semibold text-slate-900">Restaurant Payment Receipt</p>
+              <p className="mt-1 text-xs text-slate-600">Order {restaurantPaymentReceipt.order_number}</p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <ShiftMetric label="Location" value={restaurantPaymentReceipt.table_details ? `Table ${restaurantPaymentReceipt.table_details.table_number}` : restaurantPaymentReceipt.room_number ? `Room ${restaurantPaymentReceipt.room_number}` : restaurantPaymentReceipt.order_type} />
+              <ShiftMetric label="Payment Method" value={restaurantPaymentReceipt.payment_method || '-'} />
+              <ShiftMetric label="Paid Amount" value={formatMoney(restaurantPaymentReceipt.paid_amount || '0.00', settings?.currency)} />
+              <ShiftMetric label="Order Total" value={formatMoney(restaurantPaymentReceipt.grand_total, settings?.currency)} />
+              <ShiftMetric label="Paid At" value={restaurantPaymentReceipt.paid_at ? new Date(restaurantPaymentReceipt.paid_at).toLocaleString() : '-'} />
+              <ShiftMetric label="Counter" value={currentShift?.counter_details?.name || '-'} />
+              <ShiftMetric label="Cashier" value={currentShift?.cashier_email || '-'} />
+            </div>
+            {restaurantPaymentReceipt.payments?.length ? (
+              <div className="rounded-2xl bg-slate-50 p-3">
+                <p className="text-xs font-medium uppercase text-slate-500">Payment Breakdown</p>
+                <div className="mt-2 grid gap-1 text-sm">
+                  {restaurantPaymentReceipt.payments.map((payment) => (
+                    <div key={payment.id} className="flex justify-between gap-4">
+                      <span className="capitalize text-slate-600">{payment.payment_method.replace('_', ' ')}</span>
+                      <span className="font-semibold text-slate-900">{formatMoney(payment.amount, settings?.currency)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px] text-left text-sm">
+                <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
+                  <tr><th className="py-3 pr-4">Item</th><th className="py-3 pr-4">Qty</th><th className="py-3 pr-4 text-right">Amount</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {restaurantPaymentReceipt.lines.filter((line) => line.status !== 'cancelled').map((line) => (
+                    <tr key={line.id}>
+                      <td className="py-3 pr-4">
+                        <p className="font-medium text-slate-900">{line.menu_item_details?.name || 'Item'}</p>
+                        {line.modifier_details?.length ? <p className="text-xs text-slate-500">{line.modifier_details.map((modifier) => modifier.name).join(', ')}</p> : null}
+                      </td>
+                      <td className="py-3 pr-4">{line.quantity}</td>
+                      <td className="py-3 pr-4 text-right font-semibold text-slate-900">{formatMoney(line.line_total, settings?.currency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="border-t border-slate-200">
+                  <tr><td className="py-3 pr-4 font-semibold text-slate-900" colSpan={2}>Subtotal</td><td className="py-3 pr-4 text-right font-semibold">{formatMoney(restaurantPaymentReceipt.subtotal, settings?.currency)}</td></tr>
+                  {Number(restaurantPaymentReceipt.discount_total) > 0 && <tr><td className="py-3 pr-4 font-semibold text-rose-700" colSpan={2}>Discount</td><td className="py-3 pr-4 text-right font-semibold text-rose-700">-{formatMoney(restaurantPaymentReceipt.discount_total, settings?.currency)}</td></tr>}
+                  <tr><td className="py-3 pr-4 text-lg font-bold text-slate-900" colSpan={2}>Total</td><td className="py-3 pr-4 text-right text-lg font-bold">{formatMoney(restaurantPaymentReceipt.grand_total, settings?.currency)}</td></tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+          <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+            <button type="button" onClick={() => setRestaurantPaymentReceipt(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Close
+            </button>
+            <button type="button" onClick={() => window.print()} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900">
+              Print receipt
+            </button>
+          </div>
+        </ActionModal>
+      )}
+
+      {selectedFolioReport && (
+        <ActionModal
+          title={`Folio ${selectedFolioReport.folio_number}`}
+          description={`Room ${selectedFolioReport.room_number} | ${selectedFolioReport.guest_name}`}
+          onClose={() => setSelectedFolioReport(null)}
+        >
+          <div className="grid gap-4">
+            <div className="border-b border-slate-200 pb-3 text-center">
+              <h2 className="text-xl font-bold text-slate-900">{settings?.name || 'Hotel'}</h2>
+              <p className="mt-1 text-xs text-slate-500">Printed {new Date().toLocaleString()}</p>
+              <p className="mt-3 text-sm font-semibold text-slate-900">Folio {selectedFolioReport.folio_number}</p>
+              <p className="mt-1 text-xs text-slate-600">Room {selectedFolioReport.room_number} | {selectedFolioReport.guest_name}</p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <ShiftMetric label="Status" value={selectedFolioReport.status} />
+              <ShiftMetric label="Stay" value={`${new Date(selectedFolioReport.check_in_date).toLocaleDateString()} - ${new Date(selectedFolioReport.check_out_date).toLocaleDateString()}`} />
+              <ShiftMetric label="Total" value={formatMoney(selectedFolioReport.grand_total, settings?.currency)} />
+              <ShiftMetric label="Payment" value={selectedFolioReport.payment_method || '-'} />
+              <ShiftMetric label="Paid Amount" value={formatMoney(selectedFolioReport.paid_amount || '0.00', settings?.currency)} />
+              <ShiftMetric label="Paid At" value={selectedFolioReport.paid_at ? new Date(selectedFolioReport.paid_at).toLocaleString() : '-'} />
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[620px] text-left text-sm">
+                <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
+                  <tr><th className="py-3 pr-4">Description</th><th className="py-3 pr-4">Posted From</th><th className="py-3 pr-4">Reference</th><th className="py-3 pr-4 text-right">Amount</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {selectedFolioReport.lines.map((line) => (
+                    <tr key={line.id}>
+                      <td className="py-3 pr-4 font-medium text-slate-900">{line.description}</td>
+                      <td className="py-3 pr-4 text-slate-500">{formatFolioLineSource(line)}</td>
+                      <td className="py-3 pr-4 text-xs text-slate-500">{line.source_id ? line.source_id.slice(-8) : '-'}</td>
+                      <td className="py-3 pr-4 text-right font-semibold text-slate-900">{formatMoney(line.amount, settings?.currency)}</td>
+                    </tr>
+                  ))}
+                  {selectedFolioReport.lines.length === 0 && <tr><td colSpan={4} className="py-6 text-center text-slate-500">No folio lines yet.</td></tr>}
+                </tbody>
+                <tfoot className="border-t border-slate-200">
+                  <tr><td className="py-3 pr-4 font-semibold text-slate-900" colSpan={3}>Subtotal</td><td className="py-3 pr-4 text-right font-semibold">{formatMoney(selectedFolioReport.subtotal, settings?.currency)}</td></tr>
+                  <tr><td className="py-3 pr-4 font-semibold text-slate-900" colSpan={3}>Tax</td><td className="py-3 pr-4 text-right font-semibold">{formatMoney(selectedFolioReport.tax_total, settings?.currency)}</td></tr>
+                  <tr><td className="py-3 pr-4 text-lg font-bold text-slate-900" colSpan={3}>Grand Total</td><td className="py-3 pr-4 text-right text-lg font-bold">{formatMoney(selectedFolioReport.grand_total, settings?.currency)}</td></tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+          <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+            <button type="button" onClick={() => setSelectedFolioReport(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Close
+            </button>
+            <button type="button" onClick={() => window.print()} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900">
+              Print folio
+            </button>
+          </div>
         </ActionModal>
       )}
 

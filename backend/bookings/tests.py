@@ -707,6 +707,13 @@ class ReservationCheckInFolioTests(TenantTestCase):
         self.assertEqual(folio.status, 'open')
         self.assertEqual(folio.subtotal, booking.total_amount)
         self.assertEqual(folio.grand_total, booking.total_amount)
+        self.assertTrue(
+            GuestFolioLine.objects.filter(
+                folio=folio,
+                source_module='room_charge',
+                amount=booking.total_amount,
+            ).exists()
+        )
 
     def test_check_in_api_returns_open_folio(self):
         response = self.client.post(f'/api/v1/bookings/bookings/{self.booking.id}/check_in/')

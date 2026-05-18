@@ -39,6 +39,19 @@ def get_guest_history(guest):
     }
 
 
+def ensure_room_charge_line(folio: GuestFolio):
+    GuestFolioLine.objects.get_or_create(
+        folio=folio,
+        source_module='room_charge',
+        source_id=str(folio.booking_id),
+        defaults={
+            'description': f'Room charge - Room {folio.booking.room.room_number} ({folio.booking.check_in_date} to {folio.booking.check_out_date})',
+            'amount': folio.booking.total_amount,
+        },
+    )
+    return folio
+
+
 @transaction.atomic
 def check_in_booking(booking: Booking):
     if booking.status != 'confirmed':
@@ -72,6 +85,7 @@ def check_in_booking(booking: Booking):
             'subtotal': booking.total_amount,
         },
     )
+    ensure_room_charge_line(folio)
     return booking, folio
 
 
@@ -123,6 +137,7 @@ def create_walk_in_booking(
         booking=booking,
         subtotal=booking.total_amount,
     )
+    ensure_room_charge_line(folio)
 
     return booking, folio
 

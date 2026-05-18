@@ -115,18 +115,26 @@ Acceptance criteria:
 
 Goal: make reservations, rooms, guests, folios, housekeeping, and maintenance dependable.
 
-Status: functional MVP, needs hardening.
+Status: functional MVP with strengthened folio and checkout workflows.
 
 Completed:
 
 - Guest communication timeline with tenant-scoped API and guest profile UI.
 - Reservation confirmation and guest folio PDF exports.
 - Booking modification workflow for confirmed reservations.
+- Room folios are visible from reservations after check-in.
+- Folio detail modals are clickable and printable from Reservations and POS.
+- Folio print output includes tenant name, print date/time, folio number, guest, room, lines, and totals.
+- Folio lines now show clear source labels such as room charge, restaurant order, room transfer, stay extension, and facility postings.
+- Room charge lines are created and backfilled so the room stay appears in folio line detail without double-counting totals.
+- Checkout readiness panel shows open folio status, room charge line status, restaurant postings, facility postings, total due, and quick folio actions.
+- POS can settle open room folios directly and print a dedicated room folio payment receipt.
 
 Next slices:
 
 1. Walk-in booking polish.
 2. Room transfer rate adjustment policy.
+3. Checkout exception handling for missing/closed folios and unresolved postings.
 
 Acceptance criteria:
 
@@ -139,7 +147,7 @@ Acceptance criteria:
 
 Goal: move the restaurant module from basic order settlement to practical POS operations.
 
-Status: functional MVP.
+Status: advanced POS workflows in progress.
 
 Completed:
 
@@ -151,11 +159,21 @@ Completed:
 - Order and item notes.
 - Menu modifier groups and price-impacting modifiers.
 - Recipe/BOM costing with multi-ingredient inventory deduction.
+- Table merge for active dine-in orders.
+- Kitchen display polish with status filters, ticket age, modifiers, item notes, and order context.
+- POS folios tab showing room folios and served restaurant orders ready for settlement.
+- POS room folio settlement with before/after print support.
+- Dedicated room folio payment receipt after POS settlement.
+- Dedicated restaurant payment receipt after POS settlement and from paid order history.
+- Print-friendly modal output for folios, restaurant receipts, and cashier shift close reports.
+- Cashier shift summary and close report with expected cash/card/wallet/bank/room posting totals.
+- Amount-based restaurant split payments with payment rows, settlement validation, receipt payment breakdown, cashier-shift totals, and accounting debit lines per payment method.
 
 Next slices:
 
-1. Table merge.
-2. Amount-based split payments.
+1. Restaurant tax/service-charge configuration.
+2. Restaurant receipt numbering and reprint audit trail.
+3. Cash drawer reconciliation by payment row and cashier shift.
 
 Acceptance criteria:
 

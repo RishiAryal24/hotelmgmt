@@ -82,6 +82,14 @@ const emptySettleForm = { payment_method: 'cash' as RestaurantOrder['payment_met
 const emptyVoidForm = { line: '', reason: '' };
 const emptyDiscountForm = { discount_amount: '', reason: '' };
 const emptyComplimentaryForm = { reason: '' };
+const kitchenStatuses = ['all', 'open', 'preparing', 'ready', 'served'] as const;
+
+const formatTicketAge = (createdAt?: string) => {
+  if (!createdAt) return '-';
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000));
+  if (minutes < 60) return `${minutes}m`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+};
 
 const Restaurant: React.FC = () => {
   const { data: settings } = useQuery({ queryKey: ['tenant-settings'], queryFn: getTenantSettings });
@@ -137,6 +145,7 @@ const Restaurant: React.FC = () => {
   const [approvalNotes, setApprovalNotes] = useState<Record<string, string>>({});
   const [receiptOrder, setReceiptOrder] = useState<RestaurantOrder | null>(null);
   const [historySearch, setHistorySearch] = useState('');
+  const [kitchenFilter, setKitchenFilter] = useState<(typeof kitchenStatuses)[number]>('all');
 
   const activeOrders = orders?.filter((order) => order.status !== 'paid' && order.status !== 'cancelled') || [];
   const historyOrders =
@@ -158,6 +167,7 @@ const Restaurant: React.FC = () => {
     }) || [];
   const inHouseBookings = bookings?.filter((booking) => booking.status === 'checked_in') || [];
   const pendingApprovals = approvals?.filter((approval) => approval.status === 'pending') || [];
+  const filteredTickets = tickets?.filter((ticket) => kitchenFilter === 'all' || ticket.status === kitchenFilter) || [];
   const availableTransferTables =
     tables?.filter((table) => table.is_active && ['available', 'reserved'].includes(table.status) && table.id !== transferOrder?.table) || [];
   const availableMergeOrders = activeOrders.filter(
@@ -432,6 +442,7 @@ const Restaurant: React.FC = () => {
                   {activeOrders.map((order) => {
                     const lineForm = lineForms[order.id] || emptyOrderLine;
                     const activeLines = order.lines.filter((line) => line.status !== 'cancelled');
+                    const orderedLines = order.lines.filter((line) => line.status === 'ordered');
                     const itemModifierGroups = getItemModifierGroups(lineForm.menu_item);
                     return (
                       <tr key={order.id}>
@@ -479,7 +490,7 @@ const Restaurant: React.FC = () => {
                         <td className="py-3 pr-4">
                           <div className="flex flex-wrap gap-2">
                             {can('restaurant.order.update') && <button onClick={() => handleAddLine(order.id)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">Add</button>}
-                            {can('restaurant.order.update') && activeLines.length > 0 && ['draft', 'sent_to_kitchen'].includes(order.status) && <button onClick={() => orderAction.mutate({ orderId: order.id, action: 'send_to_kitchen' })} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-medium text-white">Kitchen</button>}
+                            {can('restaurant.order.update') && orderedLines.length > 0 && ['draft', 'sent_to_kitchen'].includes(order.status) && <button onClick={() => orderAction.mutate({ orderId: order.id, action: 'send_to_kitchen' })} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-medium text-white">Kitchen</button>}
                             {can('restaurant.order.update') && ['sent_to_kitchen', 'preparing'].includes(order.status) && <button onClick={() => orderAction.mutate({ orderId: order.id, action: 'mark_served' })} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-medium text-white">Served</button>}
                             {can('restaurant.order.update') && order.order_type === 'dine_in' && ['draft', 'sent_to_kitchen', 'preparing', 'served'].includes(order.status) && <button onClick={() => openTransferOrder(order)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">Transfer</button>}
                             {can('restaurant.order.update') && order.order_type === 'dine_in' && ['draft', 'sent_to_kitchen', 'preparing', 'served'].includes(order.status) && <button onClick={() => openMergeOrder(order)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">Merge</button>}
@@ -695,12 +706,55 @@ const Restaurant: React.FC = () => {
       )}
 
       {activeTab === 'kitchen' && (
-        <RowsTable headers={['Ticket', 'Order', 'Station', 'Items', 'Status', 'Actions']}>
-          {tickets?.map((ticket) => (
-            <tr key={ticket.id}><td className="py-3 pr-4 font-medium text-slate-900">{ticket.ticket_number}</td><td className="py-3 pr-4">{ticket.order_details?.order_number}</td><td className="py-3 pr-4">{ticket.station}</td><td className="py-3 pr-4">{ticket.lines.map((line) => `${line.quantity}x ${line.order_line_details?.menu_item_details?.name}${line.order_line_details?.modifier_details?.length ? ` (${line.order_line_details.modifier_details.map((modifier) => modifier.name).join(', ')})` : ''}`).join(', ')}</td><td className="py-3 pr-4">{ticket.status}</td><td className="py-3 pr-4"><div className="flex gap-2">{can('restaurant.kitchen.update') && ticket.status === 'open' && <button onClick={() => ticketAction.mutate({ ticketId: ticket.id, action: 'start' })} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-medium text-white">Start</button>}{can('restaurant.kitchen.update') && ['open', 'preparing'].includes(ticket.status) && <button onClick={() => ticketAction.mutate({ ticketId: ticket.id, action: 'mark_ready' })} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-medium text-white">Ready</button>}</div></td></tr>
-          ))}
-          {tickets?.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No kitchen tickets yet.</td></tr>}
-        </RowsTable>
+        <section className="rounded-3xl bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-wrap gap-2">
+            {kitchenStatuses.map((status) => (
+              <button
+                key={status}
+                onClick={() => setKitchenFilter(status)}
+                className={`rounded-xl px-3 py-2 text-xs font-medium capitalize ${kitchenFilter === status ? 'bg-slate-900 text-white' : 'border border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+              >
+                {status}
+              </button>
+            ))}
+          </div>
+          <RowsTable headers={['Ticket', 'Order', 'Age', 'Station', 'Items', 'Status', 'Actions']}>
+            {filteredTickets.map((ticket) => (
+              <tr key={ticket.id}>
+                <td className="py-3 pr-4 font-medium text-slate-900">{ticket.ticket_number}</td>
+                <td className="py-3 pr-4">
+                  <p>{ticket.order_details?.order_number}</p>
+                  {ticket.order_details?.notes && <p className="mt-1 max-w-xs text-xs text-amber-700">{ticket.order_details.notes}</p>}
+                </td>
+                <td className="py-3 pr-4">
+                  <span className={`rounded-full px-2 py-1 text-xs font-semibold ${formatTicketAge(ticket.created_at).startsWith('0m') ? 'bg-slate-100 text-slate-600' : 'bg-amber-100 text-amber-800'}`}>
+                    {formatTicketAge(ticket.created_at)}
+                  </span>
+                </td>
+                <td className="py-3 pr-4 capitalize">{ticket.station}</td>
+                <td className="py-3 pr-4">
+                  <div className="grid gap-2">
+                    {ticket.lines.map((line) => (
+                      <div key={line.id}>
+                        <p className="font-medium text-slate-900">{line.quantity}x {line.order_line_details?.menu_item_details?.name || 'Item'}</p>
+                        {line.order_line_details?.modifier_details?.length ? <p className="text-xs text-slate-500">{line.order_line_details.modifier_details.map((modifier) => modifier.name).join(', ')}</p> : null}
+                        {line.order_line_details?.notes ? <p className="text-xs text-amber-700">{line.order_line_details.notes}</p> : null}
+                      </div>
+                    ))}
+                  </div>
+                </td>
+                <td className="py-3 pr-4 capitalize">{ticket.status}</td>
+                <td className="py-3 pr-4">
+                  <div className="flex gap-2">
+                    {can('restaurant.kitchen.update') && ticket.status === 'open' && <button onClick={() => ticketAction.mutate({ ticketId: ticket.id, action: 'start' })} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-medium text-white">Start</button>}
+                    {can('restaurant.kitchen.update') && ['open', 'preparing'].includes(ticket.status) && <button onClick={() => ticketAction.mutate({ ticketId: ticket.id, action: 'mark_ready' })} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-medium text-white">Ready</button>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {filteredTickets.length === 0 && <tr><td colSpan={7} className="py-6 text-center text-slate-500">No kitchen tickets for this filter.</td></tr>}
+          </RowsTable>
+        </section>
       )}
 
       {activeTab === 'history' && (

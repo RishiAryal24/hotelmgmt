@@ -6,7 +6,7 @@ from django_tenants.test.cases import TenantTestCase
 from accounting.models import JournalEntry, JournalLine
 from bookings.models import Booking, Guest, GuestFolioLine, Room, RoomType
 from inventory.models import InventoryItem, StockMovement
-from restaurant.models import CashierCounter, CashierShift, MenuCategory, MenuItem, MenuModifier, MenuModifierGroup, MenuRecipeIngredient, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantTable
+from restaurant.models import CashierCounter, CashierShift, MenuCategory, MenuItem, MenuModifier, MenuModifierGroup, MenuRecipeIngredient, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantOrderPayment, RestaurantTable
 from restaurant.serializers import RestaurantOrderLineSerializer
 from restaurant.services import (
     CashierShiftError,
@@ -14,6 +14,7 @@ from restaurant.services import (
     RestaurantSettlementError,
     apply_order_discount,
     approve_order_approval,
+    calculate_cashier_shift_totals,
     close_cashier_shift,
     merge_order_table,
     open_cashier_shift,
@@ -393,6 +394,38 @@ class RestaurantRoomPostingTests(TenantTestCase):
         self.assertEqual(shift.expected_total, Decimal('175.00'))
         self.assertEqual(shift.cash_variance, Decimal('0.00'))
         self.assertIn('Balanced', shift.notes)
+
+    def test_restaurant_order_can_be_settled_with_split_payments(self):
+        shift = open_cashier_shift(cashier=self.cashier, counter=self.counter, opening_cash=Decimal('20.00'))
+
+        settle_restaurant_order(
+            self.order,
+            payments=[
+                {'payment_method': 'cash', 'amount': Decimal('30.00')},
+                {'payment_method': 'card', 'amount': Decimal('20.00')},
+            ],
+            cashier_shift=shift,
+        )
+
+        self.order.refresh_from_db()
+        payments = RestaurantOrderPayment.objects.filter(order=self.order).order_by('payment_method')
+        totals = calculate_cashier_shift_totals(shift)
+        self.assertEqual(self.order.status, 'paid')
+        self.assertEqual(self.order.payment_method, 'split')
+        self.assertEqual(self.order.paid_amount, Decimal('50.00'))
+        self.assertEqual(payments.count(), 2)
+        self.assertEqual(totals['expected_cash'], Decimal('50.00'))
+        self.assertEqual(totals['expected_card'], Decimal('20.00'))
+
+    def test_split_payments_must_match_order_total(self):
+        with self.assertRaises(RestaurantSettlementError):
+            settle_restaurant_order(
+                self.order,
+                payments=[
+                    {'payment_method': 'cash', 'amount': Decimal('10.00')},
+                    {'payment_method': 'card', 'amount': Decimal('10.00')},
+                ],
+            )
 
     def test_cashier_shift_prevents_duplicate_open_shift(self):
         open_cashier_shift(cashier=self.cashier, counter=self.counter, opening_cash=Decimal('25.00'))

@@ -28,7 +28,7 @@ from bookings.serializers import (
     RoomSerializer,
     RoomTypeSerializer,
 )
-from bookings.services import check_in_booking, create_walk_in_booking, extend_booking_stay, get_guest_history, modify_confirmed_booking, transfer_booking_room
+from bookings.services import check_in_booking, create_walk_in_booking, ensure_room_charge_line, extend_booking_stay, get_guest_history, modify_confirmed_booking, transfer_booking_room
 from users.permissions import HasActionPermission
 from .tasks import queue_booking_confirmation_email
 
@@ -196,6 +196,7 @@ class BookingViewSet(viewsets.ModelViewSet):
                         'subtotal': booking.total_amount,
                     },
                 )
+                ensure_room_charge_line(folio)
                 if folio.status != 'open':
                     return Response({'error': 'Only open folios can be settled at checkout'}, status=status.HTTP_400_BAD_REQUEST)
 

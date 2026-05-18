@@ -5,7 +5,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from bookings.models import Booking, GuestFolio, GuestFolioLine
-from restaurant.models import CashierCounter, CashierShift, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantTable
+from restaurant.models import CashierCounter, CashierShift, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantOrderPayment, RestaurantTable
 
 
 class RestaurantSettlementError(Exception):
@@ -36,12 +36,29 @@ def get_open_cashier_shift(*, cashier, cashier_shift_id=None):
     return queryset.first()
 
 
-def settle_restaurant_order(order, *, payment_method, paid_amount=None, booking_id=None, posted_by=None, cashier_shift=None):
+def settle_restaurant_order(order, *, payment_method=None, paid_amount=None, booking_id=None, posted_by=None, cashier_shift=None, payments=None):
     if order.status != 'served':
         raise RestaurantSettlementError('Only served orders can be settled')
 
-    if payment_method not in dict(RestaurantOrder.PAYMENT_METHOD_CHOICES):
-        raise RestaurantSettlementError('Invalid payment method')
+    payment_rows = []
+    if payments:
+        for payment in payments:
+            method = payment.get('payment_method')
+            amount = Decimal(str(payment.get('amount') or 0))
+            if method not in dict(RestaurantOrder.PAYMENT_METHOD_CHOICES) or method in ['split', 'room_posting']:
+                raise RestaurantSettlementError('Invalid split payment method')
+            if amount <= 0:
+                raise RestaurantSettlementError('Split payment amounts must be greater than zero')
+            payment_rows.append({'payment_method': method, 'amount': amount})
+        if sum((payment['amount'] for payment in payment_rows), Decimal('0.00')) != order.grand_total:
+            raise RestaurantSettlementError('Split payments must equal the order total')
+        payment_method = 'split' if len(payment_rows) > 1 else payment_rows[0]['payment_method']
+        paid_amount = order.grand_total
+    else:
+        if payment_method not in dict(RestaurantOrder.PAYMENT_METHOD_CHOICES) or payment_method == 'split':
+            raise RestaurantSettlementError('Invalid payment method')
+        paid_amount = Decimal(str(paid_amount or order.grand_total))
+        payment_rows = [{'payment_method': payment_method, 'amount': paid_amount}]
 
     room_booking = None
     if payment_method == 'room_posting':
@@ -52,25 +69,37 @@ def settle_restaurant_order(order, *, payment_method, paid_amount=None, booking_
         except Booking.DoesNotExist as exc:
             raise RestaurantSettlementError('Room posting requires an active checked-in booking') from exc
 
-    order.paid_amount = paid_amount or order.grand_total
+    order.paid_amount = paid_amount
     order.payment_method = payment_method
     order.paid_at = timezone.now()
     order.status = 'paid'
     order.room_booking = room_booking
     order.cashier_shift = cashier_shift
     order.save(update_fields=['paid_amount', 'payment_method', 'paid_at', 'status', 'room_booking', 'cashier_shift', 'updated_at'])
+    order.payments.all().delete()
+    for payment in payment_rows:
+        RestaurantOrderPayment.objects.create(
+            order=order,
+            payment_method=payment['payment_method'],
+            amount=payment['amount'],
+            cashier_shift=cashier_shift,
+            paid_at=order.paid_at,
+        )
 
     if order.table:
         order.table.status = 'cleaning'
         order.table.save(update_fields=['status', 'updated_at'])
 
     if room_booking:
+        from bookings.services import ensure_room_charge_line
+
         folio, _ = GuestFolio.objects.get_or_create(
             booking=room_booking,
             defaults={
                 'subtotal': room_booking.total_amount,
             },
         )
+        ensure_room_charge_line(folio)
         if folio.status != 'open':
             raise RestaurantSettlementError('Cannot post charges to a closed folio')
         GuestFolioLine.objects.get_or_create(
@@ -349,6 +378,10 @@ def _sum_payments(queryset):
     return queryset.aggregate(total=Sum('paid_amount'))['total'] or Decimal('0.00')
 
 
+def _sum_order_payments(queryset):
+    return queryset.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+
+
 def calculate_cashier_shift_totals(shift, *, closed_at=None):
     end_time = closed_at or shift.closed_at or timezone.now()
     restaurant_orders = RestaurantOrder.objects.filter(status='paid').filter(
@@ -358,14 +391,15 @@ def calculate_cashier_shift_totals(shift, *, closed_at=None):
         Q(cashier_shift=shift) | Q(cashier_shift__isnull=True, paid_at__gte=shift.opened_at, paid_at__lte=end_time),
     )
 
-    restaurant_cash = _sum_payments(restaurant_orders.filter(payment_method='cash'))
+    restaurant_payments = RestaurantOrderPayment.objects.filter(order__in=restaurant_orders)
+    restaurant_cash = _sum_order_payments(restaurant_payments.filter(payment_method='cash'))
     folio_cash = _sum_payments(folios.filter(payment_method='cash'))
     expected_cash = shift.opening_cash + restaurant_cash + folio_cash
 
-    expected_card = _sum_payments(restaurant_orders.filter(payment_method='card')) + _sum_payments(folios.filter(payment_method='card'))
-    expected_wallet = _sum_payments(restaurant_orders.filter(payment_method='wallet')) + _sum_payments(folios.filter(payment_method='wallet'))
-    expected_bank_transfer = _sum_payments(restaurant_orders.filter(payment_method='bank_transfer')) + _sum_payments(folios.filter(payment_method='bank_transfer'))
-    expected_room_posting = _sum_payments(restaurant_orders.filter(payment_method='room_posting'))
+    expected_card = _sum_order_payments(restaurant_payments.filter(payment_method='card')) + _sum_payments(folios.filter(payment_method='card'))
+    expected_wallet = _sum_order_payments(restaurant_payments.filter(payment_method='wallet')) + _sum_payments(folios.filter(payment_method='wallet'))
+    expected_bank_transfer = _sum_order_payments(restaurant_payments.filter(payment_method='bank_transfer')) + _sum_payments(folios.filter(payment_method='bank_transfer'))
+    expected_room_posting = _sum_order_payments(restaurant_payments.filter(payment_method='room_posting'))
     expected_total = expected_cash + expected_card + expected_wallet + expected_bank_transfer + expected_room_posting
 
     facility_charges = GuestFolioLine.objects.filter(folio__cashier_shift=shift).exclude(source_module='restaurant_order')

@@ -148,7 +148,7 @@ class GuestFolio(UUIDModel):
     def charge_total(self):
         if not self.pk:
             return 0
-        return sum((line.amount for line in self.lines.all()), 0)
+        return sum((line.amount for line in self.lines.exclude(source_module='room_charge')), 0)
 
     def recalculate_totals(self):
         self.grand_total = self.subtotal + self.tax_total + self.service_charge_total + self.charge_total

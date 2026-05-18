@@ -2,6 +2,77 @@
 @tailwind components;
 @tailwind utilities;
 
+@media print {
+  @page {
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  .print-surface,
+  .print-surface * {
+    visibility: visible !important;
+  }
+
+  .print-modal-root {
+    position: static !important;
+    display: block !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  .print-surface {
+    position: absolute !important;
+    inset: 0 auto auto 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    color: #0f172a !important;
+  }
+
+  .print-surface > div {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .print-hidden,
+  .print-surface button,
+  .print-surface input,
+  .print-surface select,
+  .print-surface textarea {
+    display: none !important;
+  }
+
+  .print-surface table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    font-size: 11px !important;
+  }
+
+  .print-surface th,
+  .print-surface td {
+    border-bottom: 1px solid #cbd5e1 !important;
+    padding: 6px 8px !important;
+  }
+
+  .print-surface h1,
+  .print-surface h2,
+  .print-surface h3 {
+    color: #0f172a !important;
+  }
+}
+
 body {
   margin: 0;
   background: #edf7f1;

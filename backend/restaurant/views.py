@@ -227,7 +227,7 @@ class CashierCounterViewSet(viewsets.ModelViewSet):
 
 
 class RestaurantOrderViewSet(viewsets.ModelViewSet):
-    queryset = RestaurantOrder.objects.select_related('table', 'waiter').prefetch_related('lines', 'lines__menu_item', 'lines__modifiers').all()
+    queryset = RestaurantOrder.objects.select_related('table', 'waiter').prefetch_related('lines', 'lines__menu_item', 'lines__modifiers', 'payments').all()
     serializer_class = RestaurantOrderSerializer
     permission_classes = [IsAuthenticated, HasActionPermission]
     permission_map = {
@@ -275,11 +275,12 @@ class RestaurantOrderViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def send_to_kitchen(self, request, pk=None):
         order = self.get_object()
-        if not order.lines.exists():
-            return Response({'error': 'Order has no items'}, status=status.HTTP_400_BAD_REQUEST)
+        ordered_lines = list(order.lines.filter(status='ordered').select_related('menu_item').prefetch_related('modifiers'))
+        if not ordered_lines:
+            return Response({'error': 'Add at least one new ordered item before sending to kitchen'}, status=status.HTTP_400_BAD_REQUEST)
 
         stations = {}
-        for line in order.lines.filter(status='ordered').prefetch_related('modifiers'):
+        for line in ordered_lines:
             stations.setdefault(line.menu_item.preparation_station, []).append(line)
             line.status = 'preparing'
             line.save(update_fields=['status', 'updated_at'])
@@ -437,6 +438,7 @@ class RestaurantOrderViewSet(viewsets.ModelViewSet):
                 booking_id=request.data.get('booking'),
                 posted_by=request.user,
                 cashier_shift=cashier_shift,
+                payments=request.data.get('payments'),
             )
         except CashierShift.DoesNotExist:
             return Response({'error': 'Select an open cashier shift for settlement'}, status=status.HTTP_400_BAD_REQUEST)

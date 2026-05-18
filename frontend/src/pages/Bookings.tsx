@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
@@ -23,7 +23,7 @@ import {
 import { usePermissions } from '../hooks/permissions';
 import { useCurrentCashierShift } from '../hooks/restaurant';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
-import { Booking, Guest, GuestCommunication, GuestFolio } from '../types/bookings';
+import { Booking, Guest, GuestCommunication, GuestFolio, GuestFolioLine } from '../types/bookings';
 
 const emptyGuest = {
   first_name: '',
@@ -67,6 +67,23 @@ const statusClass: Record<Booking['status'] | GuestFolio['status'], string> = {
   open: 'bg-amber-50 text-amber-700',
   paid: 'bg-emerald-50 text-emerald-700',
   void: 'bg-slate-100 text-slate-700',
+};
+
+const formatFolioLineSource = (line: GuestFolioLine) => {
+  if (line.source_module === 'restaurant_order') return 'Restaurant order';
+  if (line.source_module === 'room_charge') return 'Room charge';
+  if (line.source_module === 'room_transfer') return 'Room transfer';
+  if (line.source_module === 'booking_extension') return 'Stay extension';
+  if (line.source_module.startsWith('facility_')) {
+    return line.source_module
+      .replace('facility_', '')
+      .split('-')
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  }
+  return line.source_module
+    .replace(/[_-]/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 };
 
 const paymentMethods = [
@@ -134,6 +151,7 @@ const Bookings: React.FC = () => {
     special_requests: '',
   });
   const [transferForm, setTransferForm] = useState({ room: '' });
+  const [selectedFolio, setSelectedFolio] = useState<GuestFolio | null>(null);
   const [calendarStart, setCalendarStart] = useState(new Date().toISOString().slice(0, 10));
   const [guestForm, setGuestForm] = useState<Omit<Guest, 'id'>>(emptyGuest);
   const [bookingGuestForm, setBookingGuestForm] = useState<Omit<Guest, 'id'>>(emptyGuest);
@@ -456,6 +474,22 @@ const Bookings: React.FC = () => {
     );
   };
 
+  const getCheckoutReadiness = (booking: Booking) => {
+    const folio = booking.folio_details;
+    const lines = folio?.lines || [];
+    const restaurantLines = lines.filter((line) => line.source_module === 'restaurant_order');
+    const facilityLines = lines.filter((line) => line.source_module.startsWith('facility_'));
+    const roomChargeLines = lines.filter((line) => line.source_module === 'room_charge');
+    return {
+      folio,
+      hasOpenFolio: folio?.status === 'open',
+      roomChargeLines,
+      restaurantLines,
+      facilityLines,
+      totalDue: folio?.grand_total || booking.total_amount,
+    };
+  };
+
   const handleExtendStay = (e: React.FormEvent) => {
     e.preventDefault();
     if (!extensionBooking) return;
@@ -591,6 +625,15 @@ const Bookings: React.FC = () => {
                       <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusClass[booking.status]}`}>
                         {booking.status.replace('_', ' ')}
                       </span>
+                      {booking.folio_details && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedFolio(booking.folio_details || null)}
+                          className="mt-2 block text-xs font-semibold text-emerald-700 hover:underline"
+                        >
+                          {booking.folio_details.folio_number}
+                        </button>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-2">
@@ -1028,7 +1071,9 @@ const Bookings: React.FC = () => {
                 {(searchParams.get('filter') === 'open_folios' ? folios?.filter((folio) => folio.status === 'open') : folios)?.map((folio) => (
                   <tr key={folio.id} className="hover:bg-slate-50/70">
                     <td className="px-4 py-3 font-medium text-slate-900">
-                      {folio.folio_number}
+                      <button type="button" onClick={() => setSelectedFolio(folio)} className="text-left text-emerald-700 hover:underline">
+                        {folio.folio_number}
+                      </button>
                       <span className="block text-xs font-normal text-slate-500">Room {folio.room_number}</span>
                     </td>
                     <td className="px-4 py-3 text-slate-700">{folio.guest_name}</td>
@@ -1260,6 +1305,66 @@ const Bookings: React.FC = () => {
         </form>
       )}
 
+      {selectedFolio && (
+        <ActionModal
+          title={`Folio ${selectedFolio.folio_number}`}
+          description={`Room ${selectedFolio.room_number} | ${selectedFolio.guest_name}`}
+          onClose={() => setSelectedFolio(null)}
+        >
+          <div className="grid gap-4">
+            <div className="border-b border-slate-200 pb-3 text-center">
+              <h2 className="text-xl font-bold text-slate-900">{settings?.name || 'Hotel'}</h2>
+              <p className="mt-1 text-xs text-slate-500">Printed {new Date().toLocaleString()}</p>
+              <p className="mt-3 text-sm font-semibold text-slate-900">Folio {selectedFolio.folio_number}</p>
+              <p className="mt-1 text-xs text-slate-600">Room {selectedFolio.room_number} | {selectedFolio.guest_name}</p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-2xl bg-slate-50 p-3">
+                <p className="text-xs font-medium uppercase text-slate-500">Status</p>
+                <p className="mt-1 text-lg font-semibold text-slate-900">{selectedFolio.status}</p>
+              </div>
+              <div className="rounded-2xl bg-slate-50 p-3">
+                <p className="text-xs font-medium uppercase text-slate-500">Stay</p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">{selectedFolio.check_in_date} to {selectedFolio.check_out_date}</p>
+              </div>
+              <div className="rounded-2xl bg-slate-50 p-3">
+                <p className="text-xs font-medium uppercase text-slate-500">Total</p>
+                <p className="mt-1 text-lg font-semibold text-slate-900">{formatMoney(selectedFolio.grand_total, settings?.currency)}</p>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[620px] text-left text-sm">
+                <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
+                  <tr><th className="py-3 pr-4">Description</th><th className="py-3 pr-4">Posted From</th><th className="py-3 pr-4">Reference</th><th className="py-3 pr-4 text-right">Amount</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {selectedFolio.lines.map((line) => (
+                    <tr key={line.id}>
+                      <td className="py-3 pr-4 font-medium text-slate-900">{line.description}</td>
+                      <td className="py-3 pr-4 text-slate-500">{formatFolioLineSource(line)}</td>
+                      <td className="py-3 pr-4 text-xs text-slate-500">{line.source_id ? line.source_id.slice(-8) : '-'}</td>
+                      <td className="py-3 pr-4 text-right font-semibold text-slate-900">{formatMoney(line.amount, settings?.currency)}</td>
+                    </tr>
+                  ))}
+                  {selectedFolio.lines.length === 0 && <tr><td colSpan={4} className="py-6 text-center text-slate-500">No folio lines yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+            <button type="button" onClick={() => setSelectedFolio(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Close
+            </button>
+            <button type="button" onClick={() => handleDownloadFolioPdf(selectedFolio)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              PDF
+            </button>
+            <button type="button" onClick={() => window.print()} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900">
+              Print
+            </button>
+          </div>
+        </ActionModal>
+      )}
+
       {modificationBooking && (
         <ActionModal
           title={`Modify reservation #${modificationBooking.id.slice(-8)}`}
@@ -1390,31 +1495,79 @@ const Bookings: React.FC = () => {
           description={`Total due ${formatMoney(checkoutBooking.folio_details?.grand_total || checkoutBooking.total_amount, settings?.currency)}`}
           onClose={() => setCheckoutBooking(null)}
         >
-          <form onSubmit={handleCheckout}>
-            <div className="grid gap-3 md:grid-cols-2">
-            <select value={checkoutPayment.payment_method} onChange={(e) => setCheckoutPayment({ ...checkoutPayment, payment_method: e.target.value as CheckoutPaymentMethod })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
-              {paymentMethods.map((method) => (
-                <option key={method.value} value={method.value}>
-                  {method.label}
-                </option>
-              ))}
-            </select>
-            <input type="number" step="0.01" value={checkoutPayment.paid_amount} onChange={(e) => setCheckoutPayment({ ...checkoutPayment, paid_amount: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
-            </div>
-            <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
-              <button type="button" onClick={() => setCheckoutBooking(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-                Cancel
-              </button>
-              <button type="submit" disabled={bookingAction.isPending} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300">
-                Settle checkout
-              </button>
-            </div>
-            {bookingAction.isError && <p className="mt-3 text-sm text-red-600">Could not complete checkout.</p>}
-          </form>
+          {(() => {
+            const readiness = getCheckoutReadiness(checkoutBooking);
+            return (
+              <form onSubmit={handleCheckout}>
+                <div className="grid gap-3">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <h3 className="font-semibold text-slate-900">Checkout Readiness</h3>
+                        <p className="mt-1 text-sm text-slate-600">
+                          Room {checkoutBooking.room_details?.room_number || '-'} | {checkoutBooking.guest_details?.first_name} {checkoutBooking.guest_details?.last_name}
+                        </p>
+                      </div>
+                      <div className="text-left md:text-right">
+                        <p className="text-xs font-medium uppercase text-slate-500">Total Due</p>
+                        <p className="text-lg font-bold text-slate-900">{formatMoney(readiness.totalDue, settings?.currency)}</p>
+                      </div>
+                    </div>
+                    <div className="mt-4 grid gap-2 md:grid-cols-2">
+                      <ReadinessItem label="Room folio" value={readiness.hasOpenFolio ? 'Open' : readiness.folio?.status || 'Missing'} ok={readiness.hasOpenFolio} />
+                      <ReadinessItem label="Room charge line" value={`${readiness.roomChargeLines.length} line(s)`} ok={readiness.roomChargeLines.length > 0} />
+                      <ReadinessItem label="Restaurant postings" value={`${readiness.restaurantLines.length} line(s)`} ok />
+                      <ReadinessItem label="Facility postings" value={`${readiness.facilityLines.length} line(s)`} ok />
+                    </div>
+                    {readiness.folio && (
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <button type="button" onClick={() => setSelectedFolio(readiness.folio || null)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                          Open folio
+                        </button>
+                        <button type="button" onClick={() => readiness.folio && handleDownloadFolioPdf(readiness.folio)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                          Print folio
+                        </button>
+                        <Link to="/pos" className="rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs font-medium text-emerald-700 hover:bg-emerald-50">
+                          Settle in POS
+                        </Link>
+                      </div>
+                    )}
+                    {!readiness.folio && <p className="mt-3 text-sm text-amber-700">No folio is attached yet. Check-in normally creates the room folio.</p>}
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <select value={checkoutPayment.payment_method} onChange={(e) => setCheckoutPayment({ ...checkoutPayment, payment_method: e.target.value as CheckoutPaymentMethod })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                      {paymentMethods.map((method) => (
+                        <option key={method.value} value={method.value}>
+                          {method.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input type="number" step="0.01" value={checkoutPayment.paid_amount} onChange={(e) => setCheckoutPayment({ ...checkoutPayment, paid_amount: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+                  </div>
+                </div>
+                <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+                  <button type="button" onClick={() => setCheckoutBooking(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={bookingAction.isPending || !readiness.hasOpenFolio} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300">
+                    Settle checkout
+                  </button>
+                </div>
+                {bookingAction.isError && <p className="mt-3 text-sm text-red-600">Could not complete checkout.</p>}
+              </form>
+            );
+          })()}
         </ActionModal>
       )}
     </div>
   );
 };
+
+const ReadinessItem = ({ label, value, ok }: { label: string; value: string; ok: boolean }) => (
+  <div className="rounded-xl bg-white p-3">
+    <p className="text-xs font-medium uppercase text-slate-500">{label}</p>
+    <p className={`mt-1 text-sm font-semibold ${ok ? 'text-emerald-700' : 'text-amber-700'}`}>{value}</p>
+  </div>
+);
 
 export default Bookings;

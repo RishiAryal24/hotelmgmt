@@ -16,6 +16,7 @@ from restaurant.models import (
     RestaurantOrder,
     RestaurantOrderApproval,
     RestaurantOrderLine,
+    RestaurantOrderPayment,
     RestaurantTable,
 )
 
@@ -141,6 +142,13 @@ class ApplyOrderDiscountSerializer(serializers.Serializer):
     reason = serializers.CharField(required=False, allow_blank=True)
 
 
+class RestaurantOrderPaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RestaurantOrderPayment
+        fields = '__all__'
+        read_only_fields = ['order', 'cashier_shift', 'paid_at']
+
+
 class RestaurantOrderApprovalRequestSerializer(serializers.Serializer):
     line = serializers.PrimaryKeyRelatedField(queryset=RestaurantOrderLine.objects.all(), required=False, allow_null=True)
     discount_amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0.00'), required=False)
@@ -204,6 +212,7 @@ class CashierShiftCloseSerializer(serializers.Serializer):
 class RestaurantOrderSerializer(serializers.ModelSerializer):
     table_details = RestaurantTableSerializer(source='table', read_only=True)
     lines = RestaurantOrderLineSerializer(many=True, read_only=True)
+    payments = RestaurantOrderPaymentSerializer(many=True, read_only=True)
     room_number = serializers.CharField(source='room_booking.room.room_number', read_only=True)
     guest_name = serializers.SerializerMethodField()
 

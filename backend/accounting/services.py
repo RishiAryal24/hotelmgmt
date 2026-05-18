@@ -78,19 +78,36 @@ def post_restaurant_settlement(order, posted_by=None):
         return None
 
     seed_default_accounts()
-    payment_account = '1100' if order.payment_method == 'room_posting' else '1000'
+    payment_rows = list(order.payments.all())
+    if payment_rows:
+        debit_lines = []
+        for payment in payment_rows:
+            payment_account = '1100' if payment.payment_method == 'room_posting' else '1010' if payment.payment_method in ['card', 'bank_transfer'] else '1000'
+            debit_lines.append(
+                {
+                    'account': payment_account,
+                    'description': f'{payment.get_payment_method_display()} payment for {order.order_number}',
+                    'debit': payment.amount,
+                    'credit': 0,
+                }
+            )
+    else:
+        payment_account = '1100' if order.payment_method == 'room_posting' else '1000'
+        debit_lines = [
+            {
+                'account': payment_account,
+                'description': f'Payment for {order.order_number}',
+                'debit': order.paid_amount,
+                'credit': 0,
+            }
+        ]
     return post_journal_entry(
         description=f'Restaurant settlement {order.order_number}',
         source_module='restaurant_order',
         source_id=str(order.id),
         posted_by=posted_by,
         lines=[
-            {
-                'account': payment_account,
-                'description': f'Payment for {order.order_number}',
-                'debit': order.paid_amount,
-                'credit': 0,
-            },
+            *debit_lines,
             {
                 'account': '4100',
                 'description': f'Restaurant revenue for {order.order_number}',

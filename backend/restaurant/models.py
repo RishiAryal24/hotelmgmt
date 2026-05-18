@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.db import models
+from django.utils import timezone
 
 from core.models import UUIDModel
 
@@ -179,6 +180,7 @@ class RestaurantOrder(UUIDModel):
         ('wallet', 'Wallet'),
         ('room_posting', 'Room Posting'),
         ('bank_transfer', 'Bank Transfer'),
+        ('split', 'Split Payment'),
     ]
 
     table = models.ForeignKey(RestaurantTable, on_delete=models.PROTECT, related_name='orders', null=True, blank=True)
@@ -249,6 +251,20 @@ class RestaurantOrderLine(UUIDModel):
 
     def __str__(self):
         return f'{self.quantity} x {self.menu_item.name}'
+
+
+class RestaurantOrderPayment(UUIDModel):
+    order = models.ForeignKey(RestaurantOrder, on_delete=models.CASCADE, related_name='payments')
+    payment_method = models.CharField(max_length=30, choices=RestaurantOrder.PAYMENT_METHOD_CHOICES)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    cashier_shift = models.ForeignKey('restaurant.CashierShift', on_delete=models.SET_NULL, related_name='restaurant_order_payments', null=True, blank=True)
+    paid_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f'{self.order.order_number} {self.payment_method} {self.amount}'
 
 
 class RestaurantOrderApproval(UUIDModel):

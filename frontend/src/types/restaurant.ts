@@ -89,6 +89,15 @@ export interface RestaurantOrderLine {
   status: 'ordered' | 'preparing' | 'ready' | 'served' | 'cancelled';
 }
 
+export interface RestaurantOrderPayment {
+  id: string;
+  order: string;
+  payment_method: RestaurantOrder['payment_method'];
+  amount: string;
+  cashier_shift?: string | null;
+  paid_at: string;
+}
+
 export interface RestaurantOrder {
   id: string;
   table: string | null;
@@ -106,10 +115,11 @@ export interface RestaurantOrder {
   discount_total: string;
   grand_total: string;
   paid_amount: string;
-  payment_method: '' | 'cash' | 'card' | 'wallet' | 'room_posting' | 'bank_transfer';
+  payment_method: '' | 'cash' | 'card' | 'wallet' | 'room_posting' | 'bank_transfer' | 'split';
   paid_at: string | null;
   notes: string;
   lines: RestaurantOrderLine[];
+  payments: RestaurantOrderPayment[];
 }
 
 export interface RestaurantOrderApproval {
@@ -150,6 +160,8 @@ export interface KitchenTicket {
   station: string;
   status: 'open' | 'preparing' | 'ready' | 'served';
   lines: KitchenTicketLine[];
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CashierShiftTotals {

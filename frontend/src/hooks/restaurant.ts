@@ -331,18 +331,21 @@ export const useSettleRestaurantOrder = () => {
       paid_amount,
       booking,
       cashier_shift,
+      payments,
     }: {
       orderId: string;
       payment_method: RestaurantOrder['payment_method'];
       paid_amount: string;
       booking?: string;
       cashier_shift?: string;
+      payments?: { payment_method: RestaurantOrder['payment_method']; amount: string }[];
     }) => {
       const response = await apiClient.post(`/restaurant/orders/${orderId}/settle/`, {
         payment_method,
         paid_amount,
         booking,
         cashier_shift,
+        payments,
       });
       return response.data;
     },

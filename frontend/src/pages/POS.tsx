@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import ActionModal from '../components/ActionModal';
+import CompactTabs from '../components/CompactTabs';
 import { useBookings } from '../hooks/bookings';
 import { usePermissions } from '../hooks/permissions';
 import {
@@ -44,9 +45,16 @@ const POS: React.FC = () => {
   const [addingCounter, setAddingCounter] = useState(false);
   const [closingShift, setClosingShift] = useState(false);
   const [closeShiftForm, setCloseShiftForm] = useState({ actual_cash: '', notes: '' });
+  const [activeTab, setActiveTab] = useState('settlement');
 
   const payableOrders = orders?.filter((order) => order.status === 'served') || [];
   const paidOrders = orders?.filter((order) => order.status === 'paid') || [];
+  const tabs = [
+    { id: 'settlement', label: 'Settlement', count: payableOrders.length },
+    { id: 'counters', label: 'Counters', count: cashierCounters?.length || 0 },
+    { id: 'shifts', label: 'Shifts', count: cashierShifts?.length || 0 },
+    { id: 'paid', label: 'Paid Orders', count: paidOrders.length },
+  ];
   const activeBookings = bookings?.filter((booking) => booking.status === 'checked_in') || [];
   const liveTotals = currentShift?.live_totals;
   const expectedCash = liveTotals?.expected_cash || currentShift?.expected_cash || '0.00';
@@ -73,15 +81,18 @@ const POS: React.FC = () => {
             <h1 className="text-2xl font-bold text-slate-900">POS Settlement</h1>
             <p className="mt-1 text-sm text-slate-500">Counter shifts, payable orders, and settled sales in compact rows.</p>
           </div>
-          {currentShift && (
-            <button onClick={() => setClosingShift(true)} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900">
-              Close shift
-            </button>
-          )}
+          <div className="flex flex-col gap-3 md:flex-row md:items-center">
+            <CompactTabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
+            {currentShift && (
+              <button onClick={() => setClosingShift(true)} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900">
+                Close shift
+              </button>
+            )}
+          </div>
         </div>
       </section>
 
-      <section className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_420px]">
+      {activeTab === 'settlement' && <section className="grid gap-5">
         <div className="min-w-0 rounded-3xl bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
@@ -141,69 +152,6 @@ const POS: React.FC = () => {
           )}
         </div>
 
-        <div className="grid min-w-0 gap-5">
-          <RowsTable headers={['Date', 'Counter', 'Status', 'Variance']} minWidthClassName="min-w-[520px]">
-            {(cashierShifts || []).slice(0, 6).map((shift) => (
-              <tr key={shift.id}>
-                <td className="py-3 pr-4 font-medium text-slate-900">{shift.business_date}</td>
-                <td className="py-3 pr-4">
-                  <p className="font-medium text-slate-900">{shift.counter_details?.name || 'Counter'}</p>
-                  <p className="text-xs text-slate-500">{shift.counter_details?.outlet_type || '-'}</p>
-                </td>
-                <td className="py-3 pr-4">
-                  <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{shift.status}</span>
-                </td>
-                <td className={`py-3 pr-4 font-semibold ${Number(shift.cash_variance || 0) === 0 ? 'text-slate-900' : 'text-rose-700'}`}>
-                  {formatMoney(shift.cash_variance, settings?.currency)}
-                </td>
-              </tr>
-            ))}
-            {!cashierShifts?.length && <tr><td colSpan={4} className="py-6 text-center text-slate-500">No shifts yet.</td></tr>}
-          </RowsTable>
-
-          <div className="rounded-3xl bg-white p-4 shadow-sm">
-          <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h2 className="text-sm font-bold uppercase text-slate-700">Cashier Counters</h2>
-              <p className="mt-0.5 text-xs text-slate-500">Hotel payment points by outlet.</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setAddingCounter(true)}
-              className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900"
-            >
-              Add counter
-            </button>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[520px] text-left text-sm">
-              <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
-                <tr><th className="py-2 pr-4">Counter</th><th className="py-2 pr-4">Outlet</th><th className="py-2 pr-4">Active</th></tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {(cashierCounters || []).map((counter) => (
-                  <tr key={counter.id}>
-                    <td className="py-2 pr-4">
-                      <p className="font-medium text-slate-900">{counter.name}</p>
-                      <p className="text-xs text-slate-500">{counter.code}</p>
-                    </td>
-                    <td className="py-2 pr-4 text-xs text-slate-600">{counter.outlet_type}</td>
-                    <td className="py-2 pr-4">
-                      <span className={`rounded-full px-2 py-1 text-xs font-medium ${counter.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
-                        {counter.is_active ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-                {!cashierCounters?.length && <tr><td colSpan={3} className="py-4 text-center text-slate-500">No counters yet.</td></tr>}
-              </tbody>
-            </table>
-          </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="grid gap-5">
         <div className="rounded-3xl bg-white p-5 shadow-sm">
           <div className="mb-4 flex flex-col gap-1">
             <h2 className="font-bold text-slate-900">Payable Orders</h2>
@@ -323,7 +271,72 @@ const POS: React.FC = () => {
             </table>
           </div>
         </div>
+      </section>}
 
+      {activeTab === 'counters' && (
+        <div className="rounded-3xl bg-white p-4 shadow-sm">
+          <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-sm font-bold uppercase text-slate-700">Cashier Counters</h2>
+              <p className="mt-0.5 text-xs text-slate-500">Hotel payment points by outlet.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAddingCounter(true)}
+              className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900"
+            >
+              Add counter
+            </button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[520px] text-left text-sm">
+              <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
+                <tr><th className="py-2 pr-4">Counter</th><th className="py-2 pr-4">Outlet</th><th className="py-2 pr-4">Active</th></tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {(cashierCounters || []).map((counter) => (
+                  <tr key={counter.id}>
+                    <td className="py-2 pr-4">
+                      <p className="font-medium text-slate-900">{counter.name}</p>
+                      <p className="text-xs text-slate-500">{counter.code}</p>
+                    </td>
+                    <td className="py-2 pr-4 text-xs text-slate-600">{counter.outlet_type}</td>
+                    <td className="py-2 pr-4">
+                      <span className={`rounded-full px-2 py-1 text-xs font-medium ${counter.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                        {counter.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {!cashierCounters?.length && <tr><td colSpan={3} className="py-4 text-center text-slate-500">No counters yet.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'shifts' && (
+        <RowsTable headers={['Date', 'Counter', 'Status', 'Variance']} minWidthClassName="min-w-[760px]">
+          {(cashierShifts || []).map((shift) => (
+            <tr key={shift.id}>
+              <td className="py-3 pr-4 font-medium text-slate-900">{shift.business_date}</td>
+              <td className="py-3 pr-4">
+                <p className="font-medium text-slate-900">{shift.counter_details?.name || 'Counter'}</p>
+                <p className="text-xs text-slate-500">{shift.counter_details?.outlet_type || '-'}</p>
+              </td>
+              <td className="py-3 pr-4">
+                <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{shift.status}</span>
+              </td>
+              <td className={`py-3 pr-4 font-semibold ${Number(shift.cash_variance || 0) === 0 ? 'text-slate-900' : 'text-rose-700'}`}>
+                {formatMoney(shift.cash_variance, settings?.currency)}
+              </td>
+            </tr>
+          ))}
+          {!cashierShifts?.length && <tr><td colSpan={4} className="py-6 text-center text-slate-500">No shifts yet.</td></tr>}
+        </RowsTable>
+      )}
+
+      {activeTab === 'paid' && (
         <RowsTable headers={['Order', 'Location', 'Payment', 'Paid', 'Status']}>
           {paidOrders.slice(0, 10).map((order) => (
             <tr key={order.id}>
@@ -336,7 +349,7 @@ const POS: React.FC = () => {
           ))}
           {paidOrders.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-slate-500">No paid orders yet.</td></tr>}
         </RowsTable>
-      </section>
+      )}
 
       {closingShift && currentShift && (
         <ActionModal

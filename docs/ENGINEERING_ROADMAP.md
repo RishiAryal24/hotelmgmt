@@ -141,13 +141,21 @@ Goal: move the restaurant module from basic order settlement to practical POS op
 
 Status: functional MVP.
 
+Completed:
+
+- Facility/amenity catalog for billable hotel services.
+- POS facility charge posting into open guest folios.
+- Split bills by item quantity.
+- Table transfer for active dine-in orders.
+- Void, discount, and complimentary approval workflow.
+- Order and item notes.
+
 Next slices:
 
-1. Split bills.
-2. Table transfer.
-3. Void and complimentary approvals.
-4. Modifiers and item notes.
-5. Recipe/BOM costing.
+1. Modifiers.
+2. Recipe/BOM costing.
+3. Table merge.
+4. Amount-based split payments.
 
 Acceptance criteria:
 

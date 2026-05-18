@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 from django_tenants.test.cases import TenantTestCase
 from django_tenants.utils import schema_context, tenant_context
 
-from bookings.models import Booking, Guest, GuestCommunication, GuestFolio, GuestFolioLine, Room, RoomType
+from bookings.models import Booking, FacilityAmenity, FacilityService, Guest, GuestCommunication, GuestFolio, GuestFolioLine, Room, RoomType
 from bookings.services import check_in_booking, create_walk_in_booking, extend_booking_stay, get_guest_history, modify_confirmed_booking, transfer_booking_room
 from bookings.tasks import queue_booking_confirmation_email
 from housekeeping.models import HousekeepingTask
@@ -719,6 +719,57 @@ class ReservationCheckInFolioTests(TenantTestCase):
         self.assertEqual(self.room.status, 'occupied')
         self.assertEqual(folio.status, 'open')
         self.assertEqual(response.data['folio']['id'], str(folio.id))
+
+    def test_facility_service_can_be_created_and_posted_to_open_folio(self):
+        _, folio = check_in_booking(self.booking)
+
+        amenity_response = self.client.post(
+            '/api/v1/bookings/facility-amenities/',
+            {
+                'name': 'Pool',
+                'code': 'POOL',
+                'description': 'Pool facilities',
+                'is_active': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(amenity_response.status_code, 201)
+        amenity = FacilityAmenity.objects.get(code='POOL')
+
+        create_response = self.client.post(
+            '/api/v1/bookings/facility-services/',
+            {
+                'name': 'Pool Day Pass',
+                'code': 'POOL-DAY',
+                'amenity': str(amenity.id),
+                'category': 'other',
+                'default_price': '25.00',
+                'description': 'Daily pool access',
+                'is_active': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+        service = FacilityService.objects.get(code='POOL-DAY')
+
+        charge_response = self.client.post(
+            f'/api/v1/bookings/folios/{folio.id}/add-charge/',
+            {
+                'facility_service': str(service.id),
+                'description': service.name,
+                'amount': str(service.default_price),
+            },
+            format='json',
+        )
+
+        self.assertEqual(charge_response.status_code, 201)
+        line = GuestFolioLine.objects.get(folio=folio, description='Pool Day Pass')
+        self.assertEqual(line.source_module, 'facility_pool')
+        self.assertEqual(line.amount, service.default_price)
+        folio.refresh_from_db()
+        self.assertEqual(folio.grand_total, folio.subtotal + service.default_price)
 
     @override_settings(CELERY_TASK_ALWAYS_EAGER=True, CELERY_TASK_EAGER_PROPAGATES=True)
     def test_checkout_api_settles_folio_and_marks_room_for_cleaning(self):

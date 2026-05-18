@@ -169,6 +169,41 @@ class RestaurantOrderLine(UUIDModel):
         return f'{self.quantity} x {self.menu_item.name}'
 
 
+class RestaurantOrderApproval(UUIDModel):
+    ACTION_CHOICES = [
+        ('void_line', 'Void Item'),
+        ('discount', 'Discount'),
+        ('complimentary', 'Complimentary Bill'),
+    ]
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+
+    order = models.ForeignKey(RestaurantOrder, on_delete=models.CASCADE, related_name='approvals')
+    line = models.ForeignKey(RestaurantOrderLine, on_delete=models.SET_NULL, related_name='approval_requests', null=True, blank=True)
+    action_type = models.CharField(max_length=30, choices=ACTION_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    reason = models.TextField(blank=True)
+    requested_by = models.ForeignKey('users.PlatformUser', on_delete=models.SET_NULL, related_name='restaurant_approval_requests', null=True, blank=True)
+    decided_by = models.ForeignKey('users.PlatformUser', on_delete=models.SET_NULL, related_name='restaurant_approval_decisions', null=True, blank=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decision_notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', 'action_type']),
+            models.Index(fields=['order', 'status']),
+        ]
+
+    def __str__(self):
+        return f'{self.get_action_type_display()} for {self.order}'
+
+
 class KitchenTicket(UUIDModel):
     STATUS_CHOICES = [
         ('open', 'Open'),

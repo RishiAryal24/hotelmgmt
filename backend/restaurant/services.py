@@ -5,7 +5,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from bookings.models import Booking, GuestFolio, GuestFolioLine
-from restaurant.models import CashierCounter, CashierShift, RestaurantOrder, RestaurantOrderLine, RestaurantTable
+from restaurant.models import CashierCounter, CashierShift, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantTable
 
 
 class RestaurantSettlementError(Exception):
@@ -21,6 +21,11 @@ class CashierShiftError(Exception):
 
 
 ACTIVE_ORDER_STATUSES = ['draft', 'sent_to_kitchen', 'preparing', 'served']
+APPROVAL_ACTION_STATUSES = ['draft', 'sent_to_kitchen', 'preparing', 'served']
+
+
+def get_order_active_total(order):
+    return sum((line.line_total for line in order.lines.exclude(status='cancelled')), Decimal('0.00'))
 
 
 @transaction.atomic
@@ -184,6 +189,86 @@ def split_order_bill(order, line_splits):
 
 
 @transaction.atomic
+def request_order_approval(order, *, action_type, requested_by=None, line=None, discount_amount=0, reason=''):
+    if action_type not in dict(RestaurantOrderApproval.ACTION_CHOICES):
+        raise RestaurantOrderActionError('Invalid approval action.')
+    if order.status not in APPROVAL_ACTION_STATUSES:
+        raise RestaurantOrderActionError('Only active orders can request approval.')
+
+    discount = Decimal(str(discount_amount or 0))
+    if action_type == 'void_line':
+        if not line:
+            raise RestaurantOrderActionError('Select an item to void.')
+        if line.order_id != order.id:
+            raise RestaurantOrderActionError('Selected item does not belong to this order.')
+        if line.status == 'cancelled':
+            raise RestaurantOrderActionError('This item is already voided.')
+        existing = RestaurantOrderApproval.objects.filter(order=order, line=line, action_type='void_line', status='pending').first()
+    elif action_type == 'discount':
+        if discount <= 0:
+            raise RestaurantOrderActionError('Discount amount must be greater than zero.')
+        if discount > get_order_active_total(order) + order.tax_total + order.service_charge_total:
+            raise RestaurantOrderActionError('Discount cannot exceed the order total.')
+        existing = None
+    else:
+        active_total = get_order_active_total(order) + order.tax_total + order.service_charge_total
+        if active_total <= 0:
+            raise RestaurantOrderActionError('Complimentary approval requires a positive order total.')
+        discount = active_total
+        existing = RestaurantOrderApproval.objects.filter(order=order, action_type='complimentary', status='pending').first()
+
+    if existing:
+        return existing
+
+    return RestaurantOrderApproval.objects.create(
+        order=order,
+        line=line if action_type == 'void_line' else None,
+        action_type=action_type,
+        discount_amount=discount,
+        reason=reason,
+        requested_by=requested_by,
+    )
+
+
+@transaction.atomic
+def approve_order_approval(approval, *, decided_by=None, decision_notes=''):
+    if approval.status != 'pending':
+        raise RestaurantOrderActionError('Only pending approvals can be approved.')
+
+    order = approval.order
+    if approval.action_type == 'void_line':
+        if not approval.line_id:
+            raise RestaurantOrderActionError('Approval has no item to void.')
+        void_order_line(order, approval.line, reason=approval.reason)
+    elif approval.action_type == 'discount':
+        apply_order_discount(order, discount_amount=approval.discount_amount, reason=approval.reason)
+    elif approval.action_type == 'complimentary':
+        active_total = get_order_active_total(order) + order.tax_total + order.service_charge_total
+        apply_order_discount(order, discount_amount=active_total, reason=approval.reason or 'Complimentary bill')
+    else:
+        raise RestaurantOrderActionError('Invalid approval action.')
+
+    approval.status = 'approved'
+    approval.decided_by = decided_by
+    approval.decided_at = timezone.now()
+    approval.decision_notes = decision_notes
+    approval.save(update_fields=['status', 'decided_by', 'decided_at', 'decision_notes', 'updated_at'])
+    return approval
+
+
+@transaction.atomic
+def reject_order_approval(approval, *, decided_by=None, decision_notes=''):
+    if approval.status != 'pending':
+        raise RestaurantOrderActionError('Only pending approvals can be rejected.')
+    approval.status = 'rejected'
+    approval.decided_by = decided_by
+    approval.decided_at = timezone.now()
+    approval.decision_notes = decision_notes
+    approval.save(update_fields=['status', 'decided_by', 'decided_at', 'decision_notes', 'updated_at'])
+    return approval
+
+
+@transaction.atomic
 def void_order_line(order, line, *, reason=''):
     if order.status in ['paid', 'cancelled']:
         raise RestaurantOrderActionError('Paid or cancelled orders cannot be changed.')
@@ -210,7 +295,7 @@ def apply_order_discount(order, *, discount_amount, reason=''):
     if discount < 0:
         raise RestaurantOrderActionError('Discount cannot be negative.')
 
-    subtotal = sum(line.line_total for line in order.lines.exclude(status='cancelled'))
+    subtotal = get_order_active_total(order)
     max_discount = subtotal + order.tax_total + order.service_charge_total
     if discount > max_discount:
         raise RestaurantOrderActionError('Discount cannot exceed the order total.')

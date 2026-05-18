@@ -11,6 +11,7 @@ from restaurant.models import (
     MenuCategory,
     MenuItem,
     RestaurantOrder,
+    RestaurantOrderApproval,
     RestaurantOrderLine,
     RestaurantTable,
 )
@@ -71,6 +72,16 @@ class VoidOrderLineSerializer(serializers.Serializer):
 class ApplyOrderDiscountSerializer(serializers.Serializer):
     discount_amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0.00'))
     reason = serializers.CharField(required=False, allow_blank=True)
+
+
+class RestaurantOrderApprovalRequestSerializer(serializers.Serializer):
+    line = serializers.PrimaryKeyRelatedField(queryset=RestaurantOrderLine.objects.all(), required=False, allow_null=True)
+    discount_amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0.00'), required=False)
+    reason = serializers.CharField(required=False, allow_blank=True)
+
+
+class RestaurantOrderApprovalDecisionSerializer(serializers.Serializer):
+    decision_notes = serializers.CharField(required=False, allow_blank=True)
 
 
 class CashierShiftSerializer(serializers.ModelSerializer):
@@ -138,6 +149,20 @@ class RestaurantOrderSerializer(serializers.ModelSerializer):
         if not obj.room_booking_id:
             return ''
         return str(obj.room_booking.guest)
+
+
+class RestaurantOrderApprovalSerializer(serializers.ModelSerializer):
+    order_details = RestaurantOrderSerializer(source='order', read_only=True)
+    line_details = RestaurantOrderLineSerializer(source='line', read_only=True)
+    action_type_display = serializers.CharField(source='get_action_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    requested_by_email = serializers.EmailField(source='requested_by.email', read_only=True)
+    decided_by_email = serializers.EmailField(source='decided_by.email', read_only=True)
+
+    class Meta:
+        model = RestaurantOrderApproval
+        fields = '__all__'
+        read_only_fields = ['status', 'requested_by', 'decided_by', 'decided_at']
 
 
 class KitchenTicketLineSerializer(serializers.ModelSerializer):

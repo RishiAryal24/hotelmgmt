@@ -84,6 +84,27 @@ export interface GuestFolioLine {
   amount: string;
 }
 
+export interface FacilityAmenity {
+  id: string;
+  name: string;
+  code: string;
+  description: string;
+  is_active: boolean;
+}
+
+export interface FacilityService {
+  id: string;
+  name: string;
+  code: string;
+  amenity?: string | null;
+  amenity_details?: FacilityAmenity | null;
+  category: 'pool' | 'spa' | 'laundry' | 'minibar' | 'extra_bed' | 'transport' | 'banquet' | 'other';
+  category_display?: string;
+  default_price: string;
+  description: string;
+  is_active: boolean;
+}
+
 export interface GuestHistory {
   guest: Guest;
   summary: {

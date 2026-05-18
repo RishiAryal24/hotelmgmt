@@ -15,6 +15,7 @@ DEFAULT_PERMISSIONS = [
     ('housekeeping.task.update', 'Update housekeeping tasks', 'housekeeping'),
     ('restaurant.order.create', 'Create restaurant orders', 'restaurant'),
     ('restaurant.order.update', 'Update restaurant orders', 'restaurant'),
+    ('restaurant.order.approve', 'Approve restaurant order adjustments', 'restaurant'),
     ('restaurant.kitchen.update', 'Update kitchen tickets', 'restaurant'),
     ('pos.sale.create', 'Create POS sales', 'pos'),
     ('inventory.stock.read', 'View inventory stock', 'inventory'),
@@ -67,6 +68,12 @@ DEFAULT_ROLES = [
         'Waiter',
         'Restaurant table orders',
         ['restaurant.order.create', 'restaurant.order.update'],
+    ),
+    (
+        'restaurant_manager',
+        'Restaurant Manager',
+        'Restaurant order supervision and approval',
+        ['restaurant.order.create', 'restaurant.order.update', 'restaurant.order.approve', 'restaurant.kitchen.update', 'pos.sale.create'],
     ),
     (
         'kitchen',

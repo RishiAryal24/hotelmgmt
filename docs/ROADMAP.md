@@ -33,6 +33,7 @@ Working modules:
 - Maintenance tickets with room downtime status, resolution workflow, and housekeeping escalation.
 - Restaurant menu, tables, order workflow, kitchen tickets, settlement.
 - Restaurant room posting into guest folios.
+- POS facility/amenity catalog and in-house guest facility charge posting.
 - Inventory vendors, items, purchase orders, stock receiving, adjustments, low-stock alerts, movement history.
 - Restaurant inventory deduction on settled orders.
 - Accounting chart of accounts, journal entries, automated postings, summary view, and journal filters.
@@ -133,6 +134,10 @@ Completed:
 - Kitchen tickets.
 - Served order settlement.
 - Room posting to guest folio.
+- Facility and amenity charge catalog with folio posting from POS.
+- Item-quantity split bills.
+- Active dine-in table transfer.
+- Void, discount, and complimentary approval workflow.
 - Inventory item linkage for menu items.
 - Stock deduction from restaurant sales.
 - Vendors, stock receiving, stock adjustments.
@@ -143,9 +148,9 @@ Completed:
 
 Remaining:
 
-- Split/merged bills.
-- Table transfer.
-- Complimentary/void approvals.
+- Merged bills.
+- Amount-based split payments.
+- Menu modifiers.
 - Recipe/BOM costing.
 
 ## Phase 4: Accounting ERP

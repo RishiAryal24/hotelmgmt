@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/api';
-import { CashierCounter, CashierShift, KitchenTicket, MenuCategory, MenuItem, RestaurantOrder, RestaurantTable } from '../types/restaurant';
+import { CashierCounter, CashierShift, KitchenTicket, MenuCategory, MenuItem, RestaurantOrder, RestaurantOrderApproval, RestaurantTable } from '../types/restaurant';
 
 const getList = <T,>(data: T[] | { results: T[] }) => (Array.isArray(data) ? data : data.results);
 
@@ -49,6 +49,16 @@ export const useKitchenTickets = () => {
     queryKey: ['kitchen-tickets'],
     queryFn: async (): Promise<KitchenTicket[]> => {
       const response = await apiClient.get<KitchenTicket[] | { results: KitchenTicket[] }>('/restaurant/kitchen-tickets/');
+      return getList(response.data);
+    },
+  });
+};
+
+export const useRestaurantOrderApprovals = () => {
+  return useQuery({
+    queryKey: ['restaurant-order-approvals'],
+    queryFn: async (): Promise<RestaurantOrderApproval[]> => {
+      const response = await apiClient.get<RestaurantOrderApproval[] | { results: RestaurantOrderApproval[] }>('/restaurant/order-approvals/');
       return getList(response.data);
     },
   });
@@ -189,6 +199,51 @@ export const useRestaurantOrderAction = () => {
       queryClient.invalidateQueries({ queryKey: ['restaurant-orders'] });
       queryClient.invalidateQueries({ queryKey: ['kitchen-tickets'] });
       queryClient.invalidateQueries({ queryKey: ['restaurant-tables'] });
+    },
+  });
+};
+
+export const useRequestRestaurantOrderApproval = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      orderId,
+      action,
+      payload,
+    }: {
+      orderId: string;
+      action: 'request_void_line' | 'request_discount' | 'request_complimentary';
+      payload?: Record<string, unknown>;
+    }): Promise<RestaurantOrderApproval> => {
+      const response = await apiClient.post(`/restaurant/orders/${orderId}/${action}/`, payload || {});
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['restaurant-order-approvals'] });
+    },
+  });
+};
+
+export const useRestaurantOrderApprovalDecision = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      approvalId,
+      action,
+      decision_notes,
+    }: {
+      approvalId: string;
+      action: 'approve' | 'reject';
+      decision_notes?: string;
+    }): Promise<RestaurantOrderApproval> => {
+      const response = await apiClient.post(`/restaurant/order-approvals/${approvalId}/${action}/`, { decision_notes });
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['restaurant-order-approvals'] });
+      queryClient.invalidateQueries({ queryKey: ['restaurant-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['restaurant-tables'] });
+      queryClient.invalidateQueries({ queryKey: ['kitchen-tickets'] });
     },
   });
 };

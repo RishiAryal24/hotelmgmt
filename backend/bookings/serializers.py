@@ -1,6 +1,8 @@
 from rest_framework import serializers
 from bookings.models import (
     Booking,
+    FacilityAmenity,
+    FacilityService,
     Guest,
     GuestCommunication,
     GuestFolio,
@@ -12,6 +14,12 @@ from bookings.models import (
     Room,
     RoomType,
 )
+
+
+class FacilityAmenitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FacilityAmenity
+        fields = '__all__'
 
 
 class RoomTypeSerializer(serializers.ModelSerializer):
@@ -81,10 +89,24 @@ class GuestFolioLineSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class FacilityServiceSerializer(serializers.ModelSerializer):
+    category_display = serializers.CharField(source='get_category_display', read_only=True)
+    amenity_details = FacilityAmenitySerializer(source='amenity', read_only=True)
+
+    class Meta:
+        model = FacilityService
+        fields = '__all__'
+
+
 class GuestFolioChargeSerializer(serializers.Serializer):
     description = serializers.CharField(max_length=255)
     amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0)
     source_module = serializers.CharField(max_length=80, required=False, allow_blank=True)
+    facility_service = serializers.PrimaryKeyRelatedField(
+        queryset=FacilityService.objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
+    )
 
 
 class GuestFolioSerializer(serializers.ModelSerializer):

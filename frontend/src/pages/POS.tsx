@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
-import { useBookings } from '../hooks/bookings';
+import { useAddGuestFolioCharge, useBookings, useCreateFacilityAmenity, useCreateFacilityService, useFacilityAmenities, useFacilityServices, useGuestFolios } from '../hooks/bookings';
 import { usePermissions } from '../hooks/permissions';
 import {
   useCashierCounters,
@@ -15,6 +15,7 @@ import {
   useSettleRestaurantOrder,
 } from '../hooks/restaurant';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
+import { FacilityAmenity, FacilityService } from '../types/bookings';
 import { CashierCounter, RestaurantOrder } from '../types/restaurant';
 
 const paymentMethods = [
@@ -23,7 +24,19 @@ const paymentMethods = [
   { value: 'wallet', label: 'Wallet' },
   { value: 'room_posting', label: 'Room Posting' },
   { value: 'bank_transfer', label: 'Bank Transfer' },
-] as const;
+];
+
+const getAmenityCategory = (amenity?: FacilityAmenity): FacilityService['category'] => {
+  const value = `${amenity?.code || ''} ${amenity?.name || ''}`.toLowerCase();
+  if (value.includes('pool')) return 'pool';
+  if (value.includes('spa')) return 'spa';
+  if (value.includes('laundry')) return 'laundry';
+  if (value.includes('minibar') || value.includes('mini-bar')) return 'minibar';
+  if (value.includes('bed')) return 'extra_bed';
+  if (value.includes('transport') || value.includes('pickup') || value.includes('airport')) return 'transport';
+  if (value.includes('banquet') || value.includes('event')) return 'banquet';
+  return 'other';
+};
 
 const POS: React.FC = () => {
   const { data: settings } = useQuery({ queryKey: ['tenant-settings'], queryFn: getTenantSettings });
@@ -32,10 +45,16 @@ const POS: React.FC = () => {
   const { data: cashierCounters } = useCashierCounters();
   const { data: cashierShifts } = useCashierShifts();
   const { data: bookings } = useBookings();
+  const { data: folios } = useGuestFolios();
+  const { data: facilityAmenities } = useFacilityAmenities();
+  const { data: facilityServices } = useFacilityServices();
+  const addFolioCharge = useAddGuestFolioCharge();
   const settleOrder = useSettleRestaurantOrder();
   const openCashierShift = useOpenCashierShift();
   const closeCashierShift = useCloseCashierShift();
   const createCashierCounter = useCreateCashierCounter();
+  const createFacilityAmenity = useCreateFacilityAmenity();
+  const createFacilityService = useCreateFacilityService();
   const { can } = usePermissions();
   const [paymentForms, setPaymentForms] = useState<
     Record<string, { payment_method: RestaurantOrder['payment_method']; paid_amount: string; booking?: string }>
@@ -43,14 +62,51 @@ const POS: React.FC = () => {
   const [openShiftForm, setOpenShiftForm] = useState({ counter: '', opening_cash: '0.00', notes: '' });
   const [counterForm, setCounterForm] = useState({ name: '', code: '', outlet_type: 'restaurant' as CashierCounter['outlet_type'], is_active: true, notes: '' });
   const [addingCounter, setAddingCounter] = useState(false);
+  const [addingFacilityAmenity, setAddingFacilityAmenity] = useState(false);
+  const [addingFacilityService, setAddingFacilityService] = useState(false);
   const [closingShift, setClosingShift] = useState(false);
   const [closeShiftForm, setCloseShiftForm] = useState({ actual_cash: '', notes: '' });
   const [activeTab, setActiveTab] = useState('settlement');
+  const [facilityChargeForm, setFacilityChargeForm] = useState({
+    folioId: '',
+    facility_service: '',
+    amenity: '',
+    source_module: '',
+    description: '',
+    amount: '',
+  });
+  const [facilityServiceForm, setFacilityServiceForm] = useState({
+    name: '',
+    code: '',
+    amenity: '',
+    default_price: '',
+    description: '',
+    is_active: true,
+  });
+  const [facilityAmenityForm, setFacilityAmenityForm] = useState({
+    name: '',
+    code: '',
+    description: '',
+    is_active: true,
+  });
 
   const payableOrders = orders?.filter((order) => order.status === 'served') || [];
   const paidOrders = orders?.filter((order) => order.status === 'paid') || [];
+  const openFolios = folios?.filter((folio) => folio.status === 'open') || [];
+  const activeFacilityAmenities = (facilityAmenities || []).filter((amenity) => amenity.is_active);
+  const activeFacilityServices = (facilityServices || []).filter((service) => service.is_active);
+  const facilityChargeLines = (folios || [])
+    .flatMap((folio) =>
+      folio.lines
+        .filter((line) => !['restaurant_order', 'room_transfer', 'booking_extension'].includes(line.source_module))
+        .map((line) => ({ ...line, folio })),
+    )
+    .slice(-12)
+    .reverse();
   const tabs = [
     { id: 'settlement', label: 'Settlement', count: payableOrders.length },
+    { id: 'facilities', label: 'Facilities', count: facilityChargeLines.length },
+    { id: 'catalog', label: 'Catalog', count: (facilityAmenities?.length || 0) + (facilityServices?.length || 0) },
     { id: 'counters', label: 'Counters', count: cashierCounters?.length || 0 },
     { id: 'shifts', label: 'Shifts', count: cashierShifts?.length || 0 },
     { id: 'paid', label: 'Paid Orders', count: paidOrders.length },
@@ -69,6 +125,55 @@ const POS: React.FC = () => {
       paid_amount: order.grand_total,
       booking: '',
     };
+
+  const selectedFacilityService = activeFacilityServices.find((service) => service.id === facilityChargeForm.facility_service);
+  const selectedFacilityAmenity = activeFacilityAmenities.find((amenity) => amenity.id === facilityChargeForm.amenity);
+  const selectedFolio = openFolios.find((folio) => folio.id === facilityChargeForm.folioId);
+
+  const getAmenitySourceModule = (amenity?: FacilityAmenity | null, fallback = 'charge') =>
+    `facility_${(amenity?.code || fallback).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'charge'}`;
+
+  const handleFacilityItemSelect = (itemValue: string) => {
+    const [itemType, itemId] = itemValue.split(':');
+    if (itemType === 'service') {
+      const service = activeFacilityServices.find((item) => item.id === itemId);
+      setFacilityChargeForm({
+        ...facilityChargeForm,
+        facility_service: itemId,
+        amenity: '',
+        source_module: getAmenitySourceModule(service?.amenity_details, service?.category),
+        description: service?.name || '',
+        amount: service?.default_price || '',
+      });
+      return;
+    }
+    const amenity = activeFacilityAmenities.find((item) => item.id === itemId);
+    setFacilityChargeForm({
+      ...facilityChargeForm,
+      facility_service: '',
+      amenity: itemId,
+      source_module: getAmenitySourceModule(amenity),
+      description: amenity?.name || '',
+      amount: '',
+    });
+  };
+
+  const handleFacilityCharge = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!facilityChargeForm.folioId || (!facilityChargeForm.facility_service && !facilityChargeForm.amenity) || !facilityChargeForm.amount) return;
+    addFolioCharge.mutate(
+      {
+        folioId: facilityChargeForm.folioId,
+        facility_service: facilityChargeForm.facility_service || undefined,
+        source_module: facilityChargeForm.source_module,
+        description: facilityChargeForm.description || selectedFacilityService?.name || selectedFacilityAmenity?.name || 'Facility charge',
+        amount: facilityChargeForm.amount,
+      },
+      {
+        onSuccess: () => setFacilityChargeForm({ folioId: '', facility_service: '', amenity: '', source_module: '', description: '', amount: '' }),
+      },
+    );
+  };
 
   if (isLoading || shiftLoading) return <div className="p-6 text-slate-600">Loading POS orders...</div>;
   if (error) return <div className="p-6 text-red-600">Error loading POS orders</div>;
@@ -272,6 +377,182 @@ const POS: React.FC = () => {
           </div>
         </div>
       </section>}
+
+      {activeTab === 'facilities' && (
+        <section className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
+          <div className="rounded-3xl bg-white p-5 shadow-sm">
+            <form onSubmit={handleFacilityCharge}>
+              <h2 className="font-bold text-slate-900">Facility Charge</h2>
+              <div className="mt-4 grid gap-3">
+                <select
+                  value={facilityChargeForm.folioId}
+                  onChange={(e) => setFacilityChargeForm({ ...facilityChargeForm, folioId: e.target.value })}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                  required
+                >
+                  <option value="">Select in-house guest</option>
+                  {openFolios.map((folio) => (
+                    <option key={folio.id} value={folio.id}>
+                      Room {folio.room_number} - {folio.guest_name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={facilityChargeForm.facility_service ? `service:${facilityChargeForm.facility_service}` : facilityChargeForm.amenity ? `amenity:${facilityChargeForm.amenity}` : ''}
+                  onChange={(e) => handleFacilityItemSelect(e.target.value)}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                  required
+                >
+                  <option value="">Select facility or amenity</option>
+                  {activeFacilityAmenities.map((amenity) => (
+                    <option key={`amenity-${amenity.id}`} value={`amenity:${amenity.id}`}>
+                      {amenity.name}
+                    </option>
+                  ))}
+                  {activeFacilityServices.map((service) => (
+                    <option key={`service-${service.id}`} value={`service:${service.id}`}>
+                      {service.amenity_details?.name ? `${service.amenity_details.name} - ` : ''}{service.name} - {formatMoney(service.default_price, settings?.currency)}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  placeholder="Description"
+                  value={facilityChargeForm.description}
+                  onChange={(e) => setFacilityChargeForm({ ...facilityChargeForm, description: e.target.value })}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                />
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="Amount"
+                  value={facilityChargeForm.amount}
+                  onChange={(e) => setFacilityChargeForm({ ...facilityChargeForm, amount: e.target.value })}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                  required
+                />
+              </div>
+              {selectedFolio && (
+                <p className="mt-3 text-xs text-slate-500">
+                  Posting to {selectedFolio.folio_number} for Room {selectedFolio.room_number}.
+                </p>
+              )}
+              {activeFacilityServices.length === 0 && (
+                <p className="mt-3 text-xs text-amber-700">
+                  Add services in the Catalog tab for preset prices, or select an amenity and enter the amount manually.
+                </p>
+              )}
+              <button
+                disabled={!can('bookings.reservation.check_out') || addFolioCharge.isPending || (activeFacilityServices.length === 0 && activeFacilityAmenities.length === 0)}
+                className="mt-4 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                Post charge
+              </button>
+              {addFolioCharge.isError && <p className="mt-3 text-sm text-red-600">Could not post charge. Check the folio and amount.</p>}
+            </form>
+          </div>
+
+          <RowsTable headers={['Room', 'Guest', 'Charge', 'Amount']} minWidthClassName="min-w-[760px]">
+            {facilityChargeLines.map((line) => (
+              <tr key={line.id}>
+                <td className="py-3 pr-4 font-medium text-slate-900">Room {line.folio.room_number}</td>
+                <td className="py-3 pr-4">{line.folio.guest_name}</td>
+                <td className="py-3 pr-4">
+                  <p className="font-medium text-slate-900">{line.description}</p>
+                  <p className="text-xs text-slate-500">{line.source_module}</p>
+                </td>
+                <td className="py-3 pr-4 font-semibold text-slate-900">{formatMoney(line.amount, settings?.currency)}</td>
+              </tr>
+            ))}
+            {facilityChargeLines.length === 0 && <tr><td colSpan={4} className="py-6 text-center text-slate-500">No facility charges posted yet.</td></tr>}
+          </RowsTable>
+        </section>
+      )}
+
+      {activeTab === 'catalog' && (
+        <section className="grid gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
+          <div className="rounded-3xl bg-white p-4 shadow-sm">
+            <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-sm font-bold uppercase text-slate-700">Amenities</h2>
+                <p className="mt-0.5 text-xs text-slate-500">Admin-created hotel facilities such as Pool, Spa, or Airport Pickup.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAddingFacilityAmenity(true)}
+                className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900"
+              >
+                Add amenity
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[360px] text-left text-sm">
+                <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
+                  <tr><th className="py-2 pr-4">Amenity</th><th className="py-2 pr-4">Active</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(facilityAmenities || []).map((amenity) => (
+                    <tr key={amenity.id}>
+                      <td className="py-2 pr-4">
+                        <p className="font-medium text-slate-900">{amenity.name}</p>
+                        <p className="text-xs text-slate-500">{amenity.code}</p>
+                      </td>
+                      <td className="py-2 pr-4">
+                        <span className={`rounded-full px-2 py-1 text-xs font-medium ${amenity.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                          {amenity.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {!facilityAmenities?.length && <tr><td colSpan={2} className="py-4 text-center text-slate-500">No amenities yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="rounded-3xl bg-white p-4 shadow-sm">
+            <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-sm font-bold uppercase text-slate-700">Charge Items</h2>
+                <p className="mt-0.5 text-xs text-slate-500">Billable services attached to an amenity.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAddingFacilityService(true)}
+                className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-900"
+              >
+                Add service
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[820px] text-left text-sm">
+                <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
+                  <tr><th className="py-2 pr-4">Service</th><th className="py-2 pr-4">Amenity</th><th className="py-2 pr-4">Category</th><th className="py-2 pr-4">Default Price</th><th className="py-2 pr-4">Active</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(facilityServices || []).map((service) => (
+                    <tr key={service.id}>
+                      <td className="py-2 pr-4">
+                        <p className="font-medium text-slate-900">{service.name}</p>
+                        <p className="text-xs text-slate-500">{service.code}</p>
+                      </td>
+                      <td className="py-2 pr-4 text-xs text-slate-600">{service.amenity_details?.name || 'Unassigned'}</td>
+                      <td className="py-2 pr-4 text-xs text-slate-600">{service.category_display || service.category}</td>
+                      <td className="py-2 pr-4 font-semibold text-slate-900">{formatMoney(service.default_price, settings?.currency)}</td>
+                      <td className="py-2 pr-4">
+                        <span className={`rounded-full px-2 py-1 text-xs font-medium ${service.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                          {service.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {!facilityServices?.length && <tr><td colSpan={5} className="py-4 text-center text-slate-500">No charge items yet.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      )}
 
       {activeTab === 'counters' && (
         <div className="rounded-3xl bg-white p-4 shadow-sm">
@@ -478,6 +759,149 @@ const POS: React.FC = () => {
               </button>
             </div>
             {createCashierCounter.isError && <p className="mt-3 text-sm text-red-600">Could not create counter. Check for duplicate name or code.</p>}
+          </form>
+        </ActionModal>
+      )}
+
+      {addingFacilityAmenity && (
+        <ActionModal
+          title="Add amenity"
+          description="Create the facility or amenity group first, then add billable services under it."
+          onClose={() => setAddingFacilityAmenity(false)}
+        >
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              createFacilityAmenity.mutate(facilityAmenityForm, {
+                onSuccess: () => {
+                  setFacilityAmenityForm({ name: '', code: '', description: '', is_active: true });
+                  setAddingFacilityAmenity(false);
+                },
+              });
+            }}
+          >
+            <div className="grid gap-3 md:grid-cols-2">
+              <input
+                placeholder="Amenity name"
+                value={facilityAmenityForm.name}
+                onChange={(e) => setFacilityAmenityForm({ ...facilityAmenityForm, name: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                required
+              />
+              <input
+                placeholder="Code"
+                value={facilityAmenityForm.code}
+                onChange={(e) => setFacilityAmenityForm({ ...facilityAmenityForm, code: e.target.value.toUpperCase().replace(/\s+/g, '-') })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                required
+              />
+              <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 md:col-span-2">
+                <input
+                  type="checkbox"
+                  checked={facilityAmenityForm.is_active}
+                  onChange={(e) => setFacilityAmenityForm({ ...facilityAmenityForm, is_active: e.target.checked })}
+                />
+                Active
+              </label>
+              <textarea
+                placeholder="Description"
+                value={facilityAmenityForm.description}
+                onChange={(e) => setFacilityAmenityForm({ ...facilityAmenityForm, description: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2"
+              />
+            </div>
+            <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button type="button" onClick={() => setAddingFacilityAmenity(false)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Cancel
+              </button>
+              <button type="submit" disabled={createFacilityAmenity.isPending} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Save amenity
+              </button>
+            </div>
+            {createFacilityAmenity.isError && <p className="mt-3 text-sm text-red-600">Could not create amenity. Check for duplicate name or code.</p>}
+          </form>
+        </ActionModal>
+      )}
+
+      {addingFacilityService && (
+        <ActionModal
+          title="Add service"
+          description="Create a reusable charge item under an amenity or facility."
+          onClose={() => setAddingFacilityService(false)}
+        >
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const amenity = activeFacilityAmenities.find((item) => item.id === facilityServiceForm.amenity);
+              createFacilityService.mutate({ ...facilityServiceForm, category: getAmenityCategory(amenity) }, {
+                onSuccess: () => {
+                  setFacilityServiceForm({ name: '', code: '', amenity: '', default_price: '', description: '', is_active: true });
+                  setAddingFacilityService(false);
+                },
+              });
+            }}
+          >
+            <div className="grid gap-3 md:grid-cols-2">
+              <input
+                placeholder="Service name"
+                value={facilityServiceForm.name}
+                onChange={(e) => setFacilityServiceForm({ ...facilityServiceForm, name: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                required
+              />
+              <input
+                placeholder="Code"
+                value={facilityServiceForm.code}
+                onChange={(e) => setFacilityServiceForm({ ...facilityServiceForm, code: e.target.value.toUpperCase().replace(/\s+/g, '-') })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                required
+              />
+              <select
+                value={facilityServiceForm.amenity}
+                onChange={(e) => setFacilityServiceForm({ ...facilityServiceForm, amenity: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                required
+              >
+                <option value="">Select amenity</option>
+                {activeFacilityAmenities.map((amenity) => (
+                  <option key={amenity.id} value={amenity.id}>{amenity.name}</option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Default price"
+                value={facilityServiceForm.default_price}
+                onChange={(e) => setFacilityServiceForm({ ...facilityServiceForm, default_price: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                required
+              />
+              <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={facilityServiceForm.is_active}
+                  onChange={(e) => setFacilityServiceForm({ ...facilityServiceForm, is_active: e.target.checked })}
+                />
+                Active
+              </label>
+              <textarea
+                placeholder="Description"
+                value={facilityServiceForm.description}
+                onChange={(e) => setFacilityServiceForm({ ...facilityServiceForm, description: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2"
+              />
+            </div>
+            <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button type="button" onClick={() => setAddingFacilityService(false)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Cancel
+              </button>
+              <button type="submit" disabled={createFacilityService.isPending || activeFacilityAmenities.length === 0} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Save service
+              </button>
+            </div>
+            {activeFacilityAmenities.length === 0 && <p className="mt-3 text-sm text-amber-700">Create an amenity before adding services.</p>}
+            {createFacilityService.isError && <p className="mt-3 text-sm text-red-600">Could not create service. Check for duplicate name or code.</p>}
           </form>
         </ActionModal>
       )}

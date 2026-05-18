@@ -5,14 +5,17 @@ from django_tenants.test.cases import TenantTestCase
 
 from accounting.models import JournalEntry, JournalLine
 from bookings.models import Booking, Guest, GuestFolioLine, Room, RoomType
-from restaurant.models import CashierCounter, CashierShift, MenuCategory, MenuItem, RestaurantOrder, RestaurantOrderLine, RestaurantTable
+from restaurant.models import CashierCounter, CashierShift, MenuCategory, MenuItem, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantTable
 from restaurant.services import (
     CashierShiftError,
     RestaurantOrderActionError,
     RestaurantSettlementError,
     apply_order_discount,
+    approve_order_approval,
     close_cashier_shift,
     open_cashier_shift,
+    reject_order_approval,
+    request_order_approval,
     settle_restaurant_order,
     split_order_bill,
     transfer_order_table,
@@ -225,6 +228,66 @@ class RestaurantRoomPostingTests(TenantTestCase):
     def test_order_discount_cannot_exceed_order_total(self):
         with self.assertRaises(RestaurantOrderActionError):
             apply_order_discount(self.order, discount_amount=Decimal('55.00'))
+
+    def test_void_line_approval_applies_only_after_approval(self):
+        line = self.order.lines.get()
+
+        approval = request_order_approval(
+            self.order,
+            action_type='void_line',
+            line=line,
+            reason='Wrong item',
+            requested_by=self.cashier,
+        )
+
+        self.order.refresh_from_db()
+        line.refresh_from_db()
+        self.assertEqual(approval.status, 'pending')
+        self.assertEqual(line.status, 'ordered')
+        self.assertEqual(self.order.grand_total, Decimal('50.00'))
+
+        approve_order_approval(approval, decided_by=self.cashier, decision_notes='Approved by supervisor')
+
+        self.order.refresh_from_db()
+        line.refresh_from_db()
+        approval.refresh_from_db()
+        self.assertEqual(approval.status, 'approved')
+        self.assertEqual(approval.decided_by_id, self.cashier.id)
+        self.assertEqual(line.status, 'cancelled')
+        self.assertEqual(self.order.grand_total, Decimal('0.00'))
+
+    def test_discount_approval_can_be_rejected_without_changing_order(self):
+        approval = request_order_approval(
+            self.order,
+            action_type='discount',
+            discount_amount=Decimal('10.00'),
+            reason='Service delay',
+            requested_by=self.cashier,
+        )
+
+        reject_order_approval(approval, decided_by=self.cashier, decision_notes='Not eligible')
+
+        self.order.refresh_from_db()
+        approval.refresh_from_db()
+        self.assertEqual(approval.status, 'rejected')
+        self.assertEqual(self.order.discount_total, Decimal('0.00'))
+        self.assertEqual(self.order.grand_total, Decimal('50.00'))
+
+    def test_complimentary_approval_discounts_full_bill(self):
+        approval = request_order_approval(
+            self.order,
+            action_type='complimentary',
+            reason='Manager comp',
+            requested_by=self.cashier,
+        )
+
+        approve_order_approval(approval, decided_by=self.cashier)
+
+        self.order.refresh_from_db()
+        approval.refresh_from_db()
+        self.assertEqual(approval.status, 'approved')
+        self.assertEqual(self.order.discount_total, Decimal('50.00'))
+        self.assertEqual(self.order.grand_total, Decimal('0.00'))
 
     def test_cashier_shift_closing_totals_restaurant_payments(self):
         shift = open_cashier_shift(cashier=self.cashier, counter=self.counter, opening_cash=Decimal('100.00'))

@@ -71,6 +71,27 @@ export interface RestaurantOrder {
   lines: RestaurantOrderLine[];
 }
 
+export interface RestaurantOrderApproval {
+  id: string;
+  order: string;
+  order_details?: RestaurantOrder;
+  line: string | null;
+  line_details?: RestaurantOrderLine | null;
+  action_type: 'void_line' | 'discount' | 'complimentary';
+  action_type_display?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  status_display?: string;
+  discount_amount: string;
+  reason: string;
+  requested_by: string | null;
+  requested_by_email?: string;
+  decided_by: string | null;
+  decided_by_email?: string;
+  decided_at: string | null;
+  decision_notes: string;
+  created_at: string;
+}
+
 export interface KitchenTicketLine {
   id: string;
   ticket: string;

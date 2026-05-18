@@ -14,6 +14,9 @@ import {
   useKitchenTickets,
   useMenuCategories,
   useMenuItems,
+  useRequestRestaurantOrderApproval,
+  useRestaurantOrderApprovalDecision,
+  useRestaurantOrderApprovals,
   useRestaurantOrderAction,
   useRestaurantOrders,
   useRestaurantTables,
@@ -49,6 +52,7 @@ const emptyOrderLine = { menu_item: '', quantity: 1, notes: '' };
 const emptySettleForm = { payment_method: 'cash' as RestaurantOrder['payment_method'], paid_amount: '', booking: '' };
 const emptyVoidForm = { line: '', reason: '' };
 const emptyDiscountForm = { discount_amount: '', reason: '' };
+const emptyComplimentaryForm = { reason: '' };
 
 const Restaurant: React.FC = () => {
   const { data: settings } = useQuery({ queryKey: ['tenant-settings'], queryFn: getTenantSettings });
@@ -58,6 +62,7 @@ const Restaurant: React.FC = () => {
   const { data: tables } = useRestaurantTables();
   const { data: orders } = useRestaurantOrders();
   const { data: tickets } = useKitchenTickets();
+  const { data: approvals } = useRestaurantOrderApprovals();
   const { data: currentShift } = useCurrentCashierShift();
   const { data: bookings } = useBookings();
   const createCategory = useCreateMenuCategory();
@@ -65,6 +70,8 @@ const Restaurant: React.FC = () => {
   const createTable = useCreateRestaurantTable();
   const createOrder = useCreateRestaurantOrder();
   const orderAction = useRestaurantOrderAction();
+  const requestApproval = useRequestRestaurantOrderApproval();
+  const approvalDecision = useRestaurantOrderApprovalDecision();
   const settleOrder = useSettleRestaurantOrder();
   const ticketAction = useKitchenTicketAction();
   const { can } = usePermissions();
@@ -85,6 +92,9 @@ const Restaurant: React.FC = () => {
   const [voidForm, setVoidForm] = useState(emptyVoidForm);
   const [discountOrder, setDiscountOrder] = useState<RestaurantOrder | null>(null);
   const [discountForm, setDiscountForm] = useState(emptyDiscountForm);
+  const [complimentaryOrder, setComplimentaryOrder] = useState<RestaurantOrder | null>(null);
+  const [complimentaryForm, setComplimentaryForm] = useState(emptyComplimentaryForm);
+  const [approvalNotes, setApprovalNotes] = useState<Record<string, string>>({});
   const [receiptOrder, setReceiptOrder] = useState<RestaurantOrder | null>(null);
   const [historySearch, setHistorySearch] = useState('');
 
@@ -107,6 +117,7 @@ const Restaurant: React.FC = () => {
         .some((value) => String(value).toLowerCase().includes(query));
     }) || [];
   const inHouseBookings = bookings?.filter((booking) => booking.status === 'checked_in') || [];
+  const pendingApprovals = approvals?.filter((approval) => approval.status === 'pending') || [];
   const availableTransferTables =
     tables?.filter((table) => table.is_active && ['available', 'reserved'].includes(table.status) && table.id !== transferOrder?.table) || [];
   const tabs = [
@@ -114,6 +125,7 @@ const Restaurant: React.FC = () => {
     { id: 'menu', label: 'Menu', count: items?.length || 0 },
     { id: 'categories', label: 'Categories', count: categories?.length || 0 },
     { id: 'tables', label: 'Tables', count: tables?.length || 0 },
+    { id: 'approvals', label: 'Approvals', count: pendingApprovals.length },
     { id: 'kitchen', label: 'Kitchen', count: tickets?.filter((ticket) => ticket.status !== 'served').length || 0 },
     { id: 'history', label: 'History', count: historyOrders.length },
   ];
@@ -240,8 +252,8 @@ const Restaurant: React.FC = () => {
   const handleVoidOrderLine = (e: React.FormEvent) => {
     e.preventDefault();
     if (!voidingOrder || !voidForm.line) return;
-    orderAction.mutate(
-      { orderId: voidingOrder.id, action: 'void_line', payload: voidForm },
+    requestApproval.mutate(
+      { orderId: voidingOrder.id, action: 'request_void_line', payload: voidForm },
       { onSuccess: () => setVoidingOrder(null) },
     );
   };
@@ -254,9 +266,23 @@ const Restaurant: React.FC = () => {
   const handleApplyDiscount = (e: React.FormEvent) => {
     e.preventDefault();
     if (!discountOrder) return;
-    orderAction.mutate(
-      { orderId: discountOrder.id, action: 'apply_discount', payload: { ...discountForm, discount_amount: discountForm.discount_amount || '0.00' } },
+    requestApproval.mutate(
+      { orderId: discountOrder.id, action: 'request_discount', payload: { ...discountForm, discount_amount: discountForm.discount_amount || '0.00' } },
       { onSuccess: () => setDiscountOrder(null) },
+    );
+  };
+
+  const openComplimentaryOrder = (order: RestaurantOrder) => {
+    setComplimentaryOrder(order);
+    setComplimentaryForm(emptyComplimentaryForm);
+  };
+
+  const handleComplimentaryRequest = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!complimentaryOrder) return;
+    requestApproval.mutate(
+      { orderId: complimentaryOrder.id, action: 'request_complimentary', payload: complimentaryForm },
+      { onSuccess: () => setComplimentaryOrder(null) },
     );
   };
 
@@ -346,6 +372,7 @@ const Restaurant: React.FC = () => {
                             {can('restaurant.order.update') && ['draft', 'served'].includes(order.status) && activeLines.length > 0 && <button onClick={() => openSplitOrder(order)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">Split</button>}
                             {can('restaurant.order.update') && activeLines.length > 0 && <button onClick={() => openVoidOrderLine(order)} className="rounded-xl border border-rose-200 px-3 py-2 text-xs font-medium text-rose-700 hover:bg-rose-50">Void</button>}
                             {can('restaurant.order.update') && activeLines.length > 0 && <button onClick={() => openDiscountOrder(order)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">Discount</button>}
+                            {can('restaurant.order.update') && activeLines.length > 0 && <button onClick={() => openComplimentaryOrder(order)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">Comp</button>}
                             {can('pos.sale.create') && order.status === 'served' && <button onClick={() => openSettleOrder(order)} className="rounded-xl bg-slate-800 px-3 py-2 text-xs font-medium text-white">Settle</button>}
                           </div>
                         </td>
@@ -435,6 +462,59 @@ const Restaurant: React.FC = () => {
             {tables?.length === 0 && <tr><td colSpan={5} className="py-6 text-center text-slate-500">No tables yet.</td></tr>}
           </RowsTable>
         </section>
+      )}
+
+      {activeTab === 'approvals' && (
+        <RowsTable headers={['Request', 'Order', 'Reason', 'Decision', 'Actions']}>
+          {(approvals || []).map((approval) => {
+            const note = approvalNotes[approval.id] || '';
+            return (
+              <tr key={approval.id}>
+                <td className="py-3 pr-4">
+                  <p className="font-medium text-slate-900">{approval.action_type_display || approval.action_type}</p>
+                  <p className="text-xs text-slate-500">{approval.requested_by_email || 'Requested'} | {new Date(approval.created_at).toLocaleString()}</p>
+                </td>
+                <td className="py-3 pr-4">
+                  <p className="font-medium text-slate-900">{approval.order_details?.order_number || approval.order}</p>
+                  <p className="text-xs text-slate-500">{approval.line_details?.menu_item_details?.name || (approval.order_details ? getOrderLocation(approval.order_details) : '-')}</p>
+                </td>
+                <td className="py-3 pr-4">
+                  <p>{approval.reason || '-'}</p>
+                  {Number(approval.discount_amount) > 0 && <p className="text-xs text-slate-500">{formatMoney(approval.discount_amount, settings?.currency)}</p>}
+                </td>
+                <td className="py-3 pr-4">
+                  <span className={`rounded-full px-2 py-1 text-xs font-medium ${approval.status === 'pending' ? 'bg-amber-50 text-amber-700' : approval.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                    {approval.status_display || approval.status}
+                  </span>
+                  {approval.decided_by_email && <p className="mt-1 text-xs text-slate-500">{approval.decided_by_email}</p>}
+                </td>
+                <td className="py-3 pr-4">
+                  {approval.status === 'pending' && can('restaurant.order.approve') ? (
+                    <div className="grid min-w-[280px] gap-2">
+                      <input
+                        placeholder="Decision note"
+                        value={note}
+                        onChange={(e) => setApprovalNotes({ ...approvalNotes, [approval.id]: e.target.value })}
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-xs"
+                      />
+                      <div className="flex gap-2">
+                        <button onClick={() => approvalDecision.mutate({ approvalId: approval.id, action: 'approve', decision_notes: note })} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-medium text-white">
+                          Approve
+                        </button>
+                        <button onClick={() => approvalDecision.mutate({ approvalId: approval.id, action: 'reject', decision_notes: note })} className="rounded-xl bg-rose-700 px-3 py-2 text-xs font-medium text-white">
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-slate-500">{approval.decision_notes || 'No action available'}</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+          {!approvals?.length && <tr><td colSpan={5} className="py-6 text-center text-slate-500">No approval requests yet.</td></tr>}
+        </RowsTable>
       )}
 
       {activeTab === 'kitchen' && (
@@ -657,7 +737,7 @@ const Restaurant: React.FC = () => {
       {voidingOrder && (
         <ActionModal
           title={`Void item ${voidingOrder.order_number}`}
-          description="Select the item to remove from the payable bill."
+          description="Select the item and submit it for manager approval."
           onClose={() => setVoidingOrder(null)}
         >
           <form onSubmit={handleVoidOrderLine}>
@@ -690,11 +770,11 @@ const Restaurant: React.FC = () => {
               <button type="button" onClick={() => setVoidingOrder(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
                 Cancel
               </button>
-              <button type="submit" disabled={orderAction.isPending || !voidForm.line} className="rounded-xl bg-rose-700 px-4 py-2 text-sm font-medium text-white hover:bg-rose-800 disabled:cursor-not-allowed disabled:bg-slate-300">
-                Void item
+              <button type="submit" disabled={requestApproval.isPending || !voidForm.line} className="rounded-xl bg-rose-700 px-4 py-2 text-sm font-medium text-white hover:bg-rose-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Request approval
               </button>
             </div>
-            {orderAction.isError && <p className="mt-3 text-sm text-red-600">Could not void item. Check order status and try again.</p>}
+            {requestApproval.isError && <p className="mt-3 text-sm text-red-600">Could not request approval. Check order status and try again.</p>}
           </form>
         </ActionModal>
       )}
@@ -727,11 +807,38 @@ const Restaurant: React.FC = () => {
               <button type="button" onClick={() => setDiscountOrder(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
                 Cancel
               </button>
-              <button type="submit" disabled={orderAction.isPending} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300">
-                Apply discount
+              <button type="submit" disabled={requestApproval.isPending} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Request approval
               </button>
             </div>
-            {orderAction.isError && <p className="mt-3 text-sm text-red-600">Could not apply discount. It cannot exceed the active order total.</p>}
+            {requestApproval.isError && <p className="mt-3 text-sm text-red-600">Could not request discount approval. It cannot exceed the active order total.</p>}
+          </form>
+        </ActionModal>
+      )}
+
+      {complimentaryOrder && (
+        <ActionModal
+          title={`Comp bill ${complimentaryOrder.order_number}`}
+          description={`Current bill total ${formatMoney(complimentaryOrder.grand_total, settings?.currency)}`}
+          onClose={() => setComplimentaryOrder(null)}
+        >
+          <form onSubmit={handleComplimentaryRequest}>
+            <textarea
+              placeholder="Reason"
+              value={complimentaryForm.reason}
+              onChange={(e) => setComplimentaryForm({ reason: e.target.value })}
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              required
+            />
+            <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+              <button type="button" onClick={() => setComplimentaryOrder(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Cancel
+              </button>
+              <button type="submit" disabled={requestApproval.isPending} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300">
+                Request approval
+              </button>
+            </div>
+            {requestApproval.isError && <p className="mt-3 text-sm text-red-600">Could not request complimentary approval.</p>}
           </form>
         </ActionModal>
       )}

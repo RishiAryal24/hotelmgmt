@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAuthenticated
 
-from restaurant.models import KitchenTicket, KitchenTicketLine, MenuCategory, MenuItem, RestaurantOrder, RestaurantOrderLine, RestaurantTable
+from restaurant.models import KitchenTicket, KitchenTicketLine, MenuCategory, MenuItem, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantTable
 from restaurant.models import CashierCounter, CashierShift
 from restaurant.serializers import (
     ApplyOrderDiscountSerializer,
@@ -17,6 +17,9 @@ from restaurant.serializers import (
     MenuCategorySerializer,
     MenuItemSerializer,
     RestaurantOrderLineSerializer,
+    RestaurantOrderApprovalDecisionSerializer,
+    RestaurantOrderApprovalRequestSerializer,
+    RestaurantOrderApprovalSerializer,
     RestaurantOrderSerializer,
     RestaurantTableSerializer,
     SplitBillSerializer,
@@ -28,9 +31,12 @@ from restaurant.services import (
     RestaurantSettlementError,
     CashierShiftError,
     apply_order_discount,
+    approve_order_approval,
     close_cashier_shift,
     get_open_cashier_shift,
     open_cashier_shift,
+    reject_order_approval,
+    request_order_approval,
     settle_restaurant_order,
     split_order_bill,
     transfer_order_table,
@@ -177,8 +183,11 @@ class RestaurantOrderViewSet(viewsets.ModelViewSet):
         'mark_served': 'restaurant.order.update',
         'split_bill': 'restaurant.order.update',
         'transfer_table': 'restaurant.order.update',
-        'void_line': 'restaurant.order.update',
-        'apply_discount': 'restaurant.order.update',
+        'void_line': 'restaurant.order.approve',
+        'apply_discount': 'restaurant.order.approve',
+        'request_void_line': 'restaurant.order.update',
+        'request_discount': 'restaurant.order.update',
+        'request_complimentary': 'restaurant.order.update',
         'settle': 'pos.sale.create',
     }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -294,6 +303,56 @@ class RestaurantOrderViewSet(viewsets.ModelViewSet):
         return Response(RestaurantOrderSerializer(order).data)
 
     @action(detail=True, methods=['post'])
+    def request_void_line(self, request, pk=None):
+        order = self.get_object()
+        serializer = RestaurantOrderApprovalRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            approval = request_order_approval(
+                order,
+                action_type='void_line',
+                line=serializer.validated_data.get('line'),
+                reason=serializer.validated_data.get('reason', ''),
+                requested_by=request.user,
+            )
+        except RestaurantOrderActionError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(RestaurantOrderApprovalSerializer(approval).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'])
+    def request_discount(self, request, pk=None):
+        order = self.get_object()
+        serializer = RestaurantOrderApprovalRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            approval = request_order_approval(
+                order,
+                action_type='discount',
+                discount_amount=serializer.validated_data.get('discount_amount'),
+                reason=serializer.validated_data.get('reason', ''),
+                requested_by=request.user,
+            )
+        except RestaurantOrderActionError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(RestaurantOrderApprovalSerializer(approval).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'])
+    def request_complimentary(self, request, pk=None):
+        order = self.get_object()
+        serializer = RestaurantOrderApprovalRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            approval = request_order_approval(
+                order,
+                action_type='complimentary',
+                reason=serializer.validated_data.get('reason', ''),
+                requested_by=request.user,
+            )
+        except RestaurantOrderActionError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(RestaurantOrderApprovalSerializer(approval).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'])
     def settle(self, request, pk=None):
         order = self.get_object()
         try:
@@ -314,6 +373,62 @@ class RestaurantOrderViewSet(viewsets.ModelViewSet):
             return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(RestaurantOrderSerializer(order).data)
+
+
+class RestaurantOrderApprovalViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = RestaurantOrderApproval.objects.select_related(
+        'order',
+        'order__table',
+        'order__room_booking',
+        'order__room_booking__room',
+        'order__room_booking__guest',
+        'line',
+        'line__menu_item',
+        'requested_by',
+        'decided_by',
+    ).prefetch_related('order__lines', 'order__lines__menu_item').all()
+    serializer_class = RestaurantOrderApprovalSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': ['restaurant.order.update', 'restaurant.order.approve'],
+        'retrieve': ['restaurant.order.update', 'restaurant.order.approve'],
+        'approve': 'restaurant.order.approve',
+        'reject': 'restaurant.order.approve',
+    }
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['status', 'action_type', 'order']
+    search_fields = ['order__order_number', 'reason', 'requested_by__email', 'decided_by__email']
+    ordering_fields = ['created_at', 'decided_at', 'status', 'action_type']
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        approval = self.get_object()
+        serializer = RestaurantOrderApprovalDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            approval = approve_order_approval(
+                approval,
+                decided_by=request.user,
+                decision_notes=serializer.validated_data.get('decision_notes', ''),
+            )
+        except RestaurantOrderActionError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(RestaurantOrderApprovalSerializer(approval).data)
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        approval = self.get_object()
+        serializer = RestaurantOrderApprovalDecisionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            approval = reject_order_approval(
+                approval,
+                decided_by=request.user,
+                decision_notes=serializer.validated_data.get('decision_notes', ''),
+            )
+        except RestaurantOrderActionError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(RestaurantOrderApprovalSerializer(approval).data)
 
 
 class KitchenTicketViewSet(viewsets.ModelViewSet):

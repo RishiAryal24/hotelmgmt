@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from django.http import HttpResponse
 from django.db import transaction
+from django.utils.text import slugify
 from django.utils.dateparse import parse_date
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -10,10 +11,12 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.permissions import IsAuthenticated
-from bookings.models import Booking, Guest, GuestCommunication, GuestFolio, GuestFolioLine, GuestPoints, LoyaltyProgram, Package, RatePlan, Room, RoomType
+from bookings.models import Booking, FacilityAmenity, FacilityService, Guest, GuestCommunication, GuestFolio, GuestFolioLine, GuestPoints, LoyaltyProgram, Package, RatePlan, Room, RoomType
 from bookings.pdf import booking_confirmation_pdf, guest_folio_pdf
 from bookings.serializers import (
     BookingSerializer,
+    FacilityAmenitySerializer,
+    FacilityServiceSerializer,
     GuestCommunicationSerializer,
     GuestFolioChargeSerializer,
     GuestFolioSerializer,
@@ -406,9 +409,14 @@ class GuestFolioViewSet(viewsets.ReadOnlyModelViewSet):
 
         serializer = GuestFolioChargeSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        facility_service = serializer.validated_data.get('facility_service')
+        source_module = serializer.validated_data.get('source_module')
+        if facility_service and not source_module:
+            source_key = facility_service.amenity.code if facility_service.amenity_id else facility_service.category
+            source_module = f'facility_{slugify(source_key)[:60] or "charge"}'
         charge = GuestFolioLine.objects.create(
             folio=folio,
-            source_module=serializer.validated_data.get('source_module') or 'facility_charge',
+            source_module=source_module or 'facility_charge',
             source_id=str(uuid4()),
             description=serializer.validated_data['description'],
             amount=serializer.validated_data['amount'],
@@ -424,6 +432,42 @@ class GuestFolioViewSet(viewsets.ReadOnlyModelViewSet):
         response = HttpResponse(pdf, content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="{filename}.pdf"'
         return response
+
+
+class FacilityAmenityViewSet(viewsets.ModelViewSet):
+    queryset = FacilityAmenity.objects.all()
+    serializer_class = FacilityAmenitySerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': ['bookings.reservation.read', 'pos.sale.create'],
+        'retrieve': ['bookings.reservation.read', 'pos.sale.create'],
+        'create': 'bookings.reservation.check_out',
+        'update': 'bookings.reservation.check_out',
+        'partial_update': 'bookings.reservation.check_out',
+        'destroy': 'bookings.reservation.check_out',
+    }
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['is_active']
+    search_fields = ['name', 'code', 'description']
+    ordering_fields = ['name', 'created_at']
+
+
+class FacilityServiceViewSet(viewsets.ModelViewSet):
+    queryset = FacilityService.objects.select_related('amenity').all()
+    serializer_class = FacilityServiceSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': ['bookings.reservation.read', 'pos.sale.create'],
+        'retrieve': ['bookings.reservation.read', 'pos.sale.create'],
+        'create': 'bookings.reservation.check_out',
+        'update': 'bookings.reservation.check_out',
+        'partial_update': 'bookings.reservation.check_out',
+        'destroy': 'bookings.reservation.check_out',
+    }
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['amenity', 'category', 'is_active']
+    search_fields = ['name', 'code', 'description', 'amenity__name', 'amenity__code']
+    ordering_fields = ['amenity__name', 'category', 'name', 'default_price', 'created_at']
 
 
 class RatePlanViewSet(viewsets.ModelViewSet):

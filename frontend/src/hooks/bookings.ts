@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Room, RoomType, Guest, Booking, GuestCommunication, GuestFolio, GuestHistory } from '../types/bookings';
+import { Room, RoomType, Guest, Booking, GuestCommunication, GuestFolio, GuestHistory, FacilityAmenity, FacilityService } from '../types/bookings';
 import apiClient from '../services/api';
 
 const getList = <T,>(data: T[] | { results: T[] }) => (Array.isArray(data) ? data : data.results);
@@ -89,6 +89,26 @@ export const useGuestFolios = () => {
     queryKey: ['guest-folios'],
     queryFn: async (): Promise<GuestFolio[]> => {
       const response = await apiClient.get<GuestFolio[] | { results: GuestFolio[] }>('/bookings/folios/');
+      return getList(response.data);
+    },
+  });
+};
+
+export const useFacilityServices = () => {
+  return useQuery({
+    queryKey: ['facility-services'],
+    queryFn: async (): Promise<FacilityService[]> => {
+      const response = await apiClient.get<FacilityService[] | { results: FacilityService[] }>('/bookings/facility-services/');
+      return getList(response.data);
+    },
+  });
+};
+
+export const useFacilityAmenities = () => {
+  return useQuery({
+    queryKey: ['facility-amenities'],
+    queryFn: async (): Promise<FacilityAmenity[]> => {
+      const response = await apiClient.get<FacilityAmenity[] | { results: FacilityAmenity[] }>('/bookings/facility-amenities/');
       return getList(response.data);
     },
   });
@@ -270,22 +290,53 @@ export const useAddGuestFolioCharge = () => {
       description,
       amount,
       source_module,
+      facility_service,
     }: {
       folioId: string;
       description: string;
       amount: string;
       source_module?: string;
+      facility_service?: string;
     }): Promise<GuestFolio> => {
       const response = await apiClient.post(`/bookings/folios/${folioId}/add-charge/`, {
         description,
         amount,
         source_module,
+        facility_service,
       });
       return response.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['guest-folios'] });
       queryClient.invalidateQueries({ queryKey: ['bookings'] });
+    },
+  });
+};
+
+export const useCreateFacilityService = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (service: Omit<FacilityService, 'id' | 'category_display' | 'amenity_details'>): Promise<FacilityService> => {
+      const response = await apiClient.post('/bookings/facility-services/', service);
+      return response.data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['facility-services'] }),
+  });
+};
+
+export const useCreateFacilityAmenity = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (amenity: Omit<FacilityAmenity, 'id'>): Promise<FacilityAmenity> => {
+      const response = await apiClient.post('/bookings/facility-amenities/', amenity);
+      return response.data;
+    },
+    onSuccess: (amenity) => {
+      queryClient.setQueryData<FacilityAmenity[]>(['facility-amenities'], (current = []) => {
+        if (current.some((item) => item.id === amenity.id)) return current;
+        return [...current, amenity].sort((a, b) => a.name.localeCompare(b.name));
+      });
+      queryClient.invalidateQueries({ queryKey: ['facility-amenities'] });
     },
   });
 };

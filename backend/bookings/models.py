@@ -193,6 +193,55 @@ class GuestFolioLine(UUIDModel):
         self.folio.recalculate_totals()
 
 
+class FacilityAmenity(UUIDModel):
+    name = models.CharField(max_length=120, unique=True)
+    code = models.CharField(max_length=40, unique=True)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['name']
+        indexes = [
+            models.Index(fields=['code']),
+            models.Index(fields=['is_active']),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class FacilityService(UUIDModel):
+    CATEGORY_CHOICES = [
+        ('pool', 'Pool'),
+        ('spa', 'Spa'),
+        ('laundry', 'Laundry'),
+        ('minibar', 'Minibar'),
+        ('extra_bed', 'Extra Bed'),
+        ('transport', 'Transport'),
+        ('banquet', 'Banquet'),
+        ('other', 'Other'),
+    ]
+
+    name = models.CharField(max_length=120, unique=True)
+    code = models.CharField(max_length=40, unique=True)
+    amenity = models.ForeignKey(FacilityAmenity, on_delete=models.PROTECT, related_name='services', null=True, blank=True)
+    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='other')
+    default_price = models.DecimalField(max_digits=12, decimal_places=2)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['amenity__name', 'category', 'name']
+        indexes = [
+            models.Index(fields=['amenity', 'is_active']),
+            models.Index(fields=['category', 'is_active']),
+            models.Index(fields=['code']),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
 class RatePlan(UUIDModel):
     name = models.CharField(max_length=100)
     room_type = models.ForeignKey(RoomType, on_delete=models.CASCADE, related_name='rate_plans')

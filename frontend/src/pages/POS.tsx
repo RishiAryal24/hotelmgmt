@@ -93,6 +93,7 @@ const POS: React.FC = () => {
   const [selectedFolioReport, setSelectedFolioReport] = useState<GuestFolio | null>(null);
   const [folioPaymentReceipt, setFolioPaymentReceipt] = useState<GuestFolio | null>(null);
   const [restaurantPaymentReceipt, setRestaurantPaymentReceipt] = useState<RestaurantOrder | null>(null);
+  const [paidOrderSearch, setPaidOrderSearch] = useState('');
   const [activeTab, setActiveTab] = useState('settlement');
   const [facilityChargeForm, setFacilityChargeForm] = useState({
     folioId: '',
@@ -119,6 +120,21 @@ const POS: React.FC = () => {
 
   const payableOrders = orders?.filter((order) => order.status === 'served') || [];
   const paidOrders = orders?.filter((order) => order.status === 'paid') || [];
+  const filteredPaidOrders = paidOrders.filter((order) => {
+    const query = paidOrderSearch.trim().toLowerCase();
+    if (!query) return true;
+    return [
+      order.order_number,
+      order.payment_method,
+      order.table_details?.table_number,
+      order.room_number,
+      order.guest_name,
+      order.order_type,
+      order.paid_amount,
+    ]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(query));
+  });
   const openFolios = folios?.filter((folio) => folio.status === 'open') || [];
   const activeFacilityAmenities = (facilityAmenities || []).filter((amenity) => amenity.is_active);
   const activeFacilityServices = (facilityServices || []).filter((service) => service.is_active);
@@ -804,23 +820,45 @@ const POS: React.FC = () => {
       )}
 
       {activeTab === 'paid' && (
-        <RowsTable headers={['Order', 'Location', 'Payment', 'Paid', 'Status', 'Actions']}>
-          {paidOrders.slice(0, 10).map((order) => (
-            <tr key={order.id}>
-              <td className="py-3 pr-4 font-medium text-slate-900">{order.order_number}</td>
-              <td className="py-3 pr-4">{order.table_details ? `Table ${order.table_details.table_number}` : order.room_number ? `Room ${order.room_number}` : order.order_type}</td>
-              <td className="py-3 pr-4">{order.payment_method || '-'}</td>
-              <td className="py-3 pr-4 font-semibold text-slate-900">{formatMoney(order.paid_amount, settings?.currency)}</td>
-              <td className="py-3 pr-4"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{order.status}</span></td>
-              <td className="py-3 pr-4">
-                <button onClick={() => setRestaurantPaymentReceipt(order)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">
-                  Receipt
-                </button>
-              </td>
-            </tr>
-          ))}
-          {paidOrders.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No paid orders yet.</td></tr>}
-        </RowsTable>
+        <section className="rounded-3xl bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="font-bold text-slate-900">Paid Orders</h2>
+              <p className="text-sm text-slate-500">{filteredPaidOrders.length} matching order(s)</p>
+            </div>
+            <input
+              type="search"
+              value={paidOrderSearch}
+              onChange={(e) => setPaidOrderSearch(e.target.value)}
+              placeholder="Search order, table, room, method"
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm md:w-80"
+            />
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
+                <tr><th className="py-3 pr-4">Order</th><th className="py-3 pr-4">Location</th><th className="py-3 pr-4">Payment</th><th className="py-3 pr-4">Paid</th><th className="py-3 pr-4">Status</th><th className="py-3 pr-4">Actions</th></tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredPaidOrders.slice(0, 25).map((order) => (
+                  <tr key={order.id}>
+                    <td className="py-3 pr-4 font-medium text-slate-900">{order.order_number}</td>
+                    <td className="py-3 pr-4">{order.table_details ? `Table ${order.table_details.table_number}` : order.room_number ? `Room ${order.room_number}` : order.order_type}</td>
+                    <td className="py-3 pr-4">{order.payment_method || '-'}</td>
+                    <td className="py-3 pr-4 font-semibold text-slate-900">{formatMoney(order.paid_amount, settings?.currency)}</td>
+                    <td className="py-3 pr-4"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{order.status}</span></td>
+                    <td className="py-3 pr-4">
+                      <button onClick={() => setRestaurantPaymentReceipt(order)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                        Receipt
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {filteredPaidOrders.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No paid orders match this search.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
 
       {closingShift && currentShift && (

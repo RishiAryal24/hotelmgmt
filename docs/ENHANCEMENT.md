@@ -126,9 +126,18 @@ This document outlines targeted improvements to elevate the hotel and restaurant
   - ✅ Implemented LoyaltyProgram and GuestPoints models, serializers, viewsets, URLs.
 
 #### Advanced POS Features
-- **Description**: Modifiers, split bills.
+- **Description**: Modifiers, split bills, table operations, approvals, cashier shifts, receipt output, and configurable restaurant charges.
 - **Actions**:
   - Update `restaurant` models.
+  - Completed menu modifiers with line-level price impact.
+  - Completed item-quantity split bills and amount-based split payments.
+  - Completed table transfer and table merge for active dine-in orders.
+  - Completed void, discount, and complimentary approval workflow.
+  - Completed kitchen display polish with ticket age, filters, modifiers, notes, and order context.
+  - Completed cashier shift summary and close report.
+  - Completed POS settlement for restaurant orders and room folios.
+  - Completed restaurant tax and service-charge configuration with receipt and accounting breakdowns.
+  - Remaining: receipt numbering, reprint audit trail, and cash drawer reconciliation by payment row.
 
 #### Revenue Forecasting
 - **Description**: Predictive analytics.
@@ -230,4 +239,5 @@ This document outlines targeted improvements to elevate the hotel and restaurant
 - Ensure tenant-awareness in all new features.
 - Test against PMS standards post-implementation.
 - Document all changes in this file.
-- Next: Implement payment gateway integration or advanced POS features.
+- Current checkpoint: restaurant tax/service-charge configuration is implemented and verified locally.
+- Next: implement restaurant receipt numbering and reprint audit trail.

@@ -101,6 +101,42 @@ def post_restaurant_settlement(order, posted_by=None):
                 'credit': 0,
             }
         ]
+    discount_remaining = order.discount_total
+    restaurant_revenue = order.subtotal - min(discount_remaining, order.subtotal)
+    discount_remaining -= min(discount_remaining, order.subtotal)
+    tax_payable = order.tax_total - min(discount_remaining, order.tax_total)
+    discount_remaining -= min(discount_remaining, order.tax_total)
+    service_revenue = order.service_charge_total - min(discount_remaining, order.service_charge_total)
+
+    credit_lines = []
+    if restaurant_revenue:
+        credit_lines.append(
+            {
+                'account': '4100',
+                'description': f'Restaurant revenue for {order.order_number}',
+                'debit': 0,
+                'credit': restaurant_revenue,
+            }
+        )
+    if tax_payable:
+        credit_lines.append(
+            {
+                'account': '2100',
+                'description': f'Restaurant tax for {order.order_number}',
+                'debit': 0,
+                'credit': tax_payable,
+            }
+        )
+    if service_revenue:
+        credit_lines.append(
+            {
+                'account': '4200',
+                'description': f'Restaurant service charge for {order.order_number}',
+                'debit': 0,
+                'credit': service_revenue,
+            }
+        )
+
     return post_journal_entry(
         description=f'Restaurant settlement {order.order_number}',
         source_module='restaurant_order',
@@ -108,12 +144,7 @@ def post_restaurant_settlement(order, posted_by=None):
         posted_by=posted_by,
         lines=[
             *debit_lines,
-            {
-                'account': '4100',
-                'description': f'Restaurant revenue for {order.order_number}',
-                'debit': 0,
-                'credit': order.grand_total,
-            },
+            *credit_lines,
         ],
     )
 

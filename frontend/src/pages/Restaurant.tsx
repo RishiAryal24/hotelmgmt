@@ -84,6 +84,20 @@ const emptyDiscountForm = { discount_amount: '', reason: '' };
 const emptyComplimentaryForm = { reason: '' };
 const kitchenStatuses = ['all', 'open', 'preparing', 'ready', 'served'] as const;
 
+const getMutationErrorMessage = (error: unknown, fallback: string) => {
+  const responseData = (error as { response?: { data?: unknown } })?.response?.data;
+  if (!responseData) return fallback;
+  if (typeof responseData === 'string') return responseData;
+  if (typeof responseData === 'object') {
+    const data = responseData as Record<string, unknown>;
+    if (typeof data.error === 'string') return data.error;
+    const firstValue = Object.values(data)[0];
+    if (Array.isArray(firstValue)) return firstValue.join(' ');
+    if (typeof firstValue === 'string') return firstValue;
+  }
+  return fallback;
+};
+
 const formatTicketAge = (createdAt?: string) => {
   if (!createdAt) return '-';
   const minutes = Math.max(0, Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000));
@@ -430,6 +444,11 @@ const Restaurant: React.FC = () => {
               </select>
             )}
             <textarea placeholder="Order notes" value={orderForm.notes} onChange={(e) => setOrderForm({ ...orderForm, notes: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2" />
+            {createOrder.isError && (
+              <p className="text-sm text-red-600 md:col-span-2">
+                {getMutationErrorMessage(createOrder.error, 'Could not create order. Check the order type and table or room selection.')}
+              </p>
+            )}
           </FormPanel>}
 
           <div className="rounded-3xl bg-white p-5 shadow-sm">

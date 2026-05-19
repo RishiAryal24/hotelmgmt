@@ -17,6 +17,7 @@ from restaurant.models import (
     RestaurantOrderApproval,
     RestaurantOrderLine,
     RestaurantOrderPayment,
+    RestaurantChargeConfig,
     RestaurantTable,
 )
 
@@ -70,6 +71,13 @@ class RestaurantTableSerializer(serializers.ModelSerializer):
     class Meta:
         model = RestaurantTable
         fields = '__all__'
+
+
+class RestaurantChargeConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RestaurantChargeConfig
+        fields = '__all__'
+        read_only_fields = ['code']
 
 
 class RestaurantOrderLineSerializer(serializers.ModelSerializer):
@@ -219,7 +227,17 @@ class RestaurantOrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = RestaurantOrder
         fields = '__all__'
-        read_only_fields = ['order_number', 'subtotal', 'grand_total', 'paid_amount', 'payment_method', 'paid_at', 'waiter']
+        read_only_fields = [
+            'order_number',
+            'subtotal',
+            'tax_total',
+            'service_charge_total',
+            'grand_total',
+            'paid_amount',
+            'payment_method',
+            'paid_at',
+            'waiter',
+        ]
 
     def get_guest_name(self, obj):
         if not obj.room_booking_id:

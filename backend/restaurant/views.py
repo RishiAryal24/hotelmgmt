@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAuthenticated
 
-from restaurant.models import KitchenTicket, KitchenTicketLine, MenuCategory, MenuItem, MenuModifier, MenuModifierGroup, MenuRecipeIngredient, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantTable
+from restaurant.models import KitchenTicket, KitchenTicketLine, MenuCategory, MenuItem, MenuModifier, MenuModifierGroup, MenuRecipeIngredient, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantChargeConfig, RestaurantTable
 from restaurant.models import CashierCounter, CashierShift
 from restaurant.serializers import (
     ApplyOrderDiscountSerializer,
@@ -25,6 +25,7 @@ from restaurant.serializers import (
     RestaurantOrderApprovalRequestSerializer,
     RestaurantOrderApprovalSerializer,
     RestaurantOrderSerializer,
+    RestaurantChargeConfigSerializer,
     RestaurantTableSerializer,
     SplitBillSerializer,
     TransferTableSerializer,
@@ -156,6 +157,36 @@ class RestaurantTableViewSet(viewsets.ModelViewSet):
     filterset_fields = ['status', 'section', 'is_active']
     search_fields = ['table_number', 'section']
     ordering_fields = ['section', 'table_number', 'capacity']
+
+
+class RestaurantChargeConfigViewSet(viewsets.ModelViewSet):
+    serializer_class = RestaurantChargeConfigSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': ['restaurant.order.create', 'restaurant.order.update', 'pos.sale.create'],
+        'retrieve': ['restaurant.order.create', 'restaurant.order.update', 'pos.sale.create'],
+        'create': 'restaurant.order.update',
+        'update': 'restaurant.order.update',
+        'partial_update': 'restaurant.order.update',
+        'destroy': 'restaurant.order.update',
+        'current': ['restaurant.order.create', 'restaurant.order.update', 'pos.sale.create'],
+    }
+
+    def get_queryset(self):
+        RestaurantChargeConfig.get_default()
+        return RestaurantChargeConfig.objects.all()
+
+    @action(detail=False, methods=['get', 'patch'])
+    def current(self, request):
+        config = RestaurantChargeConfig.get_default()
+        if request.method == 'PATCH':
+            serializer = self.get_serializer(config, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            for order in RestaurantOrder.objects.exclude(status__in=['paid', 'cancelled']).prefetch_related('lines'):
+                order.recalculate_totals()
+            return Response(serializer.data)
+        return Response(self.get_serializer(config).data)
 
 
 class CashierShiftViewSet(viewsets.ModelViewSet):

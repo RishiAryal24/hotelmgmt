@@ -8,7 +8,7 @@ Use this document when deciding what to build next. Use `docs/ENHANCEMENT.md` fo
 
 ## Current Baseline
 
-Status: local development checkpoint stabilized.
+Status: restaurant tax/service-charge checkpoint stabilized locally.
 
 Verified foundations:
 
@@ -19,12 +19,13 @@ Verified foundations:
 - Tenant migrations apply with `migrate_schemas`.
 - Frontend and backend respond locally.
 - Authenticated bookings and folios endpoints return `200`.
+- Restaurant tax/service-charge configuration is implemented and verified with restaurant tests, migration check, tenant migrations, and frontend build.
 
 Known local caveats:
 
 - Docker is not currently available on PATH on the development machine.
 - Redis is optional for normal web/API local development, but required for Celery workers.
-- The repository has many uncommitted feature changes, so changes should be grouped and committed carefully.
+- The current restaurant tax/service-charge slice is uncommitted and should be committed before starting another major enhancement.
 
 ## Operating Rules
 
@@ -168,12 +169,12 @@ Completed:
 - Print-friendly modal output for folios, restaurant receipts, and cashier shift close reports.
 - Cashier shift summary and close report with expected cash/card/wallet/bank/room posting totals.
 - Amount-based restaurant split payments with payment rows, settlement validation, receipt payment breakdown, cashier-shift totals, and accounting debit lines per payment method.
+- Restaurant tax and service-charge configuration with automatic open-order recalculation, receipt breakdowns, and accounting control-account postings.
 
 Next slices:
 
-1. Restaurant tax/service-charge configuration.
-2. Restaurant receipt numbering and reprint audit trail.
-3. Cash drawer reconciliation by payment row and cashier shift.
+1. Restaurant receipt numbering and reprint audit trail.
+2. Cash drawer reconciliation by payment row and cashier shift.
 
 Acceptance criteria:
 
@@ -273,7 +274,7 @@ Acceptance criteria:
 
 ### Checkpoint A: Stabilize And Commit
 
-Priority: in progress.
+Priority: done for the current local checkpoint.
 
 Tasks:
 
@@ -283,7 +284,7 @@ Tasks:
 - Run frontend build. Done.
 - Align production deployment environment variables. Done.
 - Add production smoke checklist. Done.
-- Commit the stabilization checkpoint.
+- Commit the stabilization checkpoint. Superseded by the current restaurant/POS feature checkpoint.
 
 Exit criteria:
 
@@ -293,7 +294,7 @@ Exit criteria:
 
 ### Checkpoint B: Test Harness
 
-Priority: next.
+Priority: backlog.
 
 Tasks:
 
@@ -308,7 +309,7 @@ Exit criteria:
 
 ### Checkpoint C: First Product Slice
 
-Priority: after tests.
+Priority: superseded by completed POS slices.
 
 Choose one:
 
@@ -320,6 +321,33 @@ Choose one:
 Recommendation:
 
 Start with guest communication timeline if the goal is CRM and hotel operations. Start with payment abstraction if the goal is revenue collection. Start with split bills if the restaurant/POS workflow is the immediate demo priority.
+
+### Checkpoint D: Current POS Checkpoint
+
+Priority: ready to commit.
+
+Completed:
+
+- Restaurant tax and service-charge configuration model, API, and POS settings UI.
+- Open restaurant orders recalculate tax/service totals automatically.
+- Restaurant receipts and payable order rows show subtotal, tax, service charge, discount, and total.
+- Restaurant settlement accounting splits revenue, tax payable, and service-charge revenue.
+- Tenant schemas migrated with `migrate_schemas`.
+- Restaurant order creation failure now shows the backend validation error on the Restaurant page.
+
+Verified on 2026-05-19:
+
+- `venv\Scripts\python.exe backend\manage.py check`
+- `venv\Scripts\python.exe backend\manage.py makemigrations --check --dry-run`
+- `venv\Scripts\python.exe backend\manage.py migrate_schemas`
+- `venv\Scripts\python.exe backend\manage.py test restaurant`
+- `npm.cmd run build`
+
+Resume point:
+
+1. Commit the current restaurant tax/service-charge checkpoint.
+2. Start restaurant receipt numbering and reprint audit trail.
+3. Then continue cash drawer reconciliation by payment row and cashier shift.
 
 ## Local Command Reference
 

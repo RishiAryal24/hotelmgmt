@@ -28,6 +28,11 @@ def get_order_active_total(order):
     return sum((line.line_total for line in order.lines.exclude(status='cancelled')), Decimal('0.00'))
 
 
+def get_order_active_charge_total(order):
+    order.recalculate_totals()
+    return order.subtotal + order.tax_total + order.service_charge_total
+
+
 @transaction.atomic
 def get_open_cashier_shift(*, cashier, cashier_shift_id=None):
     queryset = CashierShift.objects.filter(cashier=cashier, status='open')
@@ -270,11 +275,11 @@ def request_order_approval(order, *, action_type, requested_by=None, line=None, 
     elif action_type == 'discount':
         if discount <= 0:
             raise RestaurantOrderActionError('Discount amount must be greater than zero.')
-        if discount > get_order_active_total(order) + order.tax_total + order.service_charge_total:
+        if discount > get_order_active_charge_total(order):
             raise RestaurantOrderActionError('Discount cannot exceed the order total.')
         existing = None
     else:
-        active_total = get_order_active_total(order) + order.tax_total + order.service_charge_total
+        active_total = get_order_active_charge_total(order)
         if active_total <= 0:
             raise RestaurantOrderActionError('Complimentary approval requires a positive order total.')
         discount = active_total
@@ -306,7 +311,7 @@ def approve_order_approval(approval, *, decided_by=None, decision_notes=''):
     elif approval.action_type == 'discount':
         apply_order_discount(order, discount_amount=approval.discount_amount, reason=approval.reason)
     elif approval.action_type == 'complimentary':
-        active_total = get_order_active_total(order) + order.tax_total + order.service_charge_total
+        active_total = get_order_active_charge_total(order)
         apply_order_discount(order, discount_amount=active_total, reason=approval.reason or 'Complimentary bill')
     else:
         raise RestaurantOrderActionError('Invalid approval action.')
@@ -358,12 +363,13 @@ def apply_order_discount(order, *, discount_amount, reason=''):
     if discount < 0:
         raise RestaurantOrderActionError('Discount cannot be negative.')
 
-    subtotal = get_order_active_total(order)
+    order.discount_total = Decimal('0.00')
+    order.recalculate_totals()
+    subtotal = order.subtotal
     max_discount = subtotal + order.tax_total + order.service_charge_total
     if discount > max_discount:
         raise RestaurantOrderActionError('Discount cannot exceed the order total.')
 
-    order.subtotal = subtotal
     order.discount_total = discount
     order.grand_total = subtotal + order.tax_total + order.service_charge_total - discount
     if reason:

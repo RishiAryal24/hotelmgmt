@@ -6,9 +6,9 @@ The project is now a connected development-stage hospitality ERP. It is suitable
 
 Checkpoint note:
 
-- Current checkpoint is stable as of the audit logging foundation slice.
-- Local bootstrap, frontend build, and backend tests are passing.
-- Recommended continuation: restaurant split bills/table transfer or fiscal periods/trial balance.
+- Current checkpoint is stable as of the restaurant tax/service-charge configuration slice.
+- Restaurant tests, migration check, tenant migrations, and frontend build are passing locally.
+- Recommended continuation: restaurant receipt numbering and reprint audit trail.
 
 Working foundations:
 
@@ -147,11 +147,14 @@ Completed:
 - Purchase order workflow with draft/order/receive/cancel/pay actions.
 - Purchase order receiving creates stock movements and accounting payables.
 - Purchase order payment clears accounts payable to cash or bank.
+- Merged bills.
+- Amount-based split payments.
+- Restaurant tax and service-charge configuration.
 
 Remaining:
 
-- Merged bills.
-- Amount-based split payments.
+- Restaurant receipt numbering and reprint audit trail.
+- Cash drawer reconciliation by payment row and cashier shift.
 
 ## Phase 4: Accounting ERP
 
@@ -219,10 +222,11 @@ Planned:
 
 ## Recommended Immediate Next Step
 
-Resume with **PDF exports or guest communication timeline**.
+Resume with **restaurant receipt numbering and reprint audit trail**.
 
 Suggested order:
 
-1. Commit the current connected MVP checkpoint if it has not been committed.
-2. Add PDF payslips and management summaries.
-3. Add guest communication timeline and follow-up reminders.
+1. Commit the current restaurant tax/service-charge checkpoint if it has not been committed.
+2. Add receipt numbering for restaurant settlements.
+3. Add reprint audit trail for paid restaurant receipts.
+4. Continue with cash drawer reconciliation by payment row and cashier shift.

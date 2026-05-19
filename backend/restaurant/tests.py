@@ -6,7 +6,7 @@ from django_tenants.test.cases import TenantTestCase
 from accounting.models import JournalEntry, JournalLine
 from bookings.models import Booking, Guest, GuestFolioLine, Room, RoomType
 from inventory.models import InventoryItem, StockMovement
-from restaurant.models import CashierCounter, CashierShift, MenuCategory, MenuItem, MenuModifier, MenuModifierGroup, MenuRecipeIngredient, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantOrderPayment, RestaurantTable
+from restaurant.models import CashierCounter, CashierShift, MenuCategory, MenuItem, MenuModifier, MenuModifierGroup, MenuRecipeIngredient, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantOrderPayment, RestaurantChargeConfig, RestaurantTable
 from restaurant.serializers import RestaurantOrderLineSerializer
 from restaurant.services import (
     CashierShiftError,
@@ -247,6 +247,34 @@ class RestaurantRoomPostingTests(TenantTestCase):
         self.assertEqual(self.order.discount_total, Decimal('5.00'))
         self.assertEqual(self.order.grand_total, Decimal('45.00'))
         self.assertIn('Service recovery', self.order.notes)
+
+    def test_charge_config_adds_tax_and_service_to_order_total(self):
+        config = RestaurantChargeConfig.get_default()
+        config.tax_rate = Decimal('13.00')
+        config.service_charge_rate = Decimal('10.00')
+        config.save(update_fields=['tax_rate', 'service_charge_rate', 'updated_at'])
+
+        self.order.recalculate_totals()
+        self.order.refresh_from_db()
+
+        self.assertEqual(self.order.subtotal, Decimal('50.00'))
+        self.assertEqual(self.order.tax_total, Decimal('6.50'))
+        self.assertEqual(self.order.service_charge_total, Decimal('5.00'))
+        self.assertEqual(self.order.grand_total, Decimal('61.50'))
+
+    def test_restaurant_settlement_posts_tax_and_service_to_control_accounts(self):
+        config = RestaurantChargeConfig.get_default()
+        config.tax_rate = Decimal('13.00')
+        config.service_charge_rate = Decimal('10.00')
+        config.save(update_fields=['tax_rate', 'service_charge_rate', 'updated_at'])
+        self.order.recalculate_totals()
+
+        settle_restaurant_order(self.order, payment_method='cash', paid_amount=Decimal('61.50'))
+
+        journal = JournalEntry.objects.get(source_module='restaurant_order', source_id=str(self.order.id))
+        self.assertTrue(JournalLine.objects.filter(journal_entry=journal, account__code='4100', credit=Decimal('50.00')).exists())
+        self.assertTrue(JournalLine.objects.filter(journal_entry=journal, account__code='2100', credit=Decimal('6.50')).exists())
+        self.assertTrue(JournalLine.objects.filter(journal_entry=journal, account__code='4200', credit=Decimal('5.00')).exists())
 
     def test_order_discount_cannot_exceed_order_total(self):
         with self.assertRaises(RestaurantOrderActionError):

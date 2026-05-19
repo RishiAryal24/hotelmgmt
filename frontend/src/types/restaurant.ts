@@ -75,6 +75,17 @@ export interface RestaurantTable {
   is_active: boolean;
 }
 
+export interface RestaurantChargeConfig {
+  id: string;
+  code: string;
+  name: string;
+  tax_rate: string;
+  service_charge_rate: string;
+  apply_tax: boolean;
+  apply_service_charge: boolean;
+  is_active: boolean;
+}
+
 export interface RestaurantOrderLine {
   id: string;
   order: string;

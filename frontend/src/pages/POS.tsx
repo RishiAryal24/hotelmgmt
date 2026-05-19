@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
@@ -11,8 +11,10 @@ import {
   useCreateCashierCounter,
   useCurrentCashierShift,
   useOpenCashierShift,
+  useRestaurantChargeConfig,
   useRestaurantOrders,
   useSettleRestaurantOrder,
+  useUpdateRestaurantChargeConfig,
 } from '../hooks/restaurant';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
 import { FacilityAmenity, FacilityService, GuestFolio } from '../types/bookings';
@@ -62,6 +64,7 @@ const formatFolioLineSource = (line: { source_module: string }) => {
 const POS: React.FC = () => {
   const { data: settings } = useQuery({ queryKey: ['tenant-settings'], queryFn: getTenantSettings });
   const { data: orders, isLoading, error } = useRestaurantOrders();
+  const { data: chargeConfig } = useRestaurantChargeConfig();
   const { data: currentShift, isLoading: shiftLoading } = useCurrentCashierShift();
   const { data: cashierCounters } = useCashierCounters();
   const { data: cashierShifts } = useCashierShifts();
@@ -77,6 +80,7 @@ const POS: React.FC = () => {
   const createCashierCounter = useCreateCashierCounter();
   const createFacilityAmenity = useCreateFacilityAmenity();
   const createFacilityService = useCreateFacilityService();
+  const updateChargeConfig = useUpdateRestaurantChargeConfig();
   const { can } = usePermissions();
   const [paymentForms, setPaymentForms] = useState<
     Record<string, { payment_method: RestaurantOrder['payment_method']; paid_amount: string; booking?: string; split_payments: { payment_method: RestaurantOrder['payment_method']; amount: string }[] }>
@@ -117,6 +121,24 @@ const POS: React.FC = () => {
     description: '',
     is_active: true,
   });
+  const [chargeConfigForm, setChargeConfigForm] = useState({
+    tax_rate: '0.00',
+    service_charge_rate: '0.00',
+    apply_tax: true,
+    apply_service_charge: true,
+    is_active: true,
+  });
+
+  useEffect(() => {
+    if (!chargeConfig) return;
+    setChargeConfigForm({
+      tax_rate: chargeConfig.tax_rate,
+      service_charge_rate: chargeConfig.service_charge_rate,
+      apply_tax: chargeConfig.apply_tax,
+      apply_service_charge: chargeConfig.apply_service_charge,
+      is_active: chargeConfig.is_active,
+    });
+  }, [chargeConfig]);
 
   const payableOrders = orders?.filter((order) => order.status === 'served') || [];
   const paidOrders = orders?.filter((order) => order.status === 'paid') || [];
@@ -151,6 +173,7 @@ const POS: React.FC = () => {
     { id: 'folios', label: 'Folios', count: openFolios.length + payableOrders.length },
     { id: 'facilities', label: 'Facilities', count: facilityChargeLines.length },
     { id: 'catalog', label: 'Catalog', count: (facilityAmenities?.length || 0) + (facilityServices?.length || 0) },
+    { id: 'settings', label: 'Settings', count: chargeConfig?.is_active ? 1 : 0 },
     { id: 'counters', label: 'Counters', count: cashierCounters?.length || 0 },
     { id: 'shifts', label: 'Shifts', count: cashierShifts?.length || 0 },
     { id: 'paid', label: 'Paid Orders', count: paidOrders.length },
@@ -352,7 +375,14 @@ const POS: React.FC = () => {
                     {order.lines.filter((line) => line.status !== 'cancelled').map((line) => `${line.quantity}x ${line.menu_item_details?.name}`).join(', ') || 'No active items'}
                   </div>
                 </td>
-                <td className="py-3 pr-4 font-semibold text-slate-900">{formatMoney(order.grand_total, settings?.currency)}</td>
+                <td className="py-3 pr-4">
+                  <p className="font-semibold text-slate-900">{formatMoney(order.grand_total, settings?.currency)}</p>
+                  <p className="text-xs text-slate-500">
+                    Sub {formatMoney(order.subtotal, settings?.currency)}
+                    {Number(order.tax_total) > 0 ? ` | Tax ${formatMoney(order.tax_total, settings?.currency)}` : ''}
+                    {Number(order.service_charge_total) > 0 ? ` | Service ${formatMoney(order.service_charge_total, settings?.currency)}` : ''}
+                  </p>
+                </td>
                 <td className="py-3 pr-4">
                       <select
                         value={form.payment_method}
@@ -756,6 +786,62 @@ const POS: React.FC = () => {
         </section>
       )}
 
+      {activeTab === 'settings' && (
+        <section className="rounded-3xl bg-white p-5 shadow-sm">
+          <div className="mb-4 flex flex-col gap-1">
+            <h2 className="font-bold text-slate-900">Restaurant Charges</h2>
+            <p className="text-sm text-slate-500">Default percentages applied to open restaurant orders before settlement.</p>
+          </div>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              updateChargeConfig.mutate(chargeConfigForm);
+            }}
+            className="grid gap-3 md:grid-cols-2 xl:grid-cols-5"
+          >
+            <label className="grid gap-1 text-sm text-slate-700">
+              <span className="text-xs font-semibold uppercase text-slate-500">Tax %</span>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={chargeConfigForm.tax_rate}
+                onChange={(e) => setChargeConfigForm({ ...chargeConfigForm, tax_rate: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="grid gap-1 text-sm text-slate-700">
+              <span className="text-xs font-semibold uppercase text-slate-500">Service %</span>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={chargeConfigForm.service_charge_rate}
+                onChange={(e) => setChargeConfigForm({ ...chargeConfigForm, service_charge_rate: e.target.value })}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
+              <input type="checkbox" checked={chargeConfigForm.apply_tax} onChange={(e) => setChargeConfigForm({ ...chargeConfigForm, apply_tax: e.target.checked })} />
+              Apply tax
+            </label>
+            <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
+              <input type="checkbox" checked={chargeConfigForm.apply_service_charge} onChange={(e) => setChargeConfigForm({ ...chargeConfigForm, apply_service_charge: e.target.checked })} />
+              Apply service
+            </label>
+            <button
+              disabled={!can('restaurant.order.update') || updateChargeConfig.isPending}
+              className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              Save charges
+            </button>
+          </form>
+          {updateChargeConfig.isError && <p className="mt-3 text-sm text-red-600">Could not save restaurant charges.</p>}
+        </section>
+      )}
+
       {activeTab === 'counters' && (
         <div className="rounded-3xl bg-white p-4 shadow-sm">
           <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -1046,6 +1132,8 @@ const POS: React.FC = () => {
                 </tbody>
                 <tfoot className="border-t border-slate-200">
                   <tr><td className="py-3 pr-4 font-semibold text-slate-900" colSpan={2}>Subtotal</td><td className="py-3 pr-4 text-right font-semibold">{formatMoney(restaurantPaymentReceipt.subtotal, settings?.currency)}</td></tr>
+                  {Number(restaurantPaymentReceipt.tax_total) > 0 && <tr><td className="py-3 pr-4 font-semibold text-slate-900" colSpan={2}>Tax</td><td className="py-3 pr-4 text-right font-semibold">{formatMoney(restaurantPaymentReceipt.tax_total, settings?.currency)}</td></tr>}
+                  {Number(restaurantPaymentReceipt.service_charge_total) > 0 && <tr><td className="py-3 pr-4 font-semibold text-slate-900" colSpan={2}>Service</td><td className="py-3 pr-4 text-right font-semibold">{formatMoney(restaurantPaymentReceipt.service_charge_total, settings?.currency)}</td></tr>}
                   {Number(restaurantPaymentReceipt.discount_total) > 0 && <tr><td className="py-3 pr-4 font-semibold text-rose-700" colSpan={2}>Discount</td><td className="py-3 pr-4 text-right font-semibold text-rose-700">-{formatMoney(restaurantPaymentReceipt.discount_total, settings?.currency)}</td></tr>}
                   <tr><td className="py-3 pr-4 text-lg font-bold text-slate-900" colSpan={2}>Total</td><td className="py-3 pr-4 text-right text-lg font-bold">{formatMoney(restaurantPaymentReceipt.grand_total, settings?.currency)}</td></tr>
                 </tfoot>

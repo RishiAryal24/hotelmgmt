@@ -6,6 +6,9 @@ from django.utils import timezone
 from core.models import UUIDModel
 
 
+MONEY_QUANT = Decimal('0.01')
+
+
 class MenuCategory(UUIDModel):
     name = models.CharField(max_length=100, unique=True)
     code = models.CharField(max_length=50, unique=True)
@@ -158,6 +161,27 @@ class RestaurantTable(UUIDModel):
         return f'Table {self.table_number}'
 
 
+class RestaurantChargeConfig(UUIDModel):
+    code = models.CharField(max_length=40, unique=True, default='default')
+    name = models.CharField(max_length=120, default='Default restaurant charges')
+    tax_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    service_charge_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    apply_tax = models.BooleanField(default=True)
+    apply_service_charge = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+    @classmethod
+    def get_default(cls):
+        config, _ = cls.objects.get_or_create(code='default')
+        return config
+
+
 class RestaurantOrder(UUIDModel):
     ORDER_TYPE_CHOICES = [
         ('dine_in', 'Dine In'),
@@ -210,12 +234,20 @@ class RestaurantOrder(UUIDModel):
 
     def recalculate_totals(self):
         subtotal = sum(line.line_total for line in self.lines.exclude(status='cancelled'))
+        config = RestaurantChargeConfig.get_default()
+        self.tax_total = Decimal('0.00')
+        self.service_charge_total = Decimal('0.00')
+        if config.is_active and config.apply_tax:
+            self.tax_total = (subtotal * config.tax_rate / Decimal('100')).quantize(MONEY_QUANT)
+        if config.is_active and config.apply_service_charge:
+            self.service_charge_total = (subtotal * config.service_charge_rate / Decimal('100')).quantize(MONEY_QUANT)
+
         max_discount = subtotal + self.tax_total + self.service_charge_total
         if self.discount_total > max_discount:
             self.discount_total = max_discount
         self.subtotal = subtotal
         self.grand_total = subtotal + self.tax_total + self.service_charge_total - self.discount_total
-        self.save(update_fields=['subtotal', 'discount_total', 'grand_total', 'updated_at'])
+        self.save(update_fields=['subtotal', 'tax_total', 'service_charge_total', 'discount_total', 'grand_total', 'updated_at'])
 
     def __str__(self):
         return self.order_number

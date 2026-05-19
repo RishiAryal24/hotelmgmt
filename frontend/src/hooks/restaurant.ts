@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/api';
-import { CashierCounter, CashierShift, KitchenTicket, MenuCategory, MenuItem, MenuModifier, MenuModifierGroup, MenuRecipeIngredient, RestaurantOrder, RestaurantOrderApproval, RestaurantTable } from '../types/restaurant';
+import { CashierCounter, CashierShift, KitchenTicket, MenuCategory, MenuItem, MenuModifier, MenuModifierGroup, MenuRecipeIngredient, RestaurantOrder, RestaurantOrderApproval, RestaurantChargeConfig, RestaurantTable } from '../types/restaurant';
 
 const getList = <T,>(data: T[] | { results: T[] }) => (Array.isArray(data) ? data : data.results);
 
@@ -60,6 +60,16 @@ export const useRestaurantTables = () => {
     queryFn: async (): Promise<RestaurantTable[]> => {
       const response = await apiClient.get<RestaurantTable[] | { results: RestaurantTable[] }>('/restaurant/tables/');
       return getList(response.data);
+    },
+  });
+};
+
+export const useRestaurantChargeConfig = () => {
+  return useQuery({
+    queryKey: ['restaurant-charge-config'],
+    queryFn: async (): Promise<RestaurantChargeConfig> => {
+      const response = await apiClient.get<RestaurantChargeConfig>('/restaurant/charge-configs/current/');
+      return response.data;
     },
   });
 };
@@ -198,6 +208,20 @@ export const useCreateRestaurantTable = () => {
       return response.data;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['restaurant-tables'] }),
+  });
+};
+
+export const useUpdateRestaurantChargeConfig = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: Partial<RestaurantChargeConfig>): Promise<RestaurantChargeConfig> => {
+      const response = await apiClient.patch('/restaurant/charge-configs/current/', payload);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['restaurant-charge-config'] });
+      queryClient.invalidateQueries({ queryKey: ['restaurant-orders'] });
+    },
   });
 };
 

@@ -4,12 +4,12 @@ import { useQuery } from '@tanstack/react-query';
 import CompactTabs from '../components/CompactTabs';
 import { useBookings, useGuestFolios, useRooms } from '../hooks/bookings';
 import { useInventoryItems, useStockMovements } from '../hooks/inventory';
-import { useRestaurantOrders } from '../hooks/restaurant';
+import { useCashierShifts, useRestaurantOrderApprovals, useRestaurantOrders } from '../hooks/restaurant';
 import { useJournalEntries } from '../hooks/accounting';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
 import { downloadCsv } from '../utils/csv';
 
-type ReportTab = 'occupancy' | 'revenue' | 'restaurant' | 'inventory';
+type ReportTab = 'occupancy' | 'revenue' | 'restaurant' | 'inventory' | 'cashier';
 
 const Reports = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -18,6 +18,8 @@ const Reports = () => {
   const { data: bookings } = useBookings();
   const { data: folios } = useGuestFolios();
   const { data: restaurantOrders } = useRestaurantOrders();
+  const { data: cashierShifts } = useCashierShifts();
+  const { data: approvals } = useRestaurantOrderApprovals();
   const { data: inventoryItems } = useInventoryItems();
   const { data: stockMovements } = useStockMovements();
   const { data: journalEntries } = useJournalEntries();
@@ -26,6 +28,17 @@ const Reports = () => {
   const today = new Date().toISOString().slice(0, 10);
   const paidFolios = folios?.filter((folio) => folio.status === 'paid') || [];
   const paidOrders = restaurantOrders?.filter((order) => order.status === 'paid') || [];
+  const closedShifts = cashierShifts?.filter((shift) => shift.status === 'closed') || [];
+  const varianceShifts = closedShifts.filter((shift) => Number(shift.cash_variance || 0) !== 0);
+  const receiptReprints = paidOrders.flatMap((order) =>
+    (order.receipt_reprints || []).map((reprint) => ({
+      ...reprint,
+      order_number: order.order_number,
+      receipt_number: reprint.receipt_number || order.receipt_number || '',
+      paid_at: order.paid_at,
+    })),
+  );
+  const exceptionApprovals = approvals?.filter((approval) => ['void_line', 'discount', 'complimentary'].includes(approval.action_type)) || [];
   const openFolios = folios?.filter((folio) => folio.status === 'open') || [];
   const lowStockItems = inventoryItems?.filter((item) => item.is_low_stock) || [];
   const purchaseMovements = stockMovements?.filter((movement) => movement.movement_type === 'purchase') || [];
@@ -61,8 +74,39 @@ const Reports = () => {
       inventorySaleValue,
       lowStockItems: lowStockItems.length,
       postedJournalCount,
+      closedShifts: closedShifts.length,
+      varianceShifts: varianceShifts.length,
+      totalCashVariance: varianceShifts.reduce((sum, shift) => sum + Number(shift.cash_variance || 0), 0),
+      receiptReprints: receiptReprints.length,
+      pendingApprovals: exceptionApprovals.filter((approval) => approval.status === 'pending').length,
+      totalDiscountApproved: exceptionApprovals
+        .filter((approval) => approval.action_type !== 'void_line' && approval.status === 'approved')
+        .reduce((sum, approval) => sum + Number(approval.discount_amount || 0), 0),
     };
-  }, [bookings, journalEntries, lowStockItems.length, openFolios, paidFolios, paidOrders, purchaseMovements, rooms, saleMovements, today]);
+  }, [bookings, closedShifts.length, exceptionApprovals, journalEntries, lowStockItems.length, openFolios, paidFolios, paidOrders, purchaseMovements, receiptReprints.length, rooms, saleMovements, today, varianceShifts]);
+
+  const paymentMethodRows = useMemo(() => {
+    const methods = [
+      ['cash', 'Cash'],
+      ['card', 'Card'],
+      ['wallet', 'Wallet'],
+      ['bank_transfer', 'Bank Transfer'],
+      ['room_posting', 'Room Posting'],
+    ];
+    return methods.map(([method, label]) => {
+      const restaurantTotal = paidOrders.reduce((sum, order) => {
+        const paymentTotal = (order.payments || [])
+          .filter((payment) => payment.payment_method === method)
+          .reduce((paymentSum, payment) => paymentSum + Number(payment.amount || 0), 0);
+        if (paymentTotal) return sum + paymentTotal;
+        return order.payment_method === method ? sum + Number(order.paid_amount || order.grand_total || 0) : sum;
+      }, 0);
+      const folioTotal = paidFolios
+        .filter((folio) => folio.payment_method === method)
+        .reduce((sum, folio) => sum + Number(folio.paid_amount || folio.grand_total || 0), 0);
+      return { method, label, restaurantTotal, folioTotal, total: restaurantTotal + folioTotal };
+    });
+  }, [paidFolios, paidOrders]);
 
   const restaurantItemSales = useMemo(() => {
     const rows = new Map<string, { name: string; quantity: number; total: number }>();
@@ -127,6 +171,43 @@ const Reports = () => {
       return;
     }
 
+    if (activeTab === 'cashier') {
+      downloadCsv(
+        `cashier-exceptions-report-${today}.csv`,
+        ['Type', 'Reference', 'Cashier/User', 'Counter/Context', 'Status/Method', 'Amount/Variance', 'Date/Time'],
+        [
+          ...closedShifts.map((shift) => [
+            'Shift',
+            shift.id,
+            shift.cashier_email || '',
+            shift.counter_details?.name || '',
+            shift.status,
+            shift.cash_variance,
+            shift.closed_at || '',
+          ]),
+          ...receiptReprints.map((reprint) => [
+            'Receipt Reprint',
+            reprint.receipt_number,
+            reprint.reprinted_by_email || '',
+            reprint.order_number,
+            reprint.reason || '',
+            '',
+            reprint.reprinted_at,
+          ]),
+          ...exceptionApprovals.map((approval) => [
+            'Approval',
+            approval.order_details?.order_number || approval.order,
+            approval.requested_by_email || '',
+            approval.action_type_display || approval.action_type,
+            approval.status,
+            approval.discount_amount,
+            approval.created_at,
+          ]),
+        ],
+      );
+      return;
+    }
+
     downloadCsv(
       `inventory-report-${today}.csv`,
       ['Item', 'SKU', 'Category', 'Stock', 'Unit', 'Reorder Level', 'Cost Price', 'Low Stock'],
@@ -171,6 +252,7 @@ const Reports = () => {
           { id: 'revenue', label: 'Revenue' },
           { id: 'restaurant', label: 'Restaurant' },
           { id: 'inventory', label: 'Inventory' },
+          { id: 'cashier', label: 'Cashier' },
         ]}
         activeTab={activeTab}
         onChange={(tabId) => {
@@ -275,6 +357,73 @@ const Reports = () => {
               </tr>
             ))}
             {!inventoryItems?.length && <EmptyRow columns={5} label="No inventory items yet." />}
+          </RowsTable>
+        </section>
+      )}
+
+      {activeTab === 'cashier' && (
+        <section className="space-y-4">
+          <MetricGrid
+            metrics={[
+              ['Closed Shifts', reportData.closedShifts, 'Cashier shifts closed'],
+              ['Variance Shifts', reportData.varianceShifts, 'Non-zero cash variance'],
+              ['Cash Variance', formatMoney(reportData.totalCashVariance, settings?.currency), 'Net cash over/short'],
+              ['Receipt Reprints', reportData.receiptReprints, 'Paid restaurant receipts reprinted'],
+            ]}
+          />
+
+          <RowsTable headers={['Payment Method', 'Restaurant', 'Rooms/Folios', 'Total']}>
+            {paymentMethodRows.map((row) => (
+              <tr key={row.method}>
+                <td className="px-4 py-3 font-medium text-slate-900">{row.label}</td>
+                <td className="px-4 py-3 text-right">{formatMoney(row.restaurantTotal, settings?.currency)}</td>
+                <td className="px-4 py-3 text-right">{formatMoney(row.folioTotal, settings?.currency)}</td>
+                <td className="px-4 py-3 text-right font-semibold text-slate-900">{formatMoney(row.total, settings?.currency)}</td>
+              </tr>
+            ))}
+          </RowsTable>
+
+          <RowsTable headers={['Shift', 'Cashier', 'Counter', 'Expected Cash', 'Actual Cash', 'Variance']}>
+            {closedShifts.slice(0, 12).map((shift) => (
+              <tr key={shift.id}>
+                <td className="px-4 py-3 font-medium text-slate-900">{shift.business_date}</td>
+                <td className="px-4 py-3 text-right">{shift.cashier_email || '-'}</td>
+                <td className="px-4 py-3 text-right">{shift.counter_details?.name || '-'}</td>
+                <td className="px-4 py-3 text-right">{formatMoney(shift.expected_cash, settings?.currency)}</td>
+                <td className="px-4 py-3 text-right">{formatMoney(shift.actual_cash, settings?.currency)}</td>
+                <td className={`px-4 py-3 text-right font-semibold ${Number(shift.cash_variance || 0) === 0 ? 'text-slate-900' : 'text-rose-700'}`}>
+                  {formatMoney(shift.cash_variance, settings?.currency)}
+                </td>
+              </tr>
+            ))}
+            {!closedShifts.length && <EmptyRow columns={6} label="No closed cashier shifts yet." />}
+          </RowsTable>
+
+          <RowsTable headers={['Receipt', 'Order', 'Reprinted By', 'Reason', 'Reprinted At']}>
+            {receiptReprints.slice(0, 12).map((reprint) => (
+              <tr key={reprint.id}>
+                <td className="px-4 py-3 font-medium text-slate-900">{reprint.receipt_number}</td>
+                <td className="px-4 py-3 text-right">{reprint.order_number}</td>
+                <td className="px-4 py-3 text-right">{reprint.reprinted_by_email || '-'}</td>
+                <td className="px-4 py-3 text-right">{reprint.reason || '-'}</td>
+                <td className="px-4 py-3 text-right">{new Date(reprint.reprinted_at).toLocaleString()}</td>
+              </tr>
+            ))}
+            {!receiptReprints.length && <EmptyRow columns={5} label="No receipt reprints yet." />}
+          </RowsTable>
+
+          <RowsTable headers={['Order', 'Action', 'Requested By', 'Status', 'Amount', 'Decided At']}>
+            {exceptionApprovals.slice(0, 12).map((approval) => (
+              <tr key={approval.id}>
+                <td className="px-4 py-3 font-medium text-slate-900">{approval.order_details?.order_number || approval.order}</td>
+                <td className="px-4 py-3 text-right">{approval.action_type_display || approval.action_type}</td>
+                <td className="px-4 py-3 text-right">{approval.requested_by_email || '-'}</td>
+                <td className="px-4 py-3 text-right capitalize">{approval.status}</td>
+                <td className="px-4 py-3 text-right">{formatMoney(approval.discount_amount || '0.00', settings?.currency)}</td>
+                <td className="px-4 py-3 text-right">{approval.decided_at ? new Date(approval.decided_at).toLocaleString() : '-'}</td>
+              </tr>
+            ))}
+            {!exceptionApprovals.length && <EmptyRow columns={6} label="No void, discount, or complimentary approvals yet." />}
           </RowsTable>
         </section>
       )}

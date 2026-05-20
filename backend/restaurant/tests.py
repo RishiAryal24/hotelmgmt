@@ -6,7 +6,7 @@ from django_tenants.test.cases import TenantTestCase
 from accounting.models import JournalEntry, JournalLine
 from bookings.models import Booking, Guest, GuestFolioLine, Room, RoomType
 from inventory.models import InventoryItem, StockMovement
-from restaurant.models import CashierCounter, CashierShift, MenuCategory, MenuItem, MenuModifier, MenuModifierGroup, MenuRecipeIngredient, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantOrderPayment, RestaurantChargeConfig, RestaurantTable
+from restaurant.models import CashierCounter, CashierShift, MenuCategory, MenuItem, MenuModifier, MenuModifierGroup, MenuRecipeIngredient, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantOrderPayment, RestaurantReceiptReprint, RestaurantChargeConfig, RestaurantTable
 from restaurant.serializers import RestaurantOrderLineSerializer
 from restaurant.services import (
     CashierShiftError,
@@ -18,6 +18,7 @@ from restaurant.services import (
     close_cashier_shift,
     merge_order_table,
     open_cashier_shift,
+    record_restaurant_receipt_reprint,
     reject_order_approval,
     request_order_approval,
     settle_restaurant_order,
@@ -276,6 +277,30 @@ class RestaurantRoomPostingTests(TenantTestCase):
         self.assertTrue(JournalLine.objects.filter(journal_entry=journal, account__code='2100', credit=Decimal('6.50')).exists())
         self.assertTrue(JournalLine.objects.filter(journal_entry=journal, account__code='4200', credit=Decimal('5.00')).exists())
 
+    def test_restaurant_settlement_assigns_receipt_number(self):
+        settle_restaurant_order(self.order, payment_method='cash', paid_amount=Decimal('50.00'))
+
+        self.order.refresh_from_db()
+        self.assertTrue(self.order.receipt_number.startswith('RCP-'))
+        self.assertIsNotNone(self.order.receipt_issued_at)
+        self.assertEqual(self.order.receipt_reprint_count, 0)
+
+    def test_paid_receipt_reprint_is_audited(self):
+        settle_restaurant_order(self.order, payment_method='cash', paid_amount=Decimal('50.00'))
+
+        reprint = record_restaurant_receipt_reprint(self.order, reprinted_by=self.cashier, reason='Guest requested copy')
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.receipt_reprint_count, 1)
+        self.assertEqual(reprint.receipt_number, self.order.receipt_number)
+        self.assertEqual(reprint.reprinted_by_id, self.cashier.id)
+        self.assertEqual(reprint.reason, 'Guest requested copy')
+        self.assertEqual(RestaurantReceiptReprint.objects.filter(order=self.order).count(), 1)
+
+    def test_unpaid_receipt_cannot_be_reprinted(self):
+        with self.assertRaises(RestaurantSettlementError):
+            record_restaurant_receipt_reprint(self.order, reprinted_by=self.cashier)
+
     def test_order_discount_cannot_exceed_order_total(self):
         with self.assertRaises(RestaurantOrderActionError):
             apply_order_discount(self.order, discount_amount=Decimal('55.00'))
@@ -422,6 +447,13 @@ class RestaurantRoomPostingTests(TenantTestCase):
         self.assertEqual(shift.expected_total, Decimal('175.00'))
         self.assertEqual(shift.cash_variance, Decimal('0.00'))
         self.assertIn('Balanced', shift.notes)
+        totals = calculate_cashier_shift_totals(shift)
+        cash_breakdown = next(row for row in totals['payment_breakdown'] if row['payment_method'] == 'cash')
+        card_breakdown = next(row for row in totals['payment_breakdown'] if row['payment_method'] == 'card')
+        self.assertEqual(cash_breakdown['restaurant_total'], Decimal('50.00'))
+        self.assertEqual(cash_breakdown['total'], Decimal('50.00'))
+        self.assertEqual(card_breakdown['restaurant_total'], Decimal('25.00'))
+        self.assertEqual(len(totals['payment_rows']), 2)
 
     def test_restaurant_order_can_be_settled_with_split_payments(self):
         shift = open_cashier_shift(cashier=self.cashier, counter=self.counter, opening_cash=Decimal('20.00'))

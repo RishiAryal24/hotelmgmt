@@ -6,9 +6,9 @@ The project is now a connected development-stage hospitality ERP. It is suitable
 
 Checkpoint note:
 
-- Current checkpoint is stable as of the restaurant tax/service-charge configuration slice.
+- Current checkpoint is stable as of the restaurant receipt numbering and reprint audit trail slice.
 - Restaurant tests, migration check, tenant migrations, and frontend build are passing locally.
-- Recommended continuation: restaurant receipt numbering and reprint audit trail.
+- Recommended continuation: cash drawer reconciliation by payment row and cashier shift.
 
 Working foundations:
 
@@ -150,10 +150,10 @@ Completed:
 - Merged bills.
 - Amount-based split payments.
 - Restaurant tax and service-charge configuration.
+- Restaurant receipt numbering and reprint audit trail.
 
 Remaining:
 
-- Restaurant receipt numbering and reprint audit trail.
 - Cash drawer reconciliation by payment row and cashier shift.
 
 ## Phase 4: Accounting ERP
@@ -222,11 +222,11 @@ Planned:
 
 ## Recommended Immediate Next Step
 
-Resume with **restaurant receipt numbering and reprint audit trail**.
+Resume with **cash drawer reconciliation by payment row and cashier shift**.
 
 Suggested order:
 
-1. Commit the current restaurant tax/service-charge checkpoint if it has not been committed.
-2. Add receipt numbering for restaurant settlements.
-3. Add reprint audit trail for paid restaurant receipts.
-4. Continue with cash drawer reconciliation by payment row and cashier shift.
+1. Commit the current restaurant receipt numbering checkpoint if it has not been committed.
+2. Add cash drawer reconciliation by payment row.
+3. Tie reconciliation review to cashier shift close reports.
+4. Continue with POS operational reports for cashier exceptions.

@@ -221,6 +221,9 @@ class RestaurantOrder(UUIDModel):
     paid_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     payment_method = models.CharField(max_length=30, choices=PAYMENT_METHOD_CHOICES, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True)
+    receipt_number = models.CharField(max_length=40, unique=True, null=True, blank=True, db_index=True)
+    receipt_issued_at = models.DateTimeField(null=True, blank=True)
+    receipt_reprint_count = models.PositiveIntegerField(default=0)
     cashier_shift = models.ForeignKey('restaurant.CashierShift', on_delete=models.SET_NULL, related_name='restaurant_orders', null=True, blank=True)
     notes = models.TextField(blank=True)
 
@@ -297,6 +300,25 @@ class RestaurantOrderPayment(UUIDModel):
 
     def __str__(self):
         return f'{self.order.order_number} {self.payment_method} {self.amount}'
+
+
+class RestaurantReceiptReprint(UUIDModel):
+    order = models.ForeignKey(RestaurantOrder, on_delete=models.CASCADE, related_name='receipt_reprints')
+    receipt_number = models.CharField(max_length=40)
+    reprinted_by = models.ForeignKey('users.PlatformUser', on_delete=models.SET_NULL, related_name='restaurant_receipt_reprints', null=True, blank=True)
+    cashier_shift = models.ForeignKey('restaurant.CashierShift', on_delete=models.SET_NULL, related_name='restaurant_receipt_reprints', null=True, blank=True)
+    reprinted_at = models.DateTimeField(default=timezone.now)
+    reason = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ['-reprinted_at']
+        indexes = [
+            models.Index(fields=['receipt_number']),
+            models.Index(fields=['reprinted_at']),
+        ]
+
+    def __str__(self):
+        return f'Reprint {self.receipt_number} at {self.reprinted_at:%Y-%m-%d %H:%M}'
 
 
 class RestaurantOrderApproval(UUIDModel):

@@ -4,7 +4,7 @@
 
 @media print {
   @page {
-    margin: 12mm;
+    margin: 6mm;
   }
 
   html,
@@ -44,6 +44,7 @@
   .print-surface > div {
     max-height: none !important;
     overflow: visible !important;
+    padding: 0 !important;
   }
 
   .print-hidden,
@@ -57,19 +58,65 @@
   .print-surface table {
     width: 100% !important;
     border-collapse: collapse !important;
-    font-size: 11px !important;
+    font-size: 9px !important;
+    line-height: 1.15 !important;
   }
 
   .print-surface th,
   .print-surface td {
     border-bottom: 1px solid #cbd5e1 !important;
-    padding: 6px 8px !important;
+    padding: 2px 4px !important;
+    vertical-align: top !important;
   }
 
   .print-surface h1,
   .print-surface h2,
   .print-surface h3 {
     color: #0f172a !important;
+  }
+
+  .print-surface p {
+    margin-top: 1px !important;
+    margin-bottom: 1px !important;
+  }
+
+  .receipt-print,
+  .receipt-print * {
+    line-height: 1.15 !important;
+  }
+
+  .receipt-print {
+    border: 0 !important;
+    padding: 0 !important;
+    font-size: 9px !important;
+  }
+
+  .receipt-print .print-header {
+    padding-bottom: 4px !important;
+    margin-bottom: 4px !important;
+  }
+
+  .receipt-print .print-metrics {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 4px !important;
+    margin: 4px 0 !important;
+  }
+
+  .receipt-print .print-section {
+    margin-top: 4px !important;
+  }
+
+  .receipt-print .print-total {
+    font-size: 11px !important;
+  }
+
+  .receipt-print .rounded-2xl,
+  .receipt-print .rounded-xl,
+  .receipt-print .rounded-lg,
+  .receipt-print .bg-slate-50 {
+    border-radius: 0 !important;
+    background: #fff !important;
   }
 }
 

@@ -387,6 +387,19 @@ export const useSettleRestaurantOrder = () => {
   });
 };
 
+export const useReprintRestaurantReceipt = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId, reason }: { orderId: string; reason?: string }): Promise<RestaurantOrder> => {
+      const response = await apiClient.post(`/restaurant/orders/${orderId}/reprint_receipt/`, { reason });
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['restaurant-orders'] });
+    },
+  });
+};
+
 export const useKitchenTicketAction = () => {
   const queryClient = useQueryClient();
   return useMutation({

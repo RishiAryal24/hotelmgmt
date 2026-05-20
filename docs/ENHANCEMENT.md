@@ -137,7 +137,8 @@ This document outlines targeted improvements to elevate the hotel and restaurant
   - Completed cashier shift summary and close report.
   - Completed POS settlement for restaurant orders and room folios.
   - Completed restaurant tax and service-charge configuration with receipt and accounting breakdowns.
-  - Remaining: receipt numbering, reprint audit trail, and cash drawer reconciliation by payment row.
+  - Completed restaurant receipt numbering and reprint audit trail.
+  - Remaining: cash drawer reconciliation by payment row.
 
 #### Revenue Forecasting
 - **Description**: Predictive analytics.
@@ -239,5 +240,5 @@ This document outlines targeted improvements to elevate the hotel and restaurant
 - Ensure tenant-awareness in all new features.
 - Test against PMS standards post-implementation.
 - Document all changes in this file.
-- Current checkpoint: restaurant tax/service-charge configuration is implemented and verified locally.
-- Next: implement restaurant receipt numbering and reprint audit trail.
+- Current checkpoint: restaurant receipt numbering and reprint audit trail is implemented and verified locally.
+- Next: implement cash drawer reconciliation by payment row.

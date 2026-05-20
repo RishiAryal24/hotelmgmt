@@ -17,6 +17,7 @@ from restaurant.models import (
     RestaurantOrderApproval,
     RestaurantOrderLine,
     RestaurantOrderPayment,
+    RestaurantReceiptReprint,
     RestaurantChargeConfig,
     RestaurantTable,
 )
@@ -157,6 +158,19 @@ class RestaurantOrderPaymentSerializer(serializers.ModelSerializer):
         read_only_fields = ['order', 'cashier_shift', 'paid_at']
 
 
+class RestaurantReceiptReprintSerializer(serializers.ModelSerializer):
+    reprinted_by_email = serializers.EmailField(source='reprinted_by.email', read_only=True)
+
+    class Meta:
+        model = RestaurantReceiptReprint
+        fields = '__all__'
+        read_only_fields = ['order', 'receipt_number', 'reprinted_by', 'cashier_shift', 'reprinted_at']
+
+
+class RestaurantReceiptReprintRequestSerializer(serializers.Serializer):
+    reason = serializers.CharField(required=False, allow_blank=True, max_length=255)
+
+
 class RestaurantOrderApprovalRequestSerializer(serializers.Serializer):
     line = serializers.PrimaryKeyRelatedField(queryset=RestaurantOrderLine.objects.all(), required=False, allow_null=True)
     discount_amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0.00'), required=False)
@@ -221,6 +235,7 @@ class RestaurantOrderSerializer(serializers.ModelSerializer):
     table_details = RestaurantTableSerializer(source='table', read_only=True)
     lines = RestaurantOrderLineSerializer(many=True, read_only=True)
     payments = RestaurantOrderPaymentSerializer(many=True, read_only=True)
+    receipt_reprints = RestaurantReceiptReprintSerializer(many=True, read_only=True)
     room_number = serializers.CharField(source='room_booking.room.room_number', read_only=True)
     guest_name = serializers.SerializerMethodField()
 

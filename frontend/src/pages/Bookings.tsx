@@ -469,7 +469,11 @@ const Bookings: React.FC = () => {
         payload: { ...checkoutPayment, cashier_shift: currentShift?.id },
       },
       {
-        onSuccess: () => setCheckoutBooking(null),
+        onSuccess: (result) => {
+          const settledFolio = (result as { folio?: GuestFolio }).folio;
+          setCheckoutBooking(null);
+          if (settledFolio) setSelectedFolio(settledFolio);
+        },
       },
     );
   };
@@ -1307,33 +1311,46 @@ const Bookings: React.FC = () => {
 
       {selectedFolio && (
         <ActionModal
-          title={`Folio ${selectedFolio.folio_number}`}
+          title={`${selectedFolio.status === 'paid' ? 'Checkout receipt' : 'Folio'} ${selectedFolio.folio_number}`}
           description={`Room ${selectedFolio.room_number} | ${selectedFolio.guest_name}`}
           onClose={() => setSelectedFolio(null)}
         >
-          <div className="grid gap-4">
-            <div className="border-b border-slate-200 pb-3 text-center">
-              <h2 className="text-xl font-bold text-slate-900">{settings?.name || 'Hotel'}</h2>
+          <div className="receipt-print grid gap-2 text-xs">
+            <div className="print-header border-b border-slate-200 pb-2 text-center">
+              <h2 className="text-lg font-bold text-slate-900">{settings?.name || 'Hotel'}</h2>
               <p className="mt-1 text-xs text-slate-500">Printed {new Date().toLocaleString()}</p>
-              <p className="mt-3 text-sm font-semibold text-slate-900">Folio {selectedFolio.folio_number}</p>
+              <p className="mt-2 text-xs font-semibold text-slate-900">{selectedFolio.status === 'paid' ? 'Payment Receipt' : 'Guest Folio'}</p>
+              <p className="mt-1 text-xs text-slate-700">Folio {selectedFolio.folio_number}</p>
               <p className="mt-1 text-xs text-slate-600">Room {selectedFolio.room_number} | {selectedFolio.guest_name}</p>
             </div>
-            <div className="grid gap-3 md:grid-cols-3">
-              <div className="rounded-2xl bg-slate-50 p-3">
+            <div className="print-metrics grid gap-2 md:grid-cols-3">
+              <div className="rounded-lg bg-slate-50 p-2">
                 <p className="text-xs font-medium uppercase text-slate-500">Status</p>
-                <p className="mt-1 text-lg font-semibold text-slate-900">{selectedFolio.status}</p>
+                <p className="mt-0.5 text-sm font-semibold text-slate-900">{selectedFolio.status}</p>
               </div>
-              <div className="rounded-2xl bg-slate-50 p-3">
+              <div className="rounded-lg bg-slate-50 p-2">
                 <p className="text-xs font-medium uppercase text-slate-500">Stay</p>
-                <p className="mt-1 text-sm font-semibold text-slate-900">{selectedFolio.check_in_date} to {selectedFolio.check_out_date}</p>
+                <p className="mt-0.5 text-sm font-semibold text-slate-900">{selectedFolio.check_in_date} to {selectedFolio.check_out_date}</p>
               </div>
-              <div className="rounded-2xl bg-slate-50 p-3">
+              <div className="rounded-lg bg-slate-50 p-2">
                 <p className="text-xs font-medium uppercase text-slate-500">Total</p>
-                <p className="mt-1 text-lg font-semibold text-slate-900">{formatMoney(selectedFolio.grand_total, settings?.currency)}</p>
+                <p className="mt-0.5 text-sm font-semibold text-slate-900">{formatMoney(selectedFolio.grand_total, settings?.currency)}</p>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-2">
+                <p className="text-xs font-medium uppercase text-slate-500">Payment</p>
+                <p className="mt-0.5 text-sm font-semibold text-slate-900">{selectedFolio.payment_method || '-'}</p>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-2">
+                <p className="text-xs font-medium uppercase text-slate-500">Paid</p>
+                <p className="mt-0.5 text-sm font-semibold text-slate-900">{formatMoney(selectedFolio.paid_amount || '0.00', settings?.currency)}</p>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-2">
+                <p className="text-xs font-medium uppercase text-slate-500">Paid At</p>
+                <p className="mt-0.5 text-sm font-semibold text-slate-900">{selectedFolio.paid_at ? new Date(selectedFolio.paid_at).toLocaleString() : '-'}</p>
               </div>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[620px] text-left text-sm">
+            <div className="print-section overflow-x-auto">
+              <table className="w-full min-w-[620px] text-left text-xs">
                 <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
                   <tr><th className="py-3 pr-4">Description</th><th className="py-3 pr-4">Posted From</th><th className="py-3 pr-4">Reference</th><th className="py-3 pr-4 text-right">Amount</th></tr>
                 </thead>
@@ -1348,6 +1365,11 @@ const Bookings: React.FC = () => {
                   ))}
                   {selectedFolio.lines.length === 0 && <tr><td colSpan={4} className="py-6 text-center text-slate-500">No folio lines yet.</td></tr>}
                 </tbody>
+                <tfoot className="border-t border-slate-200">
+                  <tr><td className="py-3 pr-4 font-semibold text-slate-900" colSpan={3}>Subtotal</td><td className="py-3 pr-4 text-right font-semibold">{formatMoney(selectedFolio.subtotal, settings?.currency)}</td></tr>
+                  <tr><td className="py-3 pr-4 font-semibold text-slate-900" colSpan={3}>Tax</td><td className="py-3 pr-4 text-right font-semibold">{formatMoney(selectedFolio.tax_total, settings?.currency)}</td></tr>
+                  <tr><td className="print-total py-3 pr-4 text-base font-bold text-slate-900" colSpan={3}>Grand Total</td><td className="print-total py-3 pr-4 text-right text-base font-bold">{formatMoney(selectedFolio.grand_total, settings?.currency)}</td></tr>
+                </tfoot>
               </table>
             </div>
           </div>
@@ -1359,7 +1381,7 @@ const Bookings: React.FC = () => {
               PDF
             </button>
             <button type="button" onClick={() => window.print()} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900">
-              Print
+              {selectedFolio.status === 'paid' ? 'Print receipt' : 'Print folio'}
             </button>
           </div>
         </ActionModal>

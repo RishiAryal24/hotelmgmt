@@ -24,6 +24,7 @@ from restaurant.serializers import (
     RestaurantOrderApprovalDecisionSerializer,
     RestaurantOrderApprovalRequestSerializer,
     RestaurantOrderApprovalSerializer,
+    RestaurantReceiptReprintRequestSerializer,
     RestaurantOrderSerializer,
     RestaurantChargeConfigSerializer,
     RestaurantTableSerializer,
@@ -42,6 +43,7 @@ from restaurant.services import (
     merge_order_table,
     open_cashier_shift,
     reject_order_approval,
+    record_restaurant_receipt_reprint,
     request_order_approval,
     settle_restaurant_order,
     split_order_bill,
@@ -258,7 +260,7 @@ class CashierCounterViewSet(viewsets.ModelViewSet):
 
 
 class RestaurantOrderViewSet(viewsets.ModelViewSet):
-    queryset = RestaurantOrder.objects.select_related('table', 'waiter').prefetch_related('lines', 'lines__menu_item', 'lines__modifiers', 'payments').all()
+    queryset = RestaurantOrder.objects.select_related('table', 'waiter').prefetch_related('lines', 'lines__menu_item', 'lines__modifiers', 'payments', 'receipt_reprints').all()
     serializer_class = RestaurantOrderSerializer
     permission_classes = [IsAuthenticated, HasActionPermission]
     permission_map = {
@@ -280,6 +282,7 @@ class RestaurantOrderViewSet(viewsets.ModelViewSet):
         'request_discount': 'restaurant.order.update',
         'request_complimentary': 'restaurant.order.update',
         'settle': 'pos.sale.create',
+        'reprint_receipt': 'pos.sale.create',
     }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'order_type', 'table', 'waiter']
@@ -476,6 +479,23 @@ class RestaurantOrderViewSet(viewsets.ModelViewSet):
         except RestaurantSettlementError as exc:
             return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
+        return Response(RestaurantOrderSerializer(order).data)
+
+    @action(detail=True, methods=['post'])
+    def reprint_receipt(self, request, pk=None):
+        order = self.get_object()
+        serializer = RestaurantReceiptReprintRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            record_restaurant_receipt_reprint(
+                order,
+                reprinted_by=request.user,
+                reason=serializer.validated_data.get('reason', ''),
+            )
+        except RestaurantSettlementError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        order.refresh_from_db()
         return Response(RestaurantOrderSerializer(order).data)
 
 

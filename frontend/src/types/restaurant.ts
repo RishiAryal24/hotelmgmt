@@ -109,6 +109,17 @@ export interface RestaurantOrderPayment {
   paid_at: string;
 }
 
+export interface RestaurantReceiptReprint {
+  id: string;
+  order: string;
+  receipt_number: string;
+  reprinted_by: string | null;
+  reprinted_by_email?: string;
+  cashier_shift: string | null;
+  reprinted_at: string;
+  reason: string;
+}
+
 export interface RestaurantOrder {
   id: string;
   table: string | null;
@@ -128,9 +139,13 @@ export interface RestaurantOrder {
   paid_amount: string;
   payment_method: '' | 'cash' | 'card' | 'wallet' | 'room_posting' | 'bank_transfer' | 'split';
   paid_at: string | null;
+  receipt_number: string | null;
+  receipt_issued_at: string | null;
+  receipt_reprint_count: number;
   notes: string;
   lines: RestaurantOrderLine[];
   payments: RestaurantOrderPayment[];
+  receipt_reprints?: RestaurantReceiptReprint[];
 }
 
 export interface RestaurantOrderApproval {
@@ -179,12 +194,34 @@ export interface CashierShiftTotals {
   restaurant_cash: string;
   folio_cash: string;
   facility_charges: string;
+  opening_cash: string;
+  cash_sales: string;
   expected_cash: string;
   expected_card: string;
   expected_wallet: string;
   expected_bank_transfer: string;
   expected_room_posting: string;
   expected_total: string;
+  sales_total: string;
+  payment_breakdown: CashierShiftPaymentBreakdown[];
+  payment_rows: CashierShiftPaymentRow[];
+}
+
+export interface CashierShiftPaymentBreakdown {
+  payment_method: 'cash' | 'card' | 'wallet' | 'bank_transfer' | 'room_posting';
+  label: string;
+  restaurant_total: string;
+  folio_total: string;
+  total: string;
+}
+
+export interface CashierShiftPaymentRow {
+  source: 'restaurant' | 'folio';
+  reference: string;
+  guest_or_table: string;
+  payment_method: RestaurantOrder['payment_method'];
+  amount: string;
+  paid_at: string | null;
 }
 
 export interface CashierCounter {

@@ -11,6 +11,7 @@ import {
   useCreateCashierCounter,
   useCurrentCashierShift,
   useOpenCashierShift,
+  useReprintRestaurantReceipt,
   useRestaurantChargeConfig,
   useRestaurantOrders,
   useSettleRestaurantOrder,
@@ -75,6 +76,7 @@ const POS: React.FC = () => {
   const addFolioCharge = useAddGuestFolioCharge();
   const settleGuestFolio = useSettleGuestFolio();
   const settleOrder = useSettleRestaurantOrder();
+  const reprintRestaurantReceipt = useReprintRestaurantReceipt();
   const openCashierShift = useOpenCashierShift();
   const closeCashierShift = useCloseCashierShift();
   const createCashierCounter = useCreateCashierCounter();
@@ -97,6 +99,7 @@ const POS: React.FC = () => {
   const [selectedFolioReport, setSelectedFolioReport] = useState<GuestFolio | null>(null);
   const [folioPaymentReceipt, setFolioPaymentReceipt] = useState<GuestFolio | null>(null);
   const [restaurantPaymentReceipt, setRestaurantPaymentReceipt] = useState<RestaurantOrder | null>(null);
+  const [restaurantBillPreview, setRestaurantBillPreview] = useState<RestaurantOrder | null>(null);
   const [paidOrderSearch, setPaidOrderSearch] = useState('');
   const [activeTab, setActiveTab] = useState('settlement');
   const [facilityChargeForm, setFacilityChargeForm] = useState({
@@ -147,6 +150,7 @@ const POS: React.FC = () => {
     if (!query) return true;
     return [
       order.order_number,
+      order.receipt_number,
       order.payment_method,
       order.table_details?.table_number,
       order.room_number,
@@ -160,6 +164,8 @@ const POS: React.FC = () => {
   const openFolios = folios?.filter((folio) => folio.status === 'open') || [];
   const activeFacilityAmenities = (facilityAmenities || []).filter((amenity) => amenity.is_active);
   const activeFacilityServices = (facilityServices || []).filter((service) => service.is_active);
+  const getOrderFolio = (order?: RestaurantOrder | null) =>
+    order?.room_booking ? (folios || []).find((folio) => folio.booking === order.room_booking) : undefined;
   const facilityChargeLines = (folios || [])
     .flatMap((folio) =>
       folio.lines
@@ -182,6 +188,8 @@ const POS: React.FC = () => {
   const liveTotals = currentShift?.live_totals;
   const expectedCash = liveTotals?.expected_cash || currentShift?.expected_cash || '0.00';
   const expectedTotal = liveTotals?.expected_total || currentShift?.expected_total || '0.00';
+  const paymentLabel = (method: string) =>
+    restaurantPaymentMethods.find((item) => item.value === method)?.label || folioPaymentMethods.find((item) => item.value === method)?.label || method.replace('_', ' ');
   const closeVariance =
     closeShiftForm.actual_cash === ''
       ? null
@@ -258,6 +266,8 @@ const POS: React.FC = () => {
 
   if (isLoading || shiftLoading) return <div className="p-6 text-slate-600">Loading POS orders...</div>;
   if (error) return <div className="p-6 text-red-600">Error loading POS orders</div>;
+
+  const restaurantReceiptFolio = getOrderFolio(restaurantPaymentReceipt);
 
   return (
     <div className="space-y-5">
@@ -483,6 +493,14 @@ const POS: React.FC = () => {
                     {form.payment_method !== 'room_posting' && <span className="text-xs text-slate-400">-</span>}
                 </td>
                 <td className="py-3 pr-4">
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setRestaurantBillPreview(order)}
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        Print bill
+                      </button>
                     {can('pos.sale.create') && (
                       <button
                         onClick={() =>
@@ -501,6 +519,7 @@ const POS: React.FC = () => {
                         Settle
                       </button>
                     )}
+                    </div>
                     {!currentShift && <p className="mt-2 text-xs text-amber-700">Open a cashier shift to settle bills.</p>}
                 </td>
               </tr>
@@ -592,6 +611,9 @@ const POS: React.FC = () => {
                 <td className="py-3 pr-4">
                   <button onClick={() => setActiveTab('settlement')} className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-700">
                     Settle
+                  </button>
+                  <button onClick={() => setRestaurantBillPreview(order)} className="ml-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                    Print bill
                   </button>
                 </td>
               </tr>
@@ -923,24 +945,42 @@ const POS: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
-                <tr><th className="py-3 pr-4">Order</th><th className="py-3 pr-4">Location</th><th className="py-3 pr-4">Payment</th><th className="py-3 pr-4">Paid</th><th className="py-3 pr-4">Status</th><th className="py-3 pr-4">Actions</th></tr>
+                <tr><th className="py-3 pr-4">Order</th><th className="py-3 pr-4">Receipt</th><th className="py-3 pr-4">Location</th><th className="py-3 pr-4">Payment</th><th className="py-3 pr-4">Paid</th><th className="py-3 pr-4">Status</th><th className="py-3 pr-4">Actions</th></tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredPaidOrders.slice(0, 25).map((order) => (
-                  <tr key={order.id}>
-                    <td className="py-3 pr-4 font-medium text-slate-900">{order.order_number}</td>
-                    <td className="py-3 pr-4">{order.table_details ? `Table ${order.table_details.table_number}` : order.room_number ? `Room ${order.room_number}` : order.order_type}</td>
-                    <td className="py-3 pr-4">{order.payment_method || '-'}</td>
-                    <td className="py-3 pr-4 font-semibold text-slate-900">{formatMoney(order.paid_amount, settings?.currency)}</td>
-                    <td className="py-3 pr-4"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{order.status}</span></td>
-                    <td className="py-3 pr-4">
-                      <button onClick={() => setRestaurantPaymentReceipt(order)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">
-                        Receipt
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {filteredPaidOrders.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No paid orders match this search.</td></tr>}
+                {filteredPaidOrders.slice(0, 25).map((order) => {
+                  const orderFolio = getOrderFolio(order);
+                  return (
+                    <tr key={order.id}>
+                      <td className="py-3 pr-4 font-medium text-slate-900">{order.order_number}</td>
+                      <td className="py-3 pr-4 font-medium text-slate-700">{order.receipt_number || '-'}</td>
+                      <td className="py-3 pr-4">{order.table_details ? `Table ${order.table_details.table_number}` : order.room_number ? `Room ${order.room_number}` : order.order_type}</td>
+                      <td className="py-3 pr-4">{order.payment_method || '-'}</td>
+                      <td className="py-3 pr-4 font-semibold text-slate-900">{formatMoney(order.paid_amount, settings?.currency)}</td>
+                      <td className="py-3 pr-4"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{order.status}</span></td>
+                      <td className="py-3 pr-4">
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => reprintRestaurantReceipt.mutate(
+                              { orderId: order.id, reason: 'POS paid orders reprint' },
+                              { onSuccess: (updatedOrder) => setRestaurantPaymentReceipt(updatedOrder) },
+                            )}
+                            disabled={reprintRestaurantReceipt.isPending}
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100"
+                          >
+                            Receipt
+                          </button>
+                          {orderFolio && (
+                            <button onClick={() => setSelectedFolioReport(orderFolio)} className="rounded-xl border border-emerald-200 px-3 py-2 text-xs font-medium text-emerald-700 hover:bg-emerald-50">
+                              Folio
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {filteredPaidOrders.length === 0 && <tr><td colSpan={7} className="py-6 text-center text-slate-500">No paid orders match this search.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -973,6 +1013,24 @@ const POS: React.FC = () => {
               <ShiftMetric label="Expected Total" value={formatMoney(expectedTotal, settings?.currency)} />
               <ShiftMetric label="Card" value={formatMoney(liveTotals?.expected_card || '0.00', settings?.currency)} />
               <ShiftMetric label="Room Posting" value={formatMoney(liveTotals?.expected_room_posting || '0.00', settings?.currency)} />
+              {liveTotals?.payment_breakdown?.length ? (
+                <div className="rounded-lg border border-slate-200 md:col-span-2">
+                  <div className="grid grid-cols-4 gap-2 border-b border-slate-100 px-3 py-2 text-xs font-semibold uppercase text-slate-500">
+                    <span>Method</span>
+                    <span className="text-right">Restaurant</span>
+                    <span className="text-right">Rooms</span>
+                    <span className="text-right">Total</span>
+                  </div>
+                  {liveTotals.payment_breakdown.map((row) => (
+                    <div key={row.payment_method} className="grid grid-cols-4 gap-2 px-3 py-2 text-sm text-slate-700">
+                      <span>{row.label}</span>
+                      <span className="text-right">{formatMoney(row.restaurant_total, settings?.currency)}</span>
+                      <span className="text-right">{formatMoney(row.folio_total, settings?.currency)}</span>
+                      <span className="text-right font-semibold text-slate-900">{formatMoney(row.total, settings?.currency)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <input
                 type="number"
                 min="0"
@@ -1014,20 +1072,68 @@ const POS: React.FC = () => {
           description={`${closedShiftReport.counter_details?.name || 'Counter'} | ${new Date(closedShiftReport.opened_at).toLocaleString()} - ${closedShiftReport.closed_at ? new Date(closedShiftReport.closed_at).toLocaleString() : 'Closed'}`}
           onClose={() => setClosedShiftReport(null)}
         >
-          <div className="grid gap-3 md:grid-cols-2">
-            <ShiftMetric label="Opening Cash" value={formatMoney(closedShiftReport.opening_cash, settings?.currency)} />
-            <ShiftMetric label="Expected Cash" value={formatMoney(closedShiftReport.expected_cash, settings?.currency)} />
-            <ShiftMetric label="Actual Cash" value={formatMoney(closedShiftReport.actual_cash, settings?.currency)} />
-            <ShiftMetric label="Variance" value={formatMoney(closedShiftReport.cash_variance, settings?.currency)} />
-            <ShiftMetric label="Card" value={formatMoney(closedShiftReport.expected_card, settings?.currency)} />
-            <ShiftMetric label="Wallet" value={formatMoney(closedShiftReport.expected_wallet, settings?.currency)} />
-            <ShiftMetric label="Bank" value={formatMoney(closedShiftReport.expected_bank_transfer, settings?.currency)} />
-            <ShiftMetric label="Room Posting" value={formatMoney(closedShiftReport.expected_room_posting, settings?.currency)} />
-            <div className="rounded-2xl bg-slate-50 p-3 md:col-span-2">
-              <p className="text-xs font-medium uppercase text-slate-500">Expected Total</p>
-              <p className="mt-1 text-xl font-semibold text-slate-900">{formatMoney(closedShiftReport.expected_total, settings?.currency)}</p>
+          <div className="receipt-print grid gap-3 text-xs">
+            <div className="print-header border-b border-slate-200 pb-2 text-center">
+              <h2 className="text-lg font-bold text-slate-900">{settings?.name || 'Hotel'}</h2>
+              <p className="mt-1 text-xs text-slate-500">Printed {new Date().toLocaleString()}</p>
+              <p className="mt-2 text-xs font-semibold text-slate-900">Cashier Shift Close Report</p>
+              <p className="mt-1 text-xs text-slate-600">{closedShiftReport.counter_details?.name || 'Counter'} | {closedShiftReport.cashier_email || '-'}</p>
             </div>
-            {closedShiftReport.notes && <p className="text-sm text-slate-600 md:col-span-2">{closedShiftReport.notes}</p>}
+            <div className="print-metrics grid gap-2 md:grid-cols-4">
+              <ShiftMetric label="Opening Cash" value={formatMoney(closedShiftReport.opening_cash, settings?.currency)} />
+              <ShiftMetric label="Cash Sales" value={formatMoney(closedShiftReport.live_totals?.cash_sales || '0.00', settings?.currency)} />
+              <ShiftMetric label="Expected Cash" value={formatMoney(closedShiftReport.expected_cash, settings?.currency)} />
+              <ShiftMetric label="Actual Cash" value={formatMoney(closedShiftReport.actual_cash, settings?.currency)} />
+              <ShiftMetric label="Variance" value={formatMoney(closedShiftReport.cash_variance, settings?.currency)} />
+              <ShiftMetric label="Card" value={formatMoney(closedShiftReport.expected_card, settings?.currency)} />
+              <ShiftMetric label="Wallet" value={formatMoney(closedShiftReport.expected_wallet, settings?.currency)} />
+              <ShiftMetric label="Bank" value={formatMoney(closedShiftReport.expected_bank_transfer, settings?.currency)} />
+              <ShiftMetric label="Room Posting" value={formatMoney(closedShiftReport.expected_room_posting, settings?.currency)} />
+              <ShiftMetric label="Sales Total" value={formatMoney(closedShiftReport.live_totals?.sales_total || '0.00', settings?.currency)} />
+              <ShiftMetric label="Expected Total" value={formatMoney(closedShiftReport.expected_total, settings?.currency)} />
+              <ShiftMetric label="Closed At" value={closedShiftReport.closed_at ? new Date(closedShiftReport.closed_at).toLocaleString() : '-'} />
+            </div>
+            {closedShiftReport.live_totals?.payment_breakdown?.length ? (
+              <div className="print-section overflow-x-auto">
+                <table className="w-full min-w-[620px] text-left text-xs">
+                  <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
+                    <tr><th className="py-2 pr-3">Payment Method</th><th className="py-2 pr-3 text-right">Restaurant</th><th className="py-2 pr-3 text-right">Rooms/Folios</th><th className="py-2 pr-3 text-right">Total</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {closedShiftReport.live_totals.payment_breakdown.map((row) => (
+                      <tr key={row.payment_method}>
+                        <td className="py-2 pr-3 font-medium text-slate-900">{row.label}</td>
+                        <td className="py-2 pr-3 text-right">{formatMoney(row.restaurant_total, settings?.currency)}</td>
+                        <td className="py-2 pr-3 text-right">{formatMoney(row.folio_total, settings?.currency)}</td>
+                        <td className="py-2 pr-3 text-right font-semibold">{formatMoney(row.total, settings?.currency)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+            {closedShiftReport.live_totals?.payment_rows?.length ? (
+              <div className="print-section overflow-x-auto">
+                <table className="w-full min-w-[760px] text-left text-xs">
+                  <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
+                    <tr><th className="py-2 pr-3">Time</th><th className="py-2 pr-3">Source</th><th className="py-2 pr-3">Reference</th><th className="py-2 pr-3">Guest/Table</th><th className="py-2 pr-3">Method</th><th className="py-2 pr-3 text-right">Amount</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {closedShiftReport.live_totals.payment_rows.map((row, index) => (
+                      <tr key={`${row.source}-${row.reference}-${index}`}>
+                        <td className="py-2 pr-3">{row.paid_at ? new Date(row.paid_at).toLocaleTimeString() : '-'}</td>
+                        <td className="py-2 pr-3 capitalize">{row.source}</td>
+                        <td className="py-2 pr-3 font-medium text-slate-900">{row.reference}</td>
+                        <td className="py-2 pr-3">{row.guest_or_table}</td>
+                        <td className="py-2 pr-3 capitalize">{paymentLabel(row.payment_method)}</td>
+                        <td className="py-2 pr-3 text-right font-semibold">{formatMoney(row.amount, settings?.currency)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+            {closedShiftReport.notes && <p className="text-sm text-slate-600">{closedShiftReport.notes}</p>}
           </div>
           <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
             <button type="button" onClick={() => setClosedShiftReport(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
@@ -1046,14 +1152,14 @@ const POS: React.FC = () => {
           description={`Room ${folioPaymentReceipt.room_number} | ${folioPaymentReceipt.guest_name}`}
           onClose={() => setFolioPaymentReceipt(null)}
         >
-          <div className="grid gap-4">
-            <div className="border-b border-slate-200 pb-3 text-center">
-              <h2 className="text-xl font-bold text-slate-900">{settings?.name || 'Hotel'}</h2>
+          <div className="receipt-print grid gap-2 text-xs">
+            <div className="print-header border-b border-slate-200 pb-2 text-center">
+              <h2 className="text-lg font-bold text-slate-900">{settings?.name || 'Hotel'}</h2>
               <p className="mt-1 text-xs text-slate-500">Printed {new Date().toLocaleString()}</p>
-              <p className="mt-3 text-sm font-semibold text-slate-900">Payment Receipt</p>
+              <p className="mt-2 text-xs font-semibold text-slate-900">Payment Receipt</p>
               <p className="mt-1 text-xs text-slate-600">Folio {folioPaymentReceipt.folio_number}</p>
             </div>
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="print-metrics grid gap-2 md:grid-cols-2">
               <ShiftMetric label="Guest" value={folioPaymentReceipt.guest_name} />
               <ShiftMetric label="Room" value={folioPaymentReceipt.room_number} />
               <ShiftMetric label="Payment Method" value={folioPaymentReceipt.payment_method || '-'} />
@@ -1078,30 +1184,90 @@ const POS: React.FC = () => {
         </ActionModal>
       )}
 
+      {restaurantBillPreview && (
+        <ActionModal
+          title={`Restaurant bill ${restaurantBillPreview.order_number}`}
+          description={restaurantBillPreview.table_details ? `Table ${restaurantBillPreview.table_details.table_number}` : restaurantBillPreview.room_number ? `Room ${restaurantBillPreview.room_number}` : restaurantBillPreview.order_type}
+          onClose={() => setRestaurantBillPreview(null)}
+        >
+          <div className="receipt-print grid gap-2 text-xs">
+            <div className="print-header border-b border-slate-200 pb-2 text-center">
+              <h2 className="text-lg font-bold text-slate-900">{settings?.name || 'Hotel'}</h2>
+              <p className="mt-1 text-xs text-slate-500">Printed {new Date().toLocaleString()}</p>
+              <p className="mt-2 text-xs font-semibold text-slate-900">Restaurant Bill</p>
+              <p className="mt-1 text-xs text-slate-500">Order {restaurantBillPreview.order_number}</p>
+            </div>
+            <div className="print-metrics grid gap-2 md:grid-cols-2">
+              <ShiftMetric label="Location" value={restaurantBillPreview.table_details ? `Table ${restaurantBillPreview.table_details.table_number}` : restaurantBillPreview.room_number ? `Room ${restaurantBillPreview.room_number}` : restaurantBillPreview.order_type} />
+              <ShiftMetric label="Status" value={restaurantBillPreview.status} />
+              <ShiftMetric label="Amount Due" value={formatMoney(restaurantBillPreview.grand_total, settings?.currency)} />
+              <ShiftMetric label="Printed At" value={new Date().toLocaleString()} />
+            </div>
+            <div className="print-section overflow-x-auto">
+              <table className="w-full min-w-[560px] text-left text-xs">
+                <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
+                  <tr><th className="py-3 pr-4">Item</th><th className="py-3 pr-4">Qty</th><th className="py-3 pr-4 text-right">Amount</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {restaurantBillPreview.lines.filter((line) => line.status !== 'cancelled').map((line) => (
+                    <tr key={line.id}>
+                      <td className="py-3 pr-4">
+                        <p className="font-medium text-slate-900">{line.menu_item_details?.name || 'Item'}</p>
+                        {line.modifier_details?.length ? <p className="text-xs text-slate-500">{line.modifier_details.map((modifier) => modifier.name).join(', ')}</p> : null}
+                      </td>
+                      <td className="py-3 pr-4">{line.quantity}</td>
+                      <td className="py-3 pr-4 text-right font-semibold text-slate-900">{formatMoney(line.line_total, settings?.currency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="border-t border-slate-200">
+                  <tr><td className="py-3 pr-4 font-semibold text-slate-900" colSpan={2}>Subtotal</td><td className="py-3 pr-4 text-right font-semibold">{formatMoney(restaurantBillPreview.subtotal, settings?.currency)}</td></tr>
+                  {Number(restaurantBillPreview.tax_total) > 0 && <tr><td className="py-3 pr-4 font-semibold text-slate-900" colSpan={2}>Tax</td><td className="py-3 pr-4 text-right font-semibold">{formatMoney(restaurantBillPreview.tax_total, settings?.currency)}</td></tr>}
+                  {Number(restaurantBillPreview.service_charge_total) > 0 && <tr><td className="py-3 pr-4 font-semibold text-slate-900" colSpan={2}>Service</td><td className="py-3 pr-4 text-right font-semibold">{formatMoney(restaurantBillPreview.service_charge_total, settings?.currency)}</td></tr>}
+                  {Number(restaurantBillPreview.discount_total) > 0 && <tr><td className="py-3 pr-4 font-semibold text-rose-700" colSpan={2}>Discount</td><td className="py-3 pr-4 text-right font-semibold text-rose-700">-{formatMoney(restaurantBillPreview.discount_total, settings?.currency)}</td></tr>}
+                  <tr><td className="print-total py-3 pr-4 text-base font-bold text-slate-900" colSpan={2}>Amount Due</td><td className="print-total py-3 pr-4 text-right text-base font-bold">{formatMoney(restaurantBillPreview.grand_total, settings?.currency)}</td></tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+          <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+            <button type="button" onClick={() => setRestaurantBillPreview(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Close
+            </button>
+            <button type="button" onClick={() => window.print()} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900">
+              Print bill
+            </button>
+          </div>
+        </ActionModal>
+      )}
+
       {restaurantPaymentReceipt && (
         <ActionModal
-          title={`Restaurant receipt ${restaurantPaymentReceipt.order_number}`}
+          title={`Restaurant receipt ${restaurantPaymentReceipt.receipt_number || restaurantPaymentReceipt.order_number}`}
           description={restaurantPaymentReceipt.table_details ? `Table ${restaurantPaymentReceipt.table_details.table_number}` : restaurantPaymentReceipt.room_number ? `Room ${restaurantPaymentReceipt.room_number}` : restaurantPaymentReceipt.order_type}
           onClose={() => setRestaurantPaymentReceipt(null)}
         >
-          <div className="grid gap-4">
-            <div className="border-b border-slate-200 pb-3 text-center">
-              <h2 className="text-xl font-bold text-slate-900">{settings?.name || 'Hotel'}</h2>
+          <div className="receipt-print grid gap-2 text-xs">
+            <div className="print-header border-b border-slate-200 pb-2 text-center">
+              <h2 className="text-lg font-bold text-slate-900">{settings?.name || 'Hotel'}</h2>
               <p className="mt-1 text-xs text-slate-500">Printed {new Date().toLocaleString()}</p>
-              <p className="mt-3 text-sm font-semibold text-slate-900">Restaurant Payment Receipt</p>
-              <p className="mt-1 text-xs text-slate-600">Order {restaurantPaymentReceipt.order_number}</p>
+              <p className="mt-2 text-xs font-semibold text-slate-900">Restaurant Payment Receipt</p>
+              <p className="mt-1 text-xs text-slate-600">Receipt {restaurantPaymentReceipt.receipt_number || '-'}</p>
+              <p className="mt-1 text-xs text-slate-500">Order {restaurantPaymentReceipt.order_number}</p>
             </div>
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="print-metrics grid gap-2 md:grid-cols-2">
               <ShiftMetric label="Location" value={restaurantPaymentReceipt.table_details ? `Table ${restaurantPaymentReceipt.table_details.table_number}` : restaurantPaymentReceipt.room_number ? `Room ${restaurantPaymentReceipt.room_number}` : restaurantPaymentReceipt.order_type} />
               <ShiftMetric label="Payment Method" value={restaurantPaymentReceipt.payment_method || '-'} />
+              <ShiftMetric label="Receipt Number" value={restaurantPaymentReceipt.receipt_number || '-'} />
               <ShiftMetric label="Paid Amount" value={formatMoney(restaurantPaymentReceipt.paid_amount || '0.00', settings?.currency)} />
               <ShiftMetric label="Order Total" value={formatMoney(restaurantPaymentReceipt.grand_total, settings?.currency)} />
               <ShiftMetric label="Paid At" value={restaurantPaymentReceipt.paid_at ? new Date(restaurantPaymentReceipt.paid_at).toLocaleString() : '-'} />
               <ShiftMetric label="Counter" value={currentShift?.counter_details?.name || '-'} />
               <ShiftMetric label="Cashier" value={currentShift?.cashier_email || '-'} />
+              <ShiftMetric label="Reprints" value={String(restaurantPaymentReceipt.receipt_reprint_count || 0)} />
             </div>
             {restaurantPaymentReceipt.payments?.length ? (
-              <div className="rounded-2xl bg-slate-50 p-3">
+              <div className="print-section rounded-lg bg-slate-50 p-2">
                 <p className="text-xs font-medium uppercase text-slate-500">Payment Breakdown</p>
                 <div className="mt-2 grid gap-1 text-sm">
                   {restaurantPaymentReceipt.payments.map((payment) => (
@@ -1113,8 +1279,8 @@ const POS: React.FC = () => {
                 </div>
               </div>
             ) : null}
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[560px] text-left text-sm">
+            <div className="print-section overflow-x-auto">
+              <table className="w-full min-w-[560px] text-left text-xs">
                 <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
                   <tr><th className="py-3 pr-4">Item</th><th className="py-3 pr-4">Qty</th><th className="py-3 pr-4 text-right">Amount</th></tr>
                 </thead>
@@ -1135,12 +1301,17 @@ const POS: React.FC = () => {
                   {Number(restaurantPaymentReceipt.tax_total) > 0 && <tr><td className="py-3 pr-4 font-semibold text-slate-900" colSpan={2}>Tax</td><td className="py-3 pr-4 text-right font-semibold">{formatMoney(restaurantPaymentReceipt.tax_total, settings?.currency)}</td></tr>}
                   {Number(restaurantPaymentReceipt.service_charge_total) > 0 && <tr><td className="py-3 pr-4 font-semibold text-slate-900" colSpan={2}>Service</td><td className="py-3 pr-4 text-right font-semibold">{formatMoney(restaurantPaymentReceipt.service_charge_total, settings?.currency)}</td></tr>}
                   {Number(restaurantPaymentReceipt.discount_total) > 0 && <tr><td className="py-3 pr-4 font-semibold text-rose-700" colSpan={2}>Discount</td><td className="py-3 pr-4 text-right font-semibold text-rose-700">-{formatMoney(restaurantPaymentReceipt.discount_total, settings?.currency)}</td></tr>}
-                  <tr><td className="py-3 pr-4 text-lg font-bold text-slate-900" colSpan={2}>Total</td><td className="py-3 pr-4 text-right text-lg font-bold">{formatMoney(restaurantPaymentReceipt.grand_total, settings?.currency)}</td></tr>
+                  <tr><td className="print-total py-3 pr-4 text-base font-bold text-slate-900" colSpan={2}>Total</td><td className="print-total py-3 pr-4 text-right text-base font-bold">{formatMoney(restaurantPaymentReceipt.grand_total, settings?.currency)}</td></tr>
                 </tfoot>
               </table>
             </div>
           </div>
           <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
+            {restaurantReceiptFolio && (
+              <button type="button" onClick={() => setSelectedFolioReport(restaurantReceiptFolio)} className="rounded-xl border border-emerald-200 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50">
+                Full folio
+              </button>
+            )}
             <button type="button" onClick={() => setRestaurantPaymentReceipt(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
               Close
             </button>
@@ -1157,14 +1328,14 @@ const POS: React.FC = () => {
           description={`Room ${selectedFolioReport.room_number} | ${selectedFolioReport.guest_name}`}
           onClose={() => setSelectedFolioReport(null)}
         >
-          <div className="grid gap-4">
-            <div className="border-b border-slate-200 pb-3 text-center">
-              <h2 className="text-xl font-bold text-slate-900">{settings?.name || 'Hotel'}</h2>
+          <div className="receipt-print grid gap-2 text-xs">
+            <div className="print-header border-b border-slate-200 pb-2 text-center">
+              <h2 className="text-lg font-bold text-slate-900">{settings?.name || 'Hotel'}</h2>
               <p className="mt-1 text-xs text-slate-500">Printed {new Date().toLocaleString()}</p>
-              <p className="mt-3 text-sm font-semibold text-slate-900">Folio {selectedFolioReport.folio_number}</p>
+              <p className="mt-2 text-xs font-semibold text-slate-900">Folio {selectedFolioReport.folio_number}</p>
               <p className="mt-1 text-xs text-slate-600">Room {selectedFolioReport.room_number} | {selectedFolioReport.guest_name}</p>
             </div>
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="print-metrics grid gap-2 md:grid-cols-3">
               <ShiftMetric label="Status" value={selectedFolioReport.status} />
               <ShiftMetric label="Stay" value={`${new Date(selectedFolioReport.check_in_date).toLocaleDateString()} - ${new Date(selectedFolioReport.check_out_date).toLocaleDateString()}`} />
               <ShiftMetric label="Total" value={formatMoney(selectedFolioReport.grand_total, settings?.currency)} />
@@ -1172,8 +1343,8 @@ const POS: React.FC = () => {
               <ShiftMetric label="Paid Amount" value={formatMoney(selectedFolioReport.paid_amount || '0.00', settings?.currency)} />
               <ShiftMetric label="Paid At" value={selectedFolioReport.paid_at ? new Date(selectedFolioReport.paid_at).toLocaleString() : '-'} />
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[620px] text-left text-sm">
+            <div className="print-section overflow-x-auto">
+              <table className="w-full min-w-[620px] text-left text-xs">
                 <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
                   <tr><th className="py-3 pr-4">Description</th><th className="py-3 pr-4">Posted From</th><th className="py-3 pr-4">Reference</th><th className="py-3 pr-4 text-right">Amount</th></tr>
                 </thead>
@@ -1191,7 +1362,7 @@ const POS: React.FC = () => {
                 <tfoot className="border-t border-slate-200">
                   <tr><td className="py-3 pr-4 font-semibold text-slate-900" colSpan={3}>Subtotal</td><td className="py-3 pr-4 text-right font-semibold">{formatMoney(selectedFolioReport.subtotal, settings?.currency)}</td></tr>
                   <tr><td className="py-3 pr-4 font-semibold text-slate-900" colSpan={3}>Tax</td><td className="py-3 pr-4 text-right font-semibold">{formatMoney(selectedFolioReport.tax_total, settings?.currency)}</td></tr>
-                  <tr><td className="py-3 pr-4 text-lg font-bold text-slate-900" colSpan={3}>Grand Total</td><td className="py-3 pr-4 text-right text-lg font-bold">{formatMoney(selectedFolioReport.grand_total, settings?.currency)}</td></tr>
+                  <tr><td className="print-total py-3 pr-4 text-base font-bold text-slate-900" colSpan={3}>Grand Total</td><td className="print-total py-3 pr-4 text-right text-base font-bold">{formatMoney(selectedFolioReport.grand_total, settings?.currency)}</td></tr>
                 </tfoot>
               </table>
             </div>
@@ -1427,9 +1598,9 @@ const POS: React.FC = () => {
 };
 
 const ShiftMetric = ({ label, value }: { label: string; value: string }) => (
-  <div className="rounded-2xl bg-slate-50 p-3">
+  <div className="rounded-lg bg-slate-50 p-2">
     <p className="text-xs font-medium uppercase text-slate-500">{label}</p>
-    <p className="mt-1 text-lg font-semibold text-slate-900">{value}</p>
+    <p className="mt-0.5 text-sm font-semibold text-slate-900">{value}</p>
   </div>
 );
 

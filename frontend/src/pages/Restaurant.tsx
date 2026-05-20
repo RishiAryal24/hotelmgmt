@@ -20,6 +20,7 @@ import {
   useMenuModifierGroups,
   useMenuModifiers,
   useMenuRecipeIngredients,
+  useReprintRestaurantReceipt,
   useRequestRestaurantOrderApproval,
   useRestaurantOrderApprovalDecision,
   useRestaurantOrderApprovals,
@@ -130,6 +131,7 @@ const Restaurant: React.FC = () => {
   const requestApproval = useRequestRestaurantOrderApproval();
   const approvalDecision = useRestaurantOrderApprovalDecision();
   const settleOrder = useSettleRestaurantOrder();
+  const reprintRestaurantReceipt = useReprintRestaurantReceipt();
   const ticketAction = useKitchenTicketAction();
   const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState('orders');
@@ -169,6 +171,7 @@ const Restaurant: React.FC = () => {
       if (!query) return true;
       return [
         order.order_number,
+        order.receipt_number,
         order.order_type,
         order.status,
         order.table_details?.table_number,
@@ -794,7 +797,7 @@ const Restaurant: React.FC = () => {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[900px] text-left text-sm">
               <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
-                <tr><th className="py-3 pr-4">Order</th><th className="py-3 pr-4">Location</th><th className="py-3 pr-4">Status</th><th className="py-3 pr-4">Payment</th><th className="py-3 pr-4">Total</th><th className="py-3 pr-4">Actions</th></tr>
+                <tr><th className="py-3 pr-4">Order</th><th className="py-3 pr-4">Receipt</th><th className="py-3 pr-4">Location</th><th className="py-3 pr-4">Status</th><th className="py-3 pr-4">Payment</th><th className="py-3 pr-4">Total</th><th className="py-3 pr-4">Actions</th></tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {historyOrders.map((order) => (
@@ -803,18 +806,32 @@ const Restaurant: React.FC = () => {
                       <p className="font-medium text-slate-900">{order.order_number}</p>
                       <p className="text-xs text-slate-500">{order.order_type}</p>
                     </td>
+                    <td className="py-3 pr-4 font-medium text-slate-700">{order.receipt_number || '-'}</td>
                     <td className="py-3 pr-4">{getOrderLocation(order)}</td>
                     <td className="py-3 pr-4"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{order.status}</span></td>
                     <td className="py-3 pr-4">{order.payment_method || '-'}</td>
                     <td className="py-3 pr-4 font-medium">{formatMoney(order.grand_total, settings?.currency)}</td>
                     <td className="py-3 pr-4">
-                      <button onClick={() => setReceiptOrder(order)} className="rounded-xl bg-slate-800 px-3 py-2 text-xs font-medium text-white hover:bg-slate-900">
+                      <button
+                        onClick={() => {
+                          if (order.status === 'paid') {
+                            reprintRestaurantReceipt.mutate(
+                              { orderId: order.id, reason: 'Restaurant history reprint' },
+                              { onSuccess: (updatedOrder) => setReceiptOrder(updatedOrder) },
+                            );
+                          } else {
+                            setReceiptOrder(order);
+                          }
+                        }}
+                        disabled={reprintRestaurantReceipt.isPending}
+                        className="rounded-xl bg-slate-800 px-3 py-2 text-xs font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300"
+                      >
                         Receipt
                       </button>
                     </td>
                   </tr>
                 ))}
-                {historyOrders.length === 0 && <tr><td colSpan={6} className="py-6 text-center text-slate-500">No historical restaurant orders found.</td></tr>}
+                {historyOrders.length === 0 && <tr><td colSpan={7} className="py-6 text-center text-slate-500">No historical restaurant orders found.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -1135,7 +1152,7 @@ const Restaurant: React.FC = () => {
 
       {receiptOrder && (
         <ActionModal
-          title={`Receipt ${receiptOrder.order_number}`}
+          title={`Receipt ${receiptOrder.receipt_number || receiptOrder.order_number}`}
           description={getOrderLocation(receiptOrder)}
           onClose={() => setReceiptOrder(null)}
           maxWidthClassName="max-w-xl"
@@ -1169,13 +1186,16 @@ const ReceiptView = ({ order, currency }: { order: RestaurantOrder; currency?: s
     <div className="receipt-print rounded-2xl border border-slate-200 p-4 text-sm text-slate-800">
       <div className="border-b border-dashed border-slate-300 pb-3 text-center">
         <p className="text-lg font-bold text-slate-950">Restaurant Receipt</p>
-        <p className="mt-1 text-xs text-slate-500">{order.order_number}</p>
+        <p className="mt-1 text-xs text-slate-700">{order.receipt_number || '-'}</p>
+        <p className="mt-1 text-xs text-slate-500">Order {order.order_number}</p>
       </div>
       <div className="grid gap-2 border-b border-dashed border-slate-300 py-3 text-xs text-slate-600">
         <div className="flex justify-between gap-4"><span>Location</span><span className="text-right font-medium text-slate-900">{getOrderLocation(order)}</span></div>
         <div className="flex justify-between gap-4"><span>Status</span><span className="text-right font-medium text-slate-900">{order.status}</span></div>
         <div className="flex justify-between gap-4"><span>Payment</span><span className="text-right font-medium text-slate-900">{order.payment_method || '-'}</span></div>
+        {order.receipt_issued_at && <div className="flex justify-between gap-4"><span>Issued at</span><span className="text-right font-medium text-slate-900">{new Date(order.receipt_issued_at).toLocaleString()}</span></div>}
         {order.paid_at && <div className="flex justify-between gap-4"><span>Paid at</span><span className="text-right font-medium text-slate-900">{new Date(order.paid_at).toLocaleString()}</span></div>}
+        <div className="flex justify-between gap-4"><span>Reprints</span><span className="text-right font-medium text-slate-900">{order.receipt_reprint_count || 0}</span></div>
       </div>
       <div className="border-b border-dashed border-slate-300 py-3">
         <div className="space-y-2">

@@ -5,7 +5,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from bookings.models import Booking, GuestFolio, GuestFolioLine
-from restaurant.models import CashierCounter, CashierShift, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantOrderPayment, RestaurantTable
+from restaurant.models import CashierCounter, CashierShift, RestaurantOrder, RestaurantOrderApproval, RestaurantOrderLine, RestaurantOrderPayment, RestaurantReceiptReprint, RestaurantTable
 
 
 class RestaurantSettlementError(Exception):
@@ -22,6 +22,32 @@ class CashierShiftError(Exception):
 
 ACTIVE_ORDER_STATUSES = ['draft', 'sent_to_kitchen', 'preparing', 'served']
 APPROVAL_ACTION_STATUSES = ['draft', 'sent_to_kitchen', 'preparing', 'served']
+
+
+def _next_receipt_number(paid_at):
+    business_date = timezone.localtime(paid_at).date()
+    prefix = f'RCP-{business_date:%Y%m%d}-'
+    last_receipt = (
+        RestaurantOrder.objects.select_for_update()
+        .filter(receipt_number__startswith=prefix)
+        .order_by('-receipt_number')
+        .values_list('receipt_number', flat=True)
+        .first()
+    )
+    next_sequence = 1
+    if last_receipt:
+        try:
+            next_sequence = int(last_receipt.rsplit('-', 1)[1]) + 1
+        except (IndexError, ValueError):
+            next_sequence = RestaurantOrder.objects.filter(receipt_number__startswith=prefix).count() + 1
+    return f'{prefix}{next_sequence:04d}'
+
+
+def _ensure_restaurant_receipt(order):
+    if order.receipt_number:
+        return
+    order.receipt_number = _next_receipt_number(order.paid_at or timezone.now())
+    order.receipt_issued_at = order.paid_at or timezone.now()
 
 
 def get_order_active_total(order):
@@ -41,6 +67,7 @@ def get_open_cashier_shift(*, cashier, cashier_shift_id=None):
     return queryset.first()
 
 
+@transaction.atomic
 def settle_restaurant_order(order, *, payment_method=None, paid_amount=None, booking_id=None, posted_by=None, cashier_shift=None, payments=None):
     if order.status != 'served':
         raise RestaurantSettlementError('Only served orders can be settled')
@@ -80,7 +107,8 @@ def settle_restaurant_order(order, *, payment_method=None, paid_amount=None, boo
     order.status = 'paid'
     order.room_booking = room_booking
     order.cashier_shift = cashier_shift
-    order.save(update_fields=['paid_amount', 'payment_method', 'paid_at', 'status', 'room_booking', 'cashier_shift', 'updated_at'])
+    _ensure_restaurant_receipt(order)
+    order.save(update_fields=['paid_amount', 'payment_method', 'paid_at', 'status', 'room_booking', 'cashier_shift', 'receipt_number', 'receipt_issued_at', 'updated_at'])
     order.payments.all().delete()
     for payment in payment_rows:
         RestaurantOrderPayment.objects.create(
@@ -123,6 +151,22 @@ def settle_restaurant_order(order, *, payment_method=None, paid_amount=None, boo
     deduct_restaurant_order_inventory(order, posted_by=posted_by)
     post_restaurant_settlement(order, posted_by=posted_by)
     return order
+
+
+@transaction.atomic
+def record_restaurant_receipt_reprint(order, *, reprinted_by=None, cashier_shift=None, reason=''):
+    if order.status != 'paid':
+        raise RestaurantSettlementError('Only paid restaurant receipts can be reprinted')
+    _ensure_restaurant_receipt(order)
+    order.receipt_reprint_count += 1
+    order.save(update_fields=['receipt_number', 'receipt_issued_at', 'receipt_reprint_count', 'updated_at'])
+    return RestaurantReceiptReprint.objects.create(
+        order=order,
+        receipt_number=order.receipt_number,
+        reprinted_by=reprinted_by,
+        cashier_shift=cashier_shift or order.cashier_shift,
+        reason=reason,
+    )
 
 
 def update_table_status_after_order_move(table):
@@ -388,6 +432,52 @@ def _sum_order_payments(queryset):
     return queryset.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
 
 
+def _payment_total_row(method, label, restaurant_payments, folios):
+    restaurant_total = _sum_order_payments(restaurant_payments.filter(payment_method=method))
+    folio_total = _sum_payments(folios.filter(payment_method=method))
+    return {
+        'payment_method': method,
+        'label': label,
+        'restaurant_total': restaurant_total,
+        'folio_total': folio_total,
+        'total': restaurant_total + folio_total,
+    }
+
+
+def _cashier_shift_payment_rows(restaurant_orders, folios):
+    restaurant_rows = [
+        {
+            'source': 'restaurant',
+            'reference': payment.order.receipt_number or payment.order.order_number,
+            'guest_or_table': (
+                f'Table {payment.order.table.table_number}'
+                if payment.order.table_id
+                else f'Room {payment.order.room_booking.room.room_number}'
+                if payment.order.room_booking_id and payment.order.room_booking.room_id
+                else payment.order.get_order_type_display()
+            ),
+            'payment_method': payment.payment_method,
+            'amount': payment.amount,
+            'paid_at': payment.paid_at,
+        }
+        for payment in RestaurantOrderPayment.objects.filter(order__in=restaurant_orders)
+        .select_related('order', 'order__table', 'order__room_booking', 'order__room_booking__room')
+        .order_by('paid_at', 'created_at')
+    ]
+    folio_rows = [
+        {
+            'source': 'folio',
+            'reference': folio.folio_number,
+            'guest_or_table': f'Room {folio.booking.room.room_number} - {folio.booking.guest}',
+            'payment_method': folio.payment_method,
+            'amount': folio.paid_amount,
+            'paid_at': folio.paid_at,
+        }
+        for folio in folios.select_related('booking', 'booking__guest', 'booking__room').order_by('paid_at', 'created_at')
+    ]
+    return sorted(restaurant_rows + folio_rows, key=lambda row: row['paid_at'] or timezone.now())
+
+
 def calculate_cashier_shift_totals(shift, *, closed_at=None):
     end_time = closed_at or shift.closed_at or timezone.now()
     restaurant_orders = RestaurantOrder.objects.filter(status='paid').filter(
@@ -409,17 +499,36 @@ def calculate_cashier_shift_totals(shift, *, closed_at=None):
     expected_total = expected_cash + expected_card + expected_wallet + expected_bank_transfer + expected_room_posting
 
     facility_charges = GuestFolioLine.objects.filter(folio__cashier_shift=shift).exclude(source_module='restaurant_order')
+    payment_breakdown = [
+        _payment_total_row('cash', 'Cash', restaurant_payments, folios),
+        _payment_total_row('card', 'Card', restaurant_payments, folios),
+        _payment_total_row('wallet', 'Wallet', restaurant_payments, folios),
+        _payment_total_row('bank_transfer', 'Bank Transfer', restaurant_payments, folios),
+        {
+            'payment_method': 'room_posting',
+            'label': 'Room Posting',
+            'restaurant_total': expected_room_posting,
+            'folio_total': Decimal('0.00'),
+            'total': expected_room_posting,
+        },
+    ]
+    sales_total = sum((row['total'] for row in payment_breakdown), Decimal('0.00'))
 
     return {
         'restaurant_cash': restaurant_cash,
         'folio_cash': folio_cash,
         'facility_charges': facility_charges.aggregate(total=Sum('amount'))['total'] or Decimal('0.00'),
+        'opening_cash': shift.opening_cash,
+        'cash_sales': restaurant_cash + folio_cash,
         'expected_cash': expected_cash,
         'expected_card': expected_card,
         'expected_wallet': expected_wallet,
         'expected_bank_transfer': expected_bank_transfer,
         'expected_room_posting': expected_room_posting,
         'expected_total': expected_total,
+        'sales_total': sales_total,
+        'payment_breakdown': payment_breakdown,
+        'payment_rows': _cashier_shift_payment_rows(restaurant_orders, folios),
     }
 
 

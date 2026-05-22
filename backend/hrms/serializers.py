@@ -51,7 +51,13 @@ class PayrollRunSerializer(serializers.ModelSerializer):
     total_net_pay = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     journal_entry_number = serializers.CharField(source='journal_entry.entry_number', read_only=True)
     payment_journal_entry_number = serializers.CharField(source='payment_journal_entry.entry_number', read_only=True)
+    reversal_journal_entry_number = serializers.CharField(source='reversal_journal_entry.entry_number', read_only=True)
+    payment_reversal_journal_entry_number = serializers.CharField(source='payment_reversal_journal_entry.entry_number', read_only=True)
 
     class Meta:
         model = PayrollRun
         fields = '__all__'
+
+
+class PayrollRunReverseSerializer(serializers.Serializer):
+    reason = serializers.CharField(required=False, allow_blank=True)

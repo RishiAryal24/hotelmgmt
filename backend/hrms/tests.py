@@ -2,10 +2,11 @@ from datetime import date, time
 from decimal import Decimal
 
 from django_tenants.test.cases import TenantTestCase
+from django.utils import timezone
 
 from accounting.models import JournalEntry
 from hrms.models import Attendance, Employee, PayrollPeriod, Shift
-from hrms.services import cancel_payroll_run, approve_payroll_run, generate_payroll_run, post_payroll_run, settle_payroll_run
+from hrms.services import cancel_payroll_run, approve_payroll_run, generate_payroll_run, post_payroll_run, reverse_payroll_run, settle_payroll_run
 
 
 class EmployeeRecordTests(TenantTestCase):
@@ -78,8 +79,10 @@ class EmployeeRecordTests(TenantTestCase):
             attendance_date=date(2026, 5, 14),
         )
 
-        attendance.mark_clock_in()
-        attendance.mark_clock_out()
+        clock_in = timezone.make_aware(timezone.datetime(2026, 5, 14, 8, 5))
+        clock_out = timezone.make_aware(timezone.datetime(2026, 5, 14, 16, 0))
+        attendance.mark_clock_in(when=clock_in)
+        attendance.mark_clock_out(when=clock_out)
         attendance.refresh_from_db()
 
         self.assertEqual(attendance.status, 'present')
@@ -169,3 +172,69 @@ class EmployeeRecordTests(TenantTestCase):
         self.assertNotEqual(new_run.id, canceled_run.id)
         self.assertEqual(new_run.status, 'draft')
         self.assertEqual(new_run.lines.count(), 1)
+
+    def test_posted_payroll_run_can_be_reversed_with_reversal_journal(self):
+        employee = Employee.objects.create(
+            employee_id='EMP-PAY-004',
+            first_name='Reverse',
+            last_name='Posted',
+            department='Finance',
+            designation='Accountant',
+            hire_date=date(2026, 5, 1),
+            salary='31000.00',
+        )
+        Attendance.objects.create(employee=employee, attendance_date=date(2026, 5, 1), status='present')
+        period = PayrollPeriod.objects.create(name='Posted Reversal', start_date=date(2026, 5, 1), end_date=date(2026, 5, 31))
+        payroll_run = generate_payroll_run(period)
+        approve_payroll_run(payroll_run)
+        post_payroll_run(payroll_run)
+
+        reverse_payroll_run(payroll_run, reason='Incorrect attendance')
+
+        payroll_run.refresh_from_db()
+        period.refresh_from_db()
+        self.assertEqual(payroll_run.status, 'reversed')
+        self.assertEqual(payroll_run.reversal_reason, 'Incorrect attendance')
+        self.assertIsNotNone(payroll_run.reversed_at)
+        self.assertIsNotNone(payroll_run.reversal_journal_entry)
+        self.assertIsNone(payroll_run.payment_reversal_journal_entry)
+        self.assertEqual(period.status, 'draft')
+        self.assertTrue(JournalEntry.objects.filter(source_module='payroll_run_reversal', source_id=str(payroll_run.id)).exists())
+        original_debit = payroll_run.journal_entry.lines.get(account__code='5100').debit
+        reversal_credit = payroll_run.reversal_journal_entry.lines.get(account__code='5100').credit
+        self.assertEqual(reversal_credit, original_debit)
+
+    def test_paid_payroll_run_reversal_reverses_payment_and_payable(self):
+        employee = Employee.objects.create(
+            employee_id='EMP-PAY-005',
+            first_name='Reverse',
+            last_name='Paid',
+            department='Finance',
+            designation='Accountant',
+            hire_date=date(2026, 5, 1),
+            salary='31000.00',
+        )
+        Attendance.objects.create(employee=employee, attendance_date=date(2026, 5, 1), status='present')
+        period = PayrollPeriod.objects.create(name='Paid Reversal', start_date=date(2026, 5, 1), end_date=date(2026, 5, 31))
+        payroll_run = generate_payroll_run(period)
+        approve_payroll_run(payroll_run)
+        post_payroll_run(payroll_run)
+        settle_payroll_run(payroll_run, payment_method='bank_transfer', payment_reference='BANK-REV')
+
+        reverse_payroll_run(payroll_run, reason='Duplicate payroll')
+
+        payroll_run.refresh_from_db()
+        self.assertEqual(payroll_run.status, 'reversed')
+        self.assertIsNotNone(payroll_run.reversal_journal_entry)
+        self.assertIsNotNone(payroll_run.payment_reversal_journal_entry)
+        self.assertTrue(JournalEntry.objects.filter(source_module='payroll_payment_reversal', source_id=str(payroll_run.id)).exists())
+        payment_credit = payroll_run.payment_journal_entry.lines.get(account__code='1010').credit
+        payment_reversal_debit = payroll_run.payment_reversal_journal_entry.lines.get(account__code='1010').debit
+        self.assertEqual(payment_reversal_debit, payment_credit)
+
+    def test_draft_payroll_run_cannot_be_reversed(self):
+        period = PayrollPeriod.objects.create(name='Draft Reversal Block', start_date=date(2026, 5, 1), end_date=date(2026, 5, 31))
+        payroll_run = generate_payroll_run(period)
+
+        with self.assertRaises(ValueError):
+            reverse_payroll_run(payroll_run)

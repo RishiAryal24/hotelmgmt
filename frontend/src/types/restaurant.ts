@@ -202,6 +202,17 @@ export interface CashierShiftTotals {
   expected_bank_transfer: string;
   expected_room_posting: string;
   expected_total: string;
+  actual_cash: string;
+  actual_card: string;
+  actual_wallet: string;
+  actual_bank_transfer: string;
+  actual_room_posting: string;
+  cash_variance: string;
+  card_variance: string;
+  wallet_variance: string;
+  bank_transfer_variance: string;
+  room_posting_variance: string;
+  total_variance: string;
   sales_total: string;
   payment_breakdown: CashierShiftPaymentBreakdown[];
   payment_rows: CashierShiftPaymentRow[];
@@ -213,6 +224,8 @@ export interface CashierShiftPaymentBreakdown {
   restaurant_total: string;
   folio_total: string;
   total: string;
+  actual_total?: string | null;
+  variance?: string | null;
 }
 
 export interface CashierShiftPaymentRow {
@@ -249,7 +262,16 @@ export interface CashierShift {
   expected_room_posting: string;
   expected_total: string;
   actual_cash: string;
+  actual_card: string;
+  actual_wallet: string;
+  actual_bank_transfer: string;
+  actual_room_posting: string;
   cash_variance: string;
+  card_variance: string;
+  wallet_variance: string;
+  bank_transfer_variance: string;
+  room_posting_variance: string;
+  total_variance: string;
   opened_at: string;
   closed_at: string | null;
   notes: string;

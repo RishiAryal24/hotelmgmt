@@ -444,6 +444,24 @@ def _payment_total_row(method, label, restaurant_payments, folios):
     }
 
 
+def _reconciliation_amounts(shift):
+    actual_by_method = {
+        'cash': shift.actual_cash,
+        'card': shift.actual_card,
+        'wallet': shift.actual_wallet,
+        'bank_transfer': shift.actual_bank_transfer,
+        'room_posting': shift.actual_room_posting,
+    }
+    variance_by_method = {
+        'cash': shift.cash_variance,
+        'card': shift.card_variance,
+        'wallet': shift.wallet_variance,
+        'bank_transfer': shift.bank_transfer_variance,
+        'room_posting': shift.room_posting_variance,
+    }
+    return actual_by_method, variance_by_method
+
+
 def _cashier_shift_payment_rows(restaurant_orders, folios):
     restaurant_rows = [
         {
@@ -512,6 +530,15 @@ def calculate_cashier_shift_totals(shift, *, closed_at=None):
             'total': expected_room_posting,
         },
     ]
+    actual_by_method, variance_by_method = _reconciliation_amounts(shift)
+    if shift.status == 'closed':
+        for row in payment_breakdown:
+            row['actual_total'] = actual_by_method[row['payment_method']]
+            row['variance'] = variance_by_method[row['payment_method']]
+    else:
+        for row in payment_breakdown:
+            row['actual_total'] = None
+            row['variance'] = None
     sales_total = sum((row['total'] for row in payment_breakdown), Decimal('0.00'))
 
     return {
@@ -526,6 +553,17 @@ def calculate_cashier_shift_totals(shift, *, closed_at=None):
         'expected_bank_transfer': expected_bank_transfer,
         'expected_room_posting': expected_room_posting,
         'expected_total': expected_total,
+        'actual_cash': shift.actual_cash,
+        'actual_card': shift.actual_card,
+        'actual_wallet': shift.actual_wallet,
+        'actual_bank_transfer': shift.actual_bank_transfer,
+        'actual_room_posting': shift.actual_room_posting,
+        'cash_variance': shift.cash_variance,
+        'card_variance': shift.card_variance,
+        'wallet_variance': shift.wallet_variance,
+        'bank_transfer_variance': shift.bank_transfer_variance,
+        'room_posting_variance': shift.room_posting_variance,
+        'total_variance': shift.total_variance,
         'sales_total': sales_total,
         'payment_breakdown': payment_breakdown,
         'payment_rows': _cashier_shift_payment_rows(restaurant_orders, folios),
@@ -552,7 +590,16 @@ def open_cashier_shift(*, cashier, counter, opening_cash=0, business_date=None, 
 
 
 @transaction.atomic
-def close_cashier_shift(shift, *, actual_cash, notes=''):
+def close_cashier_shift(
+    shift,
+    *,
+    actual_cash,
+    actual_card=None,
+    actual_wallet=None,
+    actual_bank_transfer=None,
+    actual_room_posting=None,
+    notes='',
+):
     if shift.status != 'open':
         raise CashierShiftError('Only open shifts can be closed.')
 
@@ -565,7 +612,22 @@ def close_cashier_shift(shift, *, actual_cash, notes=''):
     shift.expected_room_posting = totals['expected_room_posting']
     shift.expected_total = totals['expected_total']
     shift.actual_cash = Decimal(str(actual_cash or 0))
+    shift.actual_card = Decimal(str(actual_card if actual_card is not None else shift.expected_card))
+    shift.actual_wallet = Decimal(str(actual_wallet if actual_wallet is not None else shift.expected_wallet))
+    shift.actual_bank_transfer = Decimal(str(actual_bank_transfer if actual_bank_transfer is not None else shift.expected_bank_transfer))
+    shift.actual_room_posting = Decimal(str(actual_room_posting if actual_room_posting is not None else shift.expected_room_posting))
     shift.cash_variance = shift.actual_cash - shift.expected_cash
+    shift.card_variance = shift.actual_card - shift.expected_card
+    shift.wallet_variance = shift.actual_wallet - shift.expected_wallet
+    shift.bank_transfer_variance = shift.actual_bank_transfer - shift.expected_bank_transfer
+    shift.room_posting_variance = shift.actual_room_posting - shift.expected_room_posting
+    shift.total_variance = (
+        shift.cash_variance
+        + shift.card_variance
+        + shift.wallet_variance
+        + shift.bank_transfer_variance
+        + shift.room_posting_variance
+    )
     shift.status = 'closed'
     shift.closed_at = closed_at
     if notes:
@@ -579,7 +641,16 @@ def close_cashier_shift(shift, *, actual_cash, notes=''):
             'expected_room_posting',
             'expected_total',
             'actual_cash',
+            'actual_card',
+            'actual_wallet',
+            'actual_bank_transfer',
+            'actual_room_posting',
             'cash_variance',
+            'card_variance',
+            'wallet_variance',
+            'bank_transfer_variance',
+            'room_posting_variance',
+            'total_variance',
             'status',
             'closed_at',
             'notes',

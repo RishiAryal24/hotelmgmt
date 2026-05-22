@@ -49,7 +49,7 @@ def generate_payroll_run(period: PayrollPeriod):
     if period.end_date < period.start_date:
         raise ValueError('Payroll period end date cannot be before start date.')
 
-    payroll_run = PayrollRun.objects.filter(period=period).exclude(status='canceled').order_by('-generated_at').first()
+    payroll_run = PayrollRun.objects.filter(period=period).exclude(status__in=['canceled', 'reversed']).order_by('-generated_at').first()
     created = payroll_run is None
     if created:
         payroll_run = PayrollRun.objects.create(period=period)
@@ -128,6 +128,8 @@ def cancel_payroll_run(payroll_run: PayrollRun):
 def approve_payroll_run(payroll_run: PayrollRun):
     if payroll_run.status == 'canceled':
         raise ValueError('Canceled payroll runs cannot be approved.')
+    if payroll_run.status == 'reversed':
+        raise ValueError('Reversed payroll runs cannot be approved.')
     if payroll_run.status in ['posted', 'paid']:
         raise ValueError('Posted payroll runs are already finalized.')
     payroll_run.status = 'approved'
@@ -140,6 +142,8 @@ def approve_payroll_run(payroll_run: PayrollRun):
 def post_payroll_run(payroll_run: PayrollRun, posted_by=None):
     if payroll_run.status == 'canceled':
         raise ValueError('Canceled payroll runs cannot be posted.')
+    if payroll_run.status == 'reversed':
+        raise ValueError('Reversed payroll runs cannot be posted.')
     if payroll_run.status in ['posted', 'paid']:
         return payroll_run.journal_entry
     if not payroll_run.lines.exists():
@@ -180,6 +184,8 @@ def post_payroll_run(payroll_run: PayrollRun, posted_by=None):
 def settle_payroll_run(payroll_run: PayrollRun, payment_method='bank_transfer', payment_reference='', posted_by=None):
     if payroll_run.status == 'paid':
         return payroll_run.payment_journal_entry
+    if payroll_run.status == 'reversed':
+        raise ValueError('Reversed payroll runs cannot be settled.')
     if payroll_run.status != 'posted':
         raise ValueError('Only posted payroll runs can be settled.')
     if not payroll_run.journal_entry_id:
@@ -224,3 +230,75 @@ def settle_payroll_run(payroll_run: PayrollRun, payment_method='bank_transfer', 
         ],
     )
     return journal_entry
+
+
+def _reverse_journal_entry(original_entry, *, description, source_module, source_id, posted_by=None):
+    if not original_entry:
+        return None
+    lines = [
+        {
+            'account': line.account,
+            'description': f'Reversal: {line.description}',
+            'debit': line.credit,
+            'credit': line.debit,
+        }
+        for line in original_entry.lines.select_related('account').all()
+    ]
+    return post_journal_entry(
+        description=description,
+        source_module=source_module,
+        source_id=source_id,
+        posted_by=posted_by,
+        lines=lines,
+    )
+
+
+@transaction.atomic
+def reverse_payroll_run(payroll_run: PayrollRun, *, reason='', posted_by=None):
+    if payroll_run.status not in ['posted', 'paid']:
+        raise ValueError('Only posted or paid payroll runs can be reversed.')
+    if payroll_run.status == 'paid' and not payroll_run.payment_journal_entry_id:
+        raise ValueError('Paid payroll run is missing its payment journal.')
+    if not payroll_run.journal_entry_id:
+        raise ValueError('Posted payroll run is missing its payroll journal.')
+
+    payment_reversal = None
+    if payroll_run.status == 'paid':
+        payment_reversal = _reverse_journal_entry(
+            payroll_run.payment_journal_entry,
+            description=f'Reverse payroll payment for {payroll_run.period.name}',
+            source_module='payroll_payment_reversal',
+            source_id=str(payroll_run.id),
+            posted_by=posted_by,
+        )
+
+    payroll_reversal = _reverse_journal_entry(
+        payroll_run.journal_entry,
+        description=f'Reverse payroll payable for {payroll_run.period.name}',
+        source_module='payroll_run_reversal',
+        source_id=str(payroll_run.id),
+        posted_by=posted_by,
+    )
+
+    payroll_run.status = 'reversed'
+    payroll_run.reversed_at = timezone.now()
+    payroll_run.reversal_reason = reason
+    payroll_run.reversal_journal_entry = payroll_reversal
+    payroll_run.payment_reversal_journal_entry = payment_reversal
+    payroll_run.save(
+        update_fields=[
+            'status',
+            'reversed_at',
+            'reversal_reason',
+            'reversal_journal_entry',
+            'payment_reversal_journal_entry',
+            'updated_at',
+        ],
+    )
+
+    has_active_run = PayrollRun.objects.filter(period=payroll_run.period).exclude(status__in=['canceled', 'reversed']).exists()
+    if not has_active_run:
+        payroll_run.period.status = 'draft'
+        payroll_run.period.save(update_fields=['status', 'updated_at'])
+
+    return payroll_run

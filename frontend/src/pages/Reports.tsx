@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
 import { useBookings, useGuestFolios, useRooms } from '../hooks/bookings';
 import { useInventoryItems, useStockMovements } from '../hooks/inventory';
@@ -10,6 +11,17 @@ import { formatMoney, getTenantSettings } from '../services/tenantSettings';
 import { downloadCsv } from '../utils/csv';
 
 type ReportTab = 'occupancy' | 'revenue' | 'restaurant' | 'inventory' | 'cashier';
+type CashierExceptionType = 'all' | 'variance' | 'reprint' | 'approval';
+type CashierExceptionRow = {
+  type: 'Shift Variance' | 'Receipt Reprint' | 'Approval';
+  reference: string;
+  actor: string;
+  context: string;
+  status: string;
+  amount: number;
+  occurredAt: string;
+  detail: string;
+};
 
 const Reports = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -24,12 +36,16 @@ const Reports = () => {
   const { data: stockMovements } = useStockMovements();
   const { data: journalEntries } = useJournalEntries();
   const [activeTab, setActiveTab] = useState<ReportTab>((searchParams.get('tab') as ReportTab | null) || 'occupancy');
+  const [cashierExceptionType, setCashierExceptionType] = useState<CashierExceptionType>('all');
+  const [cashierDateFrom, setCashierDateFrom] = useState('');
+  const [cashierDateTo, setCashierDateTo] = useState('');
+  const [summaryOpen, setSummaryOpen] = useState(false);
 
   const today = new Date().toISOString().slice(0, 10);
   const paidFolios = folios?.filter((folio) => folio.status === 'paid') || [];
   const paidOrders = restaurantOrders?.filter((order) => order.status === 'paid') || [];
   const closedShifts = cashierShifts?.filter((shift) => shift.status === 'closed') || [];
-  const varianceShifts = closedShifts.filter((shift) => Number(shift.cash_variance || 0) !== 0);
+  const varianceShifts = closedShifts.filter((shift) => Number(shift.total_variance || shift.cash_variance || 0) !== 0);
   const receiptReprints = paidOrders.flatMap((order) =>
     (order.receipt_reprints || []).map((reprint) => ({
       ...reprint,
@@ -39,6 +55,58 @@ const Reports = () => {
     })),
   );
   const exceptionApprovals = approvals?.filter((approval) => ['void_line', 'discount', 'complimentary'].includes(approval.action_type)) || [];
+  const isWithinCashierDateRange = (dateValue: string | null | undefined) => {
+    if (!dateValue) return false;
+    const date = dateValue.slice(0, 10);
+    if (cashierDateFrom && date < cashierDateFrom) return false;
+    if (cashierDateTo && date > cashierDateTo) return false;
+    return true;
+  };
+  const cashierExceptionRows = useMemo<CashierExceptionRow[]>(() => {
+    const rows: CashierExceptionRow[] = [
+      ...varianceShifts.map((shift) => ({
+        type: 'Shift Variance' as const,
+        reference: shift.business_date,
+        actor: shift.cashier_email || '-',
+        context: shift.counter_details?.name || '-',
+        status: shift.status,
+        amount: Number(shift.total_variance || shift.cash_variance || 0),
+        occurredAt: shift.closed_at || '',
+        detail: [
+          `Cash ${formatMoney(shift.cash_variance, settings?.currency)}`,
+          `Card ${formatMoney(shift.card_variance, settings?.currency)}`,
+          `Wallet ${formatMoney(shift.wallet_variance, settings?.currency)}`,
+          `Bank ${formatMoney(shift.bank_transfer_variance, settings?.currency)}`,
+          `Room ${formatMoney(shift.room_posting_variance, settings?.currency)}`,
+        ].join(' | '),
+      })),
+      ...receiptReprints.map((reprint) => ({
+        type: 'Receipt Reprint' as const,
+        reference: reprint.receipt_number,
+        actor: reprint.reprinted_by_email || '-',
+        context: reprint.order_number,
+        status: reprint.reason || '-',
+        amount: 0,
+        occurredAt: reprint.reprinted_at,
+        detail: reprint.reason || 'Receipt copy issued',
+      })),
+      ...exceptionApprovals.map((approval) => ({
+        type: 'Approval' as const,
+        reference: approval.order_details?.order_number || approval.order,
+        actor: approval.requested_by_email || '-',
+        context: approval.action_type_display || approval.action_type,
+        status: approval.status,
+        amount: Number(approval.discount_amount || 0),
+        occurredAt: approval.decided_at || approval.created_at,
+        detail: approval.reason || approval.decision_notes || '-',
+      })),
+    ];
+
+    return rows
+      .filter((row) => cashierExceptionType === 'all' || row.type.toLowerCase().includes(cashierExceptionType))
+      .filter((row) => isWithinCashierDateRange(row.occurredAt))
+      .sort((a, b) => new Date(b.occurredAt || 0).getTime() - new Date(a.occurredAt || 0).getTime());
+  }, [cashierDateFrom, cashierDateTo, cashierExceptionType, exceptionApprovals, receiptReprints, settings?.currency, varianceShifts]);
   const openFolios = folios?.filter((folio) => folio.status === 'open') || [];
   const lowStockItems = inventoryItems?.filter((item) => item.is_low_stock) || [];
   const purchaseMovements = stockMovements?.filter((movement) => movement.movement_type === 'purchase') || [];
@@ -76,7 +144,7 @@ const Reports = () => {
       postedJournalCount,
       closedShifts: closedShifts.length,
       varianceShifts: varianceShifts.length,
-      totalCashVariance: varianceShifts.reduce((sum, shift) => sum + Number(shift.cash_variance || 0), 0),
+      totalVariance: varianceShifts.reduce((sum, shift) => sum + Number(shift.total_variance || shift.cash_variance || 0), 0),
       receiptReprints: receiptReprints.length,
       pendingApprovals: exceptionApprovals.filter((approval) => approval.status === 'pending').length,
       totalDiscountApproved: exceptionApprovals
@@ -122,7 +190,7 @@ const Reports = () => {
     return Array.from(rows.values()).sort((a, b) => b.total - a.total);
   }, [paidOrders]);
 
-  const bookingStatusRows = [
+  const bookingStatusRows: Array<[string, number]> = [
     ['Confirmed', bookings?.filter((booking) => booking.status === 'confirmed').length || 0],
     ['Checked In', bookings?.filter((booking) => booking.status === 'checked_in').length || 0],
     ['Checked Out', bookings?.filter((booking) => booking.status === 'checked_out').length || 0],
@@ -174,36 +242,17 @@ const Reports = () => {
     if (activeTab === 'cashier') {
       downloadCsv(
         `cashier-exceptions-report-${today}.csv`,
-        ['Type', 'Reference', 'Cashier/User', 'Counter/Context', 'Status/Method', 'Amount/Variance', 'Date/Time'],
-        [
-          ...closedShifts.map((shift) => [
-            'Shift',
-            shift.id,
-            shift.cashier_email || '',
-            shift.counter_details?.name || '',
-            shift.status,
-            shift.cash_variance,
-            shift.closed_at || '',
-          ]),
-          ...receiptReprints.map((reprint) => [
-            'Receipt Reprint',
-            reprint.receipt_number,
-            reprint.reprinted_by_email || '',
-            reprint.order_number,
-            reprint.reason || '',
-            '',
-            reprint.reprinted_at,
-          ]),
-          ...exceptionApprovals.map((approval) => [
-            'Approval',
-            approval.order_details?.order_number || approval.order,
-            approval.requested_by_email || '',
-            approval.action_type_display || approval.action_type,
-            approval.status,
-            approval.discount_amount,
-            approval.created_at,
-          ]),
-        ],
+        ['Type', 'Reference', 'Actor', 'Context', 'Status', 'Amount', 'Date/Time', 'Detail'],
+        cashierExceptionRows.map((row) => [
+          row.type,
+          row.reference,
+          row.actor,
+          row.context,
+          row.status,
+          row.amount.toFixed(2),
+          row.occurredAt,
+          row.detail,
+        ]),
       );
       return;
     }
@@ -243,6 +292,22 @@ const Reports = () => {
           >
             Export CSV
           </button>
+          <button
+            type="button"
+            onClick={() => setSummaryOpen(true)}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+          >
+            Management PDF
+          </button>
+          {activeTab === 'cashier' && (
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              Print
+            </button>
+          )}
         </div>
       </div>
 
@@ -366,11 +431,58 @@ const Reports = () => {
           <MetricGrid
             metrics={[
               ['Closed Shifts', reportData.closedShifts, 'Cashier shifts closed'],
-              ['Variance Shifts', reportData.varianceShifts, 'Non-zero cash variance'],
-              ['Cash Variance', formatMoney(reportData.totalCashVariance, settings?.currency), 'Net cash over/short'],
+              ['Variance Shifts', reportData.varianceShifts, 'Any non-zero method variance'],
+              ['Total Variance', formatMoney(reportData.totalVariance, settings?.currency), 'Net over/short across methods'],
               ['Receipt Reprints', reportData.receiptReprints, 'Paid restaurant receipts reprinted'],
             ]}
           />
+
+          <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-4">
+            <label className="text-xs font-semibold uppercase text-slate-500">
+              Type
+              <select
+                value={cashierExceptionType}
+                onChange={(event) => setCashierExceptionType(event.target.value as CashierExceptionType)}
+                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal normal-case text-slate-800"
+              >
+                <option value="all">All exceptions</option>
+                <option value="variance">Shift variances</option>
+                <option value="reprint">Receipt reprints</option>
+                <option value="approval">Approvals</option>
+              </select>
+            </label>
+            <label className="text-xs font-semibold uppercase text-slate-500">
+              From
+              <input
+                type="date"
+                value={cashierDateFrom}
+                onChange={(event) => setCashierDateFrom(event.target.value)}
+                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal text-slate-800"
+              />
+            </label>
+            <label className="text-xs font-semibold uppercase text-slate-500">
+              To
+              <input
+                type="date"
+                value={cashierDateTo}
+                onChange={(event) => setCashierDateTo(event.target.value)}
+                className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal text-slate-800"
+              />
+            </label>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setCashierExceptionType('all');
+                  setCashierDateFrom('');
+                  setCashierDateTo('');
+                }}
+                className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Clear filters
+              </button>
+            </div>
+          </div>
 
           <RowsTable headers={['Payment Method', 'Restaurant', 'Rooms/Folios', 'Total']}>
             {paymentMethodRows.map((row) => (
@@ -383,16 +495,43 @@ const Reports = () => {
             ))}
           </RowsTable>
 
-          <RowsTable headers={['Shift', 'Cashier', 'Counter', 'Expected Cash', 'Actual Cash', 'Variance']}>
+          <RowsTable headers={['Type', 'Reference', 'Actor', 'Context', 'Status', 'Amount', 'Occurred', 'Detail']}>
+            {cashierExceptionRows.slice(0, 50).map((row, index) => (
+              <tr key={`${row.type}-${row.reference}-${row.occurredAt}-${index}`}>
+                <td className="px-4 py-3 font-medium text-slate-900">{row.type}</td>
+                <td className="px-4 py-3 text-right">{row.reference}</td>
+                <td className="px-4 py-3 text-right">{row.actor}</td>
+                <td className="px-4 py-3 text-right">{row.context}</td>
+                <td className="px-4 py-3 text-right capitalize">{row.status}</td>
+                <td className={`px-4 py-3 text-right font-semibold ${row.amount < 0 ? 'text-rose-700' : row.amount > 0 ? 'text-emerald-700' : 'text-slate-900'}`}>
+                  {row.amount ? formatMoney(row.amount, settings?.currency) : '-'}
+                </td>
+                <td className="px-4 py-3 text-right">{row.occurredAt ? new Date(row.occurredAt).toLocaleString() : '-'}</td>
+                <td className="px-4 py-3 text-right">{row.detail}</td>
+              </tr>
+            ))}
+            {!cashierExceptionRows.length && <EmptyRow columns={8} label="No cashier exceptions match the current filters." />}
+          </RowsTable>
+
+          <RowsTable headers={['Shift', 'Cashier', 'Counter', 'Expected', 'Counted', 'Total Variance']}>
             {closedShifts.slice(0, 12).map((shift) => (
               <tr key={shift.id}>
                 <td className="px-4 py-3 font-medium text-slate-900">{shift.business_date}</td>
                 <td className="px-4 py-3 text-right">{shift.cashier_email || '-'}</td>
                 <td className="px-4 py-3 text-right">{shift.counter_details?.name || '-'}</td>
-                <td className="px-4 py-3 text-right">{formatMoney(shift.expected_cash, settings?.currency)}</td>
-                <td className="px-4 py-3 text-right">{formatMoney(shift.actual_cash, settings?.currency)}</td>
-                <td className={`px-4 py-3 text-right font-semibold ${Number(shift.cash_variance || 0) === 0 ? 'text-slate-900' : 'text-rose-700'}`}>
-                  {formatMoney(shift.cash_variance, settings?.currency)}
+                <td className="px-4 py-3 text-right">{formatMoney(shift.expected_total, settings?.currency)}</td>
+                <td className="px-4 py-3 text-right">
+                  {formatMoney(
+                    Number(shift.actual_cash || 0) +
+                      Number(shift.actual_card || 0) +
+                      Number(shift.actual_wallet || 0) +
+                      Number(shift.actual_bank_transfer || 0) +
+                      Number(shift.actual_room_posting || 0),
+                    settings?.currency,
+                  )}
+                </td>
+                <td className={`px-4 py-3 text-right font-semibold ${Number(shift.total_variance || shift.cash_variance || 0) === 0 ? 'text-slate-900' : 'text-rose-700'}`}>
+                  {formatMoney(shift.total_variance || shift.cash_variance, settings?.currency)}
                 </td>
               </tr>
             ))}
@@ -426,6 +565,30 @@ const Reports = () => {
             {!exceptionApprovals.length && <EmptyRow columns={6} label="No void, discount, or complimentary approvals yet." />}
           </RowsTable>
         </section>
+      )}
+
+      {summaryOpen && (
+        <ActionModal title="Management summary" onClose={() => setSummaryOpen(false)} maxWidthClassName="max-w-5xl">
+          <ManagementSummary
+            hotelName={settings?.name || 'Hotel'}
+            currency={settings?.currency}
+            reportData={reportData}
+            bookingStatusRows={bookingStatusRows}
+            paymentMethodRows={paymentMethodRows}
+            restaurantItemSales={restaurantItemSales}
+            lowStockItems={lowStockItems}
+            cashierExceptionRows={cashierExceptionRows}
+            generatedAt={new Date().toLocaleString()}
+          />
+          <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4 print:hidden">
+            <button type="button" onClick={() => setSummaryOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              Close
+            </button>
+            <button type="button" onClick={() => window.print()} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900">
+              Print / Save PDF
+            </button>
+          </div>
+        </ActionModal>
       )}
     </div>
   );
@@ -468,6 +631,158 @@ const EmptyRow = ({ columns, label }: { columns: number; label: string }) => (
       {label}
     </td>
   </tr>
+);
+
+const ManagementSummary = ({
+  hotelName,
+  currency,
+  reportData,
+  bookingStatusRows,
+  paymentMethodRows,
+  restaurantItemSales,
+  lowStockItems,
+  cashierExceptionRows,
+  generatedAt,
+}: {
+  hotelName: string;
+  currency?: string;
+  reportData: {
+    totalRooms: number;
+    occupiedRooms: number;
+    occupancyRate: number;
+    availableRooms: number;
+    arrivalsToday: number;
+    departuresToday: number;
+    activeBookings: number;
+    roomRevenue: number;
+    restaurantRevenue: number;
+    totalRevenue: number;
+    openFolioValue: number;
+    paidOrders: number;
+    averageTicket: number;
+    purchaseValue: number;
+    inventorySaleValue: number;
+    lowStockItems: number;
+    closedShifts: number;
+    varianceShifts: number;
+    totalVariance: number;
+    receiptReprints: number;
+    pendingApprovals: number;
+    totalDiscountApproved: number;
+  };
+  bookingStatusRows: Array<[string, string | number]>;
+  paymentMethodRows: Array<{ method: string; label: string; restaurantTotal: number; folioTotal: number; total: number }>;
+  restaurantItemSales: Array<{ name: string; quantity: number; total: number }>;
+  lowStockItems: Array<{ id: string; name: string; sku: string; current_stock: string; unit: string; reorder_level: string }>;
+  cashierExceptionRows: CashierExceptionRow[];
+  generatedAt: string;
+}) => (
+  <div className="receipt-print grid gap-4 text-sm text-slate-800">
+    <div className="print-header border-b border-slate-200 pb-3 text-center">
+      <h2 className="text-xl font-bold text-slate-900">{hotelName}</h2>
+      <p className="mt-1 text-xs font-semibold uppercase text-slate-600">Management Summary</p>
+      <p className="mt-1 text-xs text-slate-500">Generated {generatedAt}</p>
+    </div>
+
+    <div className="print-metrics grid gap-2 md:grid-cols-4">
+      <SummaryMetric label="Occupancy" value={`${reportData.occupancyRate}%`} detail={`${reportData.occupiedRooms}/${reportData.totalRooms} rooms`} />
+      <SummaryMetric label="Total Revenue" value={formatMoney(reportData.totalRevenue, currency)} detail="Rooms + restaurant" />
+      <SummaryMetric label="Open Folios" value={formatMoney(reportData.openFolioValue, currency)} detail="Awaiting settlement" />
+      <SummaryMetric label="Cashier Variance" value={formatMoney(reportData.totalVariance, currency)} detail={`${reportData.varianceShifts} shifts`} />
+      <SummaryMetric label="Arrivals" value={String(reportData.arrivalsToday)} detail="Due today" />
+      <SummaryMetric label="Departures" value={String(reportData.departuresToday)} detail="Due today" />
+      <SummaryMetric label="Restaurant Avg" value={formatMoney(reportData.averageTicket, currency)} detail={`${reportData.paidOrders} paid orders`} />
+      <SummaryMetric label="Low Stock" value={String(reportData.lowStockItems)} detail="Items at reorder" />
+    </div>
+
+    <div className="print-section grid gap-4 md:grid-cols-2">
+      <SummaryTable title="Booking Status" headers={['Status', 'Count']}>
+        {bookingStatusRows.map(([status, count]) => (
+          <tr key={status}><td className="py-2 pr-3">{status}</td><td className="py-2 pr-3 text-right font-semibold">{count}</td></tr>
+        ))}
+      </SummaryTable>
+      <SummaryTable title="Revenue Mix" headers={['Source', 'Amount']}>
+        <tr><td className="py-2 pr-3">Room revenue</td><td className="py-2 pr-3 text-right font-semibold">{formatMoney(reportData.roomRevenue, currency)}</td></tr>
+        <tr><td className="py-2 pr-3">Restaurant revenue</td><td className="py-2 pr-3 text-right font-semibold">{formatMoney(reportData.restaurantRevenue, currency)}</td></tr>
+        <tr><td className="py-2 pr-3">Inventory purchases</td><td className="py-2 pr-3 text-right font-semibold">{formatMoney(reportData.purchaseValue, currency)}</td></tr>
+        <tr><td className="py-2 pr-3">Inventory sale cost</td><td className="py-2 pr-3 text-right font-semibold">{formatMoney(reportData.inventorySaleValue, currency)}</td></tr>
+      </SummaryTable>
+    </div>
+
+    <SummaryTable title="Payment Methods" headers={['Method', 'Restaurant', 'Rooms/Folios', 'Total']}>
+      {paymentMethodRows.map((row) => (
+        <tr key={row.method}>
+          <td className="py-2 pr-3">{row.label}</td>
+          <td className="py-2 pr-3 text-right">{formatMoney(row.restaurantTotal, currency)}</td>
+          <td className="py-2 pr-3 text-right">{formatMoney(row.folioTotal, currency)}</td>
+          <td className="py-2 pr-3 text-right font-semibold">{formatMoney(row.total, currency)}</td>
+        </tr>
+      ))}
+    </SummaryTable>
+
+    <div className="print-section grid gap-4 md:grid-cols-2">
+      <SummaryTable title="Top Restaurant Items" headers={['Item', 'Qty', 'Sales']}>
+        {restaurantItemSales.slice(0, 8).map((row) => (
+          <tr key={row.name}><td className="py-2 pr-3">{row.name}</td><td className="py-2 pr-3 text-right">{row.quantity}</td><td className="py-2 pr-3 text-right font-semibold">{formatMoney(row.total, currency)}</td></tr>
+        ))}
+        {!restaurantItemSales.length && <tr><td colSpan={3} className="py-4 text-center text-slate-500">No restaurant sales yet.</td></tr>}
+      </SummaryTable>
+      <SummaryTable title="Low Stock Watch" headers={['Item', 'Stock', 'Reorder']}>
+        {lowStockItems.slice(0, 8).map((item) => (
+          <tr key={item.id}>
+            <td className="py-2 pr-3">{item.name}<span className="block text-xs text-slate-500">{item.sku}</span></td>
+            <td className="py-2 pr-3 text-right">{Number(item.current_stock).toLocaleString()} {item.unit}</td>
+            <td className="py-2 pr-3 text-right font-semibold">{Number(item.reorder_level).toLocaleString()}</td>
+          </tr>
+        ))}
+        {!lowStockItems.length && <tr><td colSpan={3} className="py-4 text-center text-slate-500">No low-stock items.</td></tr>}
+      </SummaryTable>
+    </div>
+
+    <SummaryTable title="Cashier Exceptions" headers={['Type', 'Reference', 'Actor', 'Amount', 'Occurred']}>
+      {cashierExceptionRows.slice(0, 10).map((row, index) => (
+        <tr key={`${row.type}-${row.reference}-${index}`}>
+          <td className="py-2 pr-3">{row.type}</td>
+          <td className="py-2 pr-3">{row.reference}</td>
+          <td className="py-2 pr-3">{row.actor}</td>
+          <td className="py-2 pr-3 text-right font-semibold">{row.amount ? formatMoney(row.amount, currency) : '-'}</td>
+          <td className="py-2 pr-3 text-right">{row.occurredAt ? new Date(row.occurredAt).toLocaleString() : '-'}</td>
+        </tr>
+      ))}
+      {!cashierExceptionRows.length && <tr><td colSpan={5} className="py-4 text-center text-slate-500">No cashier exceptions in current filters.</td></tr>}
+    </SummaryTable>
+
+    <div className="print-section grid gap-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-700 md:grid-cols-4">
+      <span>Closed shifts: <strong>{reportData.closedShifts}</strong></span>
+      <span>Receipt reprints: <strong>{reportData.receiptReprints}</strong></span>
+      <span>Pending approvals: <strong>{reportData.pendingApprovals}</strong></span>
+      <span>Approved discounts: <strong>{formatMoney(reportData.totalDiscountApproved, currency)}</strong></span>
+    </div>
+  </div>
+);
+
+const SummaryMetric = ({ label, value, detail }: { label: string; value: string; detail: string }) => (
+  <div className="rounded-lg bg-slate-50 p-3">
+    <p className="text-xs uppercase text-slate-500">{label}</p>
+    <p className="mt-1 text-lg font-bold text-slate-900">{value}</p>
+    <p className="mt-1 text-xs text-slate-500">{detail}</p>
+  </div>
+);
+
+const SummaryTable = ({ title, headers, children }: { title: string; headers: string[]; children: React.ReactNode }) => (
+  <div className="print-section overflow-x-auto">
+    <h3 className="mb-2 text-sm font-bold text-slate-900">{title}</h3>
+    <table className="w-full text-left text-xs">
+      <thead className="border-b border-slate-200 uppercase text-slate-500">
+        <tr>
+          {headers.map((header, index) => (
+            <th key={header} className={`py-2 pr-3 ${index > 0 ? 'text-right' : ''}`}>{header}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-slate-100">{children}</tbody>
+    </table>
+  </div>
 );
 
 export default Reports;

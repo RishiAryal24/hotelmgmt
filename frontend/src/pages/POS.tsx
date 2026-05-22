@@ -94,7 +94,14 @@ const POS: React.FC = () => {
   const [addingFacilityAmenity, setAddingFacilityAmenity] = useState(false);
   const [addingFacilityService, setAddingFacilityService] = useState(false);
   const [closingShift, setClosingShift] = useState(false);
-  const [closeShiftForm, setCloseShiftForm] = useState({ actual_cash: '', notes: '' });
+  const [closeShiftForm, setCloseShiftForm] = useState({
+    actual_cash: '',
+    actual_card: '',
+    actual_wallet: '',
+    actual_bank_transfer: '',
+    actual_room_posting: '',
+    notes: '',
+  });
   const [closedShiftReport, setClosedShiftReport] = useState<CashierShift | null>(null);
   const [selectedFolioReport, setSelectedFolioReport] = useState<GuestFolio | null>(null);
   const [folioPaymentReceipt, setFolioPaymentReceipt] = useState<GuestFolio | null>(null);
@@ -188,12 +195,26 @@ const POS: React.FC = () => {
   const liveTotals = currentShift?.live_totals;
   const expectedCash = liveTotals?.expected_cash || currentShift?.expected_cash || '0.00';
   const expectedTotal = liveTotals?.expected_total || currentShift?.expected_total || '0.00';
+  const expectedCard = liveTotals?.expected_card || currentShift?.expected_card || '0.00';
+  const expectedWallet = liveTotals?.expected_wallet || currentShift?.expected_wallet || '0.00';
+  const expectedBankTransfer = liveTotals?.expected_bank_transfer || currentShift?.expected_bank_transfer || '0.00';
+  const expectedRoomPosting = liveTotals?.expected_room_posting || currentShift?.expected_room_posting || '0.00';
   const paymentLabel = (method: string) =>
     restaurantPaymentMethods.find((item) => item.value === method)?.label || folioPaymentMethods.find((item) => item.value === method)?.label || method.replace('_', ' ');
+  const closeVariances = [
+    { label: 'Cash', actual: closeShiftForm.actual_cash, expected: expectedCash },
+    { label: 'Card', actual: closeShiftForm.actual_card, expected: expectedCard },
+    { label: 'Wallet', actual: closeShiftForm.actual_wallet, expected: expectedWallet },
+    { label: 'Bank', actual: closeShiftForm.actual_bank_transfer, expected: expectedBankTransfer },
+    { label: 'Room Posting', actual: closeShiftForm.actual_room_posting, expected: expectedRoomPosting },
+  ].map((row) => ({
+    ...row,
+    variance: row.actual === '' ? null : Number(row.actual || 0) - Number(row.expected || 0),
+  }));
   const closeVariance =
-    closeShiftForm.actual_cash === ''
-      ? null
-      : Number(closeShiftForm.actual_cash || 0) - Number(expectedCash || 0);
+    closeVariances.some((row) => row.variance !== null)
+      ? closeVariances.reduce((total, row) => total + (row.variance || 0), 0)
+      : null;
 
   const getPaymentForm = (order: RestaurantOrder) =>
     paymentForms[order.id] || {
@@ -280,7 +301,20 @@ const POS: React.FC = () => {
           <div className="flex flex-col gap-3 md:flex-row md:items-center">
             <CompactTabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} />
             {currentShift && (
-              <button onClick={() => setClosingShift(true)} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900">
+              <button
+                onClick={() => {
+                  setCloseShiftForm({
+                    actual_cash: expectedCash,
+                    actual_card: expectedCard,
+                    actual_wallet: expectedWallet,
+                    actual_bank_transfer: expectedBankTransfer,
+                    actual_room_posting: expectedRoomPosting,
+                    notes: '',
+                  });
+                  setClosingShift(true);
+                }}
+                className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900"
+              >
                 Close shift
               </button>
             )}
@@ -997,11 +1031,26 @@ const POS: React.FC = () => {
             onSubmit={(e) => {
               e.preventDefault();
               closeCashierShift.mutate(
-                { shiftId: currentShift.id, actual_cash: closeShiftForm.actual_cash, notes: closeShiftForm.notes },
+                {
+                  shiftId: currentShift.id,
+                  actual_cash: closeShiftForm.actual_cash,
+                  actual_card: closeShiftForm.actual_card,
+                  actual_wallet: closeShiftForm.actual_wallet,
+                  actual_bank_transfer: closeShiftForm.actual_bank_transfer,
+                  actual_room_posting: closeShiftForm.actual_room_posting,
+                  notes: closeShiftForm.notes,
+                },
                 {
                   onSuccess: (shift) => {
                     setClosingShift(false);
-                    setCloseShiftForm({ actual_cash: '', notes: '' });
+                    setCloseShiftForm({
+                      actual_cash: '',
+                      actual_card: '',
+                      actual_wallet: '',
+                      actual_bank_transfer: '',
+                      actual_room_posting: '',
+                      notes: '',
+                    });
                     setClosedShiftReport(shift);
                   },
                 },
@@ -1011,8 +1060,8 @@ const POS: React.FC = () => {
             <div className="grid gap-3 md:grid-cols-2">
               <ShiftMetric label="Expected Cash" value={formatMoney(expectedCash, settings?.currency)} />
               <ShiftMetric label="Expected Total" value={formatMoney(expectedTotal, settings?.currency)} />
-              <ShiftMetric label="Card" value={formatMoney(liveTotals?.expected_card || '0.00', settings?.currency)} />
-              <ShiftMetric label="Room Posting" value={formatMoney(liveTotals?.expected_room_posting || '0.00', settings?.currency)} />
+              <ShiftMetric label="Card" value={formatMoney(expectedCard, settings?.currency)} />
+              <ShiftMetric label="Room Posting" value={formatMoney(expectedRoomPosting, settings?.currency)} />
               {liveTotals?.payment_breakdown?.length ? (
                 <div className="rounded-lg border border-slate-200 md:col-span-2">
                   <div className="grid grid-cols-4 gap-2 border-b border-slate-100 px-3 py-2 text-xs font-semibold uppercase text-slate-500">
@@ -1031,16 +1080,26 @@ const POS: React.FC = () => {
                   ))}
                 </div>
               ) : null}
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="Actual cash counted"
-                value={closeShiftForm.actual_cash}
-                onChange={(e) => setCloseShiftForm({ ...closeShiftForm, actual_cash: e.target.value })}
-                className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2"
-                required
-              />
+              {[
+                ['actual_cash', 'Actual cash counted'],
+                ['actual_card', 'Card settlement total'],
+                ['actual_wallet', 'Wallet settlement total'],
+                ['actual_bank_transfer', 'Bank transfer total'],
+                ['actual_room_posting', 'Room posting total'],
+              ].map(([field, label]) => (
+                <label key={field} className="text-xs font-medium text-slate-600">
+                  {label}
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={closeShiftForm[field as keyof typeof closeShiftForm]}
+                    onChange={(e) => setCloseShiftForm({ ...closeShiftForm, [field]: e.target.value })}
+                    className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                    required={field === 'actual_cash'}
+                  />
+                </label>
+              ))}
               <textarea
                 placeholder="Variance note"
                 value={closeShiftForm.notes}
@@ -1048,9 +1107,14 @@ const POS: React.FC = () => {
                 className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2"
               />
               {closeVariance !== null && (
-                <p className={`text-sm font-medium md:col-span-2 ${closeVariance === 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                  Variance: {formatMoney(String(closeVariance.toFixed(2)), settings?.currency)}
-                </p>
+                <div className={`rounded-xl px-3 py-2 text-sm font-medium md:col-span-2 ${closeVariance === 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                  Total variance: {formatMoney(String(closeVariance.toFixed(2)), settings?.currency)}
+                  <div className="mt-1 grid gap-1 text-xs font-normal text-slate-600 md:grid-cols-5">
+                    {closeVariances.map((row) => (
+                      <span key={row.label}>{row.label}: {row.variance === null ? '-' : formatMoney(String(row.variance.toFixed(2)), settings?.currency)}</span>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
             <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
@@ -1084,20 +1148,25 @@ const POS: React.FC = () => {
               <ShiftMetric label="Cash Sales" value={formatMoney(closedShiftReport.live_totals?.cash_sales || '0.00', settings?.currency)} />
               <ShiftMetric label="Expected Cash" value={formatMoney(closedShiftReport.expected_cash, settings?.currency)} />
               <ShiftMetric label="Actual Cash" value={formatMoney(closedShiftReport.actual_cash, settings?.currency)} />
-              <ShiftMetric label="Variance" value={formatMoney(closedShiftReport.cash_variance, settings?.currency)} />
+              <ShiftMetric label="Cash Variance" value={formatMoney(closedShiftReport.cash_variance, settings?.currency)} />
               <ShiftMetric label="Card" value={formatMoney(closedShiftReport.expected_card, settings?.currency)} />
+              <ShiftMetric label="Actual Card" value={formatMoney(closedShiftReport.actual_card, settings?.currency)} />
               <ShiftMetric label="Wallet" value={formatMoney(closedShiftReport.expected_wallet, settings?.currency)} />
+              <ShiftMetric label="Actual Wallet" value={formatMoney(closedShiftReport.actual_wallet, settings?.currency)} />
               <ShiftMetric label="Bank" value={formatMoney(closedShiftReport.expected_bank_transfer, settings?.currency)} />
+              <ShiftMetric label="Actual Bank" value={formatMoney(closedShiftReport.actual_bank_transfer, settings?.currency)} />
               <ShiftMetric label="Room Posting" value={formatMoney(closedShiftReport.expected_room_posting, settings?.currency)} />
+              <ShiftMetric label="Actual Room Posting" value={formatMoney(closedShiftReport.actual_room_posting, settings?.currency)} />
               <ShiftMetric label="Sales Total" value={formatMoney(closedShiftReport.live_totals?.sales_total || '0.00', settings?.currency)} />
               <ShiftMetric label="Expected Total" value={formatMoney(closedShiftReport.expected_total, settings?.currency)} />
+              <ShiftMetric label="Total Variance" value={formatMoney(closedShiftReport.total_variance, settings?.currency)} />
               <ShiftMetric label="Closed At" value={closedShiftReport.closed_at ? new Date(closedShiftReport.closed_at).toLocaleString() : '-'} />
             </div>
             {closedShiftReport.live_totals?.payment_breakdown?.length ? (
               <div className="print-section overflow-x-auto">
                 <table className="w-full min-w-[620px] text-left text-xs">
                   <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
-                    <tr><th className="py-2 pr-3">Payment Method</th><th className="py-2 pr-3 text-right">Restaurant</th><th className="py-2 pr-3 text-right">Rooms/Folios</th><th className="py-2 pr-3 text-right">Total</th></tr>
+                    <tr><th className="py-2 pr-3">Payment Method</th><th className="py-2 pr-3 text-right">Restaurant</th><th className="py-2 pr-3 text-right">Rooms/Folios</th><th className="py-2 pr-3 text-right">Expected</th><th className="py-2 pr-3 text-right">Counted</th><th className="py-2 pr-3 text-right">Variance</th></tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {closedShiftReport.live_totals.payment_breakdown.map((row) => (
@@ -1106,6 +1175,8 @@ const POS: React.FC = () => {
                         <td className="py-2 pr-3 text-right">{formatMoney(row.restaurant_total, settings?.currency)}</td>
                         <td className="py-2 pr-3 text-right">{formatMoney(row.folio_total, settings?.currency)}</td>
                         <td className="py-2 pr-3 text-right font-semibold">{formatMoney(row.total, settings?.currency)}</td>
+                        <td className="py-2 pr-3 text-right">{formatMoney(row.actual_total || '0.00', settings?.currency)}</td>
+                        <td className="py-2 pr-3 text-right font-semibold">{formatMoney(row.variance || '0.00', settings?.currency)}</td>
                       </tr>
                     ))}
                   </tbody>

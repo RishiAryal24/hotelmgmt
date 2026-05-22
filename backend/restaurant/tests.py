@@ -438,7 +438,15 @@ class RestaurantRoomPostingTests(TenantTestCase):
         card_order.refresh_from_db()
         settle_restaurant_order(card_order, payment_method='card', paid_amount=Decimal('25.00'), cashier_shift=shift)
 
-        close_cashier_shift(shift, actual_cash=Decimal('150.00'), notes='Balanced')
+        close_cashier_shift(
+            shift,
+            actual_cash=Decimal('150.00'),
+            actual_card=Decimal('25.00'),
+            actual_wallet=Decimal('0.00'),
+            actual_bank_transfer=Decimal('0.00'),
+            actual_room_posting=Decimal('0.00'),
+            notes='Balanced',
+        )
 
         shift.refresh_from_db()
         self.assertEqual(shift.status, 'closed')
@@ -446,14 +454,56 @@ class RestaurantRoomPostingTests(TenantTestCase):
         self.assertEqual(shift.expected_card, Decimal('25.00'))
         self.assertEqual(shift.expected_total, Decimal('175.00'))
         self.assertEqual(shift.cash_variance, Decimal('0.00'))
+        self.assertEqual(shift.card_variance, Decimal('0.00'))
+        self.assertEqual(shift.total_variance, Decimal('0.00'))
         self.assertIn('Balanced', shift.notes)
         totals = calculate_cashier_shift_totals(shift)
         cash_breakdown = next(row for row in totals['payment_breakdown'] if row['payment_method'] == 'cash')
         card_breakdown = next(row for row in totals['payment_breakdown'] if row['payment_method'] == 'card')
         self.assertEqual(cash_breakdown['restaurant_total'], Decimal('50.00'))
         self.assertEqual(cash_breakdown['total'], Decimal('50.00'))
+        self.assertEqual(cash_breakdown['actual_total'], Decimal('150.00'))
+        self.assertEqual(cash_breakdown['variance'], Decimal('0.00'))
         self.assertEqual(card_breakdown['restaurant_total'], Decimal('25.00'))
+        self.assertEqual(card_breakdown['actual_total'], Decimal('25.00'))
+        self.assertEqual(card_breakdown['variance'], Decimal('0.00'))
         self.assertEqual(len(totals['payment_rows']), 2)
+
+    def test_cashier_shift_close_tracks_non_cash_variances(self):
+        shift = open_cashier_shift(cashier=self.cashier, counter=self.counter, opening_cash=Decimal('20.00'))
+        settle_restaurant_order(
+            self.order,
+            payments=[
+                {'payment_method': 'cash', 'amount': Decimal('30.00')},
+                {'payment_method': 'card', 'amount': Decimal('20.00')},
+            ],
+            cashier_shift=shift,
+        )
+
+        close_cashier_shift(
+            shift,
+            actual_cash=Decimal('45.00'),
+            actual_card=Decimal('18.00'),
+            actual_wallet=Decimal('0.00'),
+            actual_bank_transfer=Decimal('0.00'),
+            actual_room_posting=Decimal('0.00'),
+            notes='Card batch short',
+        )
+
+        shift.refresh_from_db()
+        self.assertEqual(shift.expected_cash, Decimal('50.00'))
+        self.assertEqual(shift.expected_card, Decimal('20.00'))
+        self.assertEqual(shift.actual_cash, Decimal('45.00'))
+        self.assertEqual(shift.actual_card, Decimal('18.00'))
+        self.assertEqual(shift.cash_variance, Decimal('-5.00'))
+        self.assertEqual(shift.card_variance, Decimal('-2.00'))
+        self.assertEqual(shift.total_variance, Decimal('-7.00'))
+
+        totals = calculate_cashier_shift_totals(shift)
+        card_breakdown = next(row for row in totals['payment_breakdown'] if row['payment_method'] == 'card')
+        self.assertEqual(card_breakdown['total'], Decimal('20.00'))
+        self.assertEqual(card_breakdown['actual_total'], Decimal('18.00'))
+        self.assertEqual(card_breakdown['variance'], Decimal('-2.00'))
 
     def test_restaurant_order_can_be_settled_with_split_payments(self):
         shift = open_cashier_shift(cashier=self.cashier, counter=self.counter, opening_cash=Decimal('20.00'))

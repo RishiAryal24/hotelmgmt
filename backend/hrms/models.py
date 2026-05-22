@@ -152,6 +152,7 @@ class PayrollRun(UUIDModel):
         ('posted', 'Posted'),
         ('paid', 'Paid'),
         ('canceled', 'Canceled'),
+        ('reversed', 'Reversed'),
     ]
 
     PAYMENT_METHOD_CHOICES = [
@@ -182,6 +183,22 @@ class PayrollRun(UUIDModel):
     payment_method = models.CharField(max_length=30, choices=PAYMENT_METHOD_CHOICES, blank=True)
     payment_reference = models.CharField(max_length=100, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True)
+    reversal_journal_entry = models.ForeignKey(
+        'accounting.JournalEntry',
+        on_delete=models.SET_NULL,
+        related_name='payroll_reversal_runs',
+        null=True,
+        blank=True,
+    )
+    payment_reversal_journal_entry = models.ForeignKey(
+        'accounting.JournalEntry',
+        on_delete=models.SET_NULL,
+        related_name='payroll_payment_reversal_runs',
+        null=True,
+        blank=True,
+    )
+    reversed_at = models.DateTimeField(null=True, blank=True)
+    reversal_reason = models.TextField(blank=True)
     notes = models.TextField(blank=True)
 
     class Meta:

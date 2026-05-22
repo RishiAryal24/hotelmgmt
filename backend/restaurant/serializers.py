@@ -198,7 +198,16 @@ class CashierShiftSerializer(serializers.ModelSerializer):
             'expected_room_posting',
             'expected_total',
             'actual_cash',
+            'actual_card',
+            'actual_wallet',
+            'actual_bank_transfer',
+            'actual_room_posting',
             'cash_variance',
+            'card_variance',
+            'wallet_variance',
+            'bank_transfer_variance',
+            'room_posting_variance',
+            'total_variance',
             'opened_at',
             'closed_at',
             'status',
@@ -228,6 +237,10 @@ class CashierShiftOpenSerializer(serializers.Serializer):
 
 class CashierShiftCloseSerializer(serializers.Serializer):
     actual_cash = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.00'))
+    actual_card = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.00'), required=False)
+    actual_wallet = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.00'), required=False)
+    actual_bank_transfer = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.00'), required=False)
+    actual_room_posting = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.00'), required=False)
     notes = serializers.CharField(required=False, allow_blank=True)
 
 

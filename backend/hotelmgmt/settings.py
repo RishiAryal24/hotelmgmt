@@ -68,6 +68,7 @@ TENANT_APPS = [
     'hrms',
     'maintenance',
     'audit.apps.AuditConfig',
+    'notifications.apps.NotificationsConfig',
     'integrations',
 ]
 

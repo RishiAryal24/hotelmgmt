@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 from uuid import UUID
 
@@ -18,6 +18,8 @@ def serialize_value(value):
         return str(value)
     if isinstance(value, datetime):
         return value.isoformat() if is_aware(value) else value.replace(microsecond=0).isoformat()
+    if isinstance(value, time):
+        return value.replace(microsecond=0).isoformat()
     if isinstance(value, date):
         return value.isoformat()
     if hasattr(value, 'pk'):

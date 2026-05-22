@@ -34,6 +34,9 @@ DEFAULT_PERMISSIONS = [
     ('hrms.payroll.post', 'Post payroll', 'hrms'),
     ('maintenance.ticket.update', 'Update maintenance tickets', 'maintenance'),
     ('audit.log.read', 'View audit logs', 'audit'),
+    ('notifications.event.read', 'View notification events', 'notifications'),
+    ('notifications.template.read', 'View notification templates', 'notifications'),
+    ('notifications.template.manage', 'Manage notification templates', 'notifications'),
     ('reports.operational.read', 'View operational reports', 'reports'),
 ]
 
@@ -111,7 +114,7 @@ DEFAULT_ROLES = [
         ],
     ),
     ('maintenance', 'Maintenance', 'Maintenance ticket handling', ['rooms.room.read', 'maintenance.ticket.update']),
-    ('auditor', 'Auditor', 'Read-only operational, accounting, and audit review', ['accounting.ledger.read', 'reports.operational.read', 'audit.log.read']),
+    ('auditor', 'Auditor', 'Read-only operational, accounting, and audit review', ['accounting.ledger.read', 'reports.operational.read', 'audit.log.read', 'notifications.event.read']),
 ]
 
 

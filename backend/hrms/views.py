@@ -10,10 +10,11 @@ from hrms.serializers import (
     AttendanceSerializer,
     EmployeeSerializer,
     PayrollPeriodSerializer,
+    PayrollRunReverseSerializer,
     PayrollRunSerializer,
     ShiftSerializer,
 )
-from hrms.services import cancel_payroll_run, approve_payroll_run, generate_payroll_run, post_payroll_run, settle_payroll_run
+from hrms.services import cancel_payroll_run, approve_payroll_run, generate_payroll_run, post_payroll_run, reverse_payroll_run, settle_payroll_run
 from users.permissions import HasActionPermission
 
 
@@ -142,6 +143,7 @@ class PayrollRunViewSet(viewsets.ModelViewSet):
         'cancel': 'hrms.payroll.create',
         'approve': 'hrms.payroll.approve',
         'post': 'hrms.payroll.post',
+        'reverse': 'hrms.payroll.post',
         'settle': 'hrms.payroll.post',
     }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -197,6 +199,22 @@ class PayrollRunViewSet(viewsets.ModelViewSet):
                 payroll_run,
                 payment_method=payment_method,
                 payment_reference=payment_reference,
+                posted_by=request.user,
+            )
+        except ValueError as exc:
+            return response.Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        payroll_run.refresh_from_db()
+        return response.Response(self.get_serializer(payroll_run).data)
+
+    @decorators.action(detail=True, methods=['post'], url_path='reverse')
+    def reverse(self, request, pk=None):
+        payroll_run = self.get_object()
+        serializer = PayrollRunReverseSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            reverse_payroll_run(
+                payroll_run,
+                reason=serializer.validated_data.get('reason', ''),
                 posted_by=request.user,
             )
         except ValueError as exc:

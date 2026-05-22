@@ -8,7 +8,7 @@ Use this document when deciding what to build next. Use `docs/ENHANCEMENT.md` fo
 
 ## Current Baseline
 
-Status: restaurant tax/service-charge checkpoint stabilized locally.
+Status: notifications foundation checkpoint stabilized locally.
 
 Verified foundations:
 
@@ -19,13 +19,13 @@ Verified foundations:
 - Tenant migrations apply with `migrate_schemas`.
 - Frontend and backend respond locally.
 - Authenticated bookings and folios endpoints return `200`.
-- Restaurant tax/service-charge configuration is implemented and verified with restaurant tests, migration check, tenant migrations, and frontend build.
+- Attendance exception reporting, department labor cost reporting, and notifications foundation are implemented and verified locally.
 
 Known local caveats:
 
 - Docker is not currently available on PATH on the development machine.
 - Redis is optional for normal web/API local development, but required for Celery workers.
-- The current restaurant tax/service-charge slice is uncommitted and should be committed before starting another major enhancement.
+- The current notifications foundation slice is uncommitted and should be committed before starting another major enhancement.
 
 ## Operating Rules
 
@@ -173,8 +173,7 @@ Completed:
 
 Next slices:
 
-1. Restaurant receipt numbering and reprint audit trail.
-2. Cash drawer reconciliation by payment row and cashier shift.
+1. Broader POS manager analytics.
 
 Acceptance criteria:
 
@@ -213,11 +212,9 @@ Status: MVP started.
 
 Next slices:
 
-1. PDF payslips.
-2. Payroll approval and reversal rules.
-3. Management summary PDF export.
-4. Attendance exception reports.
-5. Department-level labor cost reports.
+1. Notification center UI and operational triggers.
+2. Guest communication timeline and follow-up reminders.
+3. Broader labor analytics by role, shift, and overtime trend.
 
 Acceptance criteria:
 
@@ -234,7 +231,7 @@ Status: scaffolded, not production-ready.
 
 Recommended order:
 
-1. Notifications foundation: email templates, event log, retry status.
+1. Notification center UI and operational triggers.
 2. Payment abstraction: payment intent, provider reference, status transitions.
 3. Nepal payment providers: Khalti/eSewa sandbox.
 4. Stripe or international provider sandbox.
@@ -332,22 +329,25 @@ Completed:
 - Open restaurant orders recalculate tax/service totals automatically.
 - Restaurant receipts and payable order rows show subtotal, tax, service charge, discount, and total.
 - Restaurant settlement accounting splits revenue, tax payable, and service-charge revenue.
+- Restaurant receipt numbering and reprint audit trail.
+- Cash drawer reconciliation by payment row and cashier shift.
+- POS operational reports for cashier exceptions.
 - Tenant schemas migrated with `migrate_schemas`.
 - Restaurant order creation failure now shows the backend validation error on the Restaurant page.
 
-Verified on 2026-05-19:
+Verified on 2026-05-21:
 
 - `venv\Scripts\python.exe backend\manage.py check`
 - `venv\Scripts\python.exe backend\manage.py makemigrations --check --dry-run`
 - `venv\Scripts\python.exe backend\manage.py migrate_schemas`
 - `venv\Scripts\python.exe backend\manage.py test restaurant`
-- `npm.cmd run build`
+- `npm.cmd exec tsc -- --noEmit`
+- `npm.cmd run build` reached Vite output and failed on existing Windows `EPERM` creating `frontend/dist/assets`
 
 Resume point:
 
-1. Commit the current restaurant tax/service-charge checkpoint.
-2. Start restaurant receipt numbering and reprint audit trail.
-3. Then continue cash drawer reconciliation by payment row and cashier shift.
+1. Commit the current notifications foundation checkpoint.
+2. Start notification center UI and operational triggers.
 
 ## Local Command Reference
 

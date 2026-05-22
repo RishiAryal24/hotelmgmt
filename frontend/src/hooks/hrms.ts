@@ -210,3 +210,18 @@ export const useSettlePayrollRun = () => {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['payroll-runs'] }),
   });
 };
+
+export const useReversePayrollRun = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ payrollRunId, reason }: { payrollRunId: string; reason?: string }): Promise<PayrollRun> => {
+      const response = await apiClient.post(`/hrms/payroll-runs/${payrollRunId}/reverse/`, { reason });
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['payroll-runs'] });
+      queryClient.invalidateQueries({ queryKey: ['payroll-periods'] });
+      queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+    },
+  });
+};

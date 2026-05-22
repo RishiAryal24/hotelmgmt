@@ -267,8 +267,31 @@ export const useCreateCashierCounter = () => {
 export const useCloseCashierShift = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ shiftId, actual_cash, notes }: { shiftId: string; actual_cash: string; notes?: string }): Promise<CashierShift> => {
-      const response = await apiClient.post(`/restaurant/cashier-shifts/${shiftId}/close/`, { actual_cash, notes });
+    mutationFn: async ({
+      shiftId,
+      actual_cash,
+      actual_card,
+      actual_wallet,
+      actual_bank_transfer,
+      actual_room_posting,
+      notes,
+    }: {
+      shiftId: string;
+      actual_cash: string;
+      actual_card?: string;
+      actual_wallet?: string;
+      actual_bank_transfer?: string;
+      actual_room_posting?: string;
+      notes?: string;
+    }): Promise<CashierShift> => {
+      const response = await apiClient.post(`/restaurant/cashier-shifts/${shiftId}/close/`, {
+        actual_cash,
+        actual_card,
+        actual_wallet,
+        actual_bank_transfer,
+        actual_room_posting,
+        notes,
+      });
       return response.data;
     },
     onSuccess: () => {

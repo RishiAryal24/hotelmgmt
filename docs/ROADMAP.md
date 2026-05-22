@@ -6,9 +6,9 @@ The project is now a connected development-stage hospitality ERP. It is suitable
 
 Checkpoint note:
 
-- Current checkpoint is stable as of the restaurant receipt numbering and reprint audit trail slice.
-- Restaurant tests, migration check, tenant migrations, and frontend build are passing locally.
-- Recommended continuation: cash drawer reconciliation by payment row and cashier shift.
+- Current checkpoint is stable as of the notifications foundation slice.
+- Restaurant tests, migration check, tenant migrations, and frontend TypeScript build step are passing locally. Frontend Vite output still hits the existing Windows `EPERM` writing `frontend/dist/assets`.
+- Recommended continuation: notification center UI and operational triggers.
 
 Working foundations:
 
@@ -39,10 +39,16 @@ Working modules:
 - Accounting chart of accounts, journal entries, automated postings, summary view, and journal filters.
 - Basic operational Reports for occupancy, revenue, restaurant sales, and inventory.
 - CSV exports for operational reports and payroll.
+- Printable management summary PDF export from Reports.
 - Basic HRMS employee records.
 - HRMS shifts and attendance with clock-in/clock-out workflow.
 - Payroll periods, generated draft payroll runs, approval/posting status, payslip details, and accounting settlement posting.
+- Printable payroll payslips with browser Save as PDF support.
+- Payroll reversal workflow with reversing accounting journals.
+- Attendance exception report for late, absent, half-day, and missing clock-out records.
+- Department-level labor cost report with period filter, CSV export, and printable PDF view.
 - Audit Logs page with action/module filters and field-change summaries.
+- Notifications foundation with tenant notification events, templates, delivery status, retry metadata, API endpoints, and booking confirmation logging.
 
 ## Local Testing
 
@@ -151,10 +157,12 @@ Completed:
 - Amount-based split payments.
 - Restaurant tax and service-charge configuration.
 - Restaurant receipt numbering and reprint audit trail.
+- Cash drawer reconciliation by payment row and cashier shift.
+- POS operational reports for cashier exceptions.
 
 Remaining:
 
-- Cash drawer reconciliation by payment row and cashier shift.
+- Broader POS manager analytics.
 
 ## Phase 4: Accounting ERP
 
@@ -202,7 +210,7 @@ Completed:
 
 Next:
 
-- PDF exports for payslips and management summaries.
+- Notification center UI and operational triggers.
 - Guest communication timeline and follow-up reminders.
 
 ## Phase 6: Scale And Integrations
@@ -222,11 +230,10 @@ Planned:
 
 ## Recommended Immediate Next Step
 
-Resume with **cash drawer reconciliation by payment row and cashier shift**.
+Resume with **notification center UI and operational triggers**.
 
 Suggested order:
 
-1. Commit the current restaurant receipt numbering checkpoint if it has not been committed.
-2. Add cash drawer reconciliation by payment row.
-3. Tie reconciliation review to cashier shift close reports.
-4. Continue with POS operational reports for cashier exceptions.
+1. Commit the current notifications foundation checkpoint if it has not been committed.
+2. Add a notification center page for event/template visibility.
+3. Add operational triggers for low stock, payroll posting, and housekeeping escalation.

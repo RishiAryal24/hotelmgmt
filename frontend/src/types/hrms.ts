@@ -80,7 +80,7 @@ export interface PayrollRun {
   id: string;
   period: string;
   period_details?: PayrollPeriod;
-  status: 'draft' | 'approved' | 'posted' | 'paid' | 'canceled';
+  status: 'draft' | 'approved' | 'posted' | 'paid' | 'canceled' | 'reversed';
   generated_at: string;
   approved_at: string | null;
   posted_at: string | null;
@@ -89,8 +89,14 @@ export interface PayrollRun {
   payment_journal_entry: string | null;
   journal_entry_number?: string;
   payment_journal_entry_number?: string;
+  reversal_journal_entry: string | null;
+  payment_reversal_journal_entry: string | null;
+  reversal_journal_entry_number?: string;
+  payment_reversal_journal_entry_number?: string;
   payment_method: '' | 'cash' | 'bank_transfer' | 'cheque';
   payment_reference: string;
+  reversed_at: string | null;
+  reversal_reason: string;
   notes: string;
   lines: PayrollLine[];
   total_gross_pay: string;

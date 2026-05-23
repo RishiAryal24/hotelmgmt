@@ -66,7 +66,9 @@ The system is now a connected development-stage hospitality ERP with strong tena
 - [x] Retry/cancel actions for notification deliveries.
 - [x] Payment abstraction foundation with payment intent records, provider references, status transitions, idempotent callback handling, RBAC, API endpoints, and Payment Intents UI.
 - [x] Guest communication follow-up reminders.
-- [ ] Walk-in booking polish.
+- [x] Walk-in booking polish.
+- [x] Checkout exception handling for missing/closed folios and unresolved postings.
+- [x] Room transfer rate adjustment policy.
 - [ ] Broader POS manager analytics.
 
 ### Phase 3: Advanced Features
@@ -109,6 +111,9 @@ The system is now a connected development-stage hospitality ERP with strong tena
 
 - [x] Guest profile with stay history, folio value, VIP level, preferences, and internal notes.
 - [x] Guest communication follow-up reminders.
+- [x] Walk-in booking polish with faster front-desk mode switching, guest safety checks, room readiness context, and immediate folio review.
+- [x] Checkout exception handling with server-backed readiness checks for missing/closed folios and unresolved restaurant postings.
+- [x] Room transfer rate adjustment policy with folio charge/credit handling.
 - [ ] Self-check-in or QR check-in.
 - [ ] Guest feedback collection.
 
@@ -264,13 +269,16 @@ The system is now a connected development-stage hospitality ERP with strong tena
 - OTA channel sync foundation is implemented with channel configuration, room/rate mappings, availability/rate payload jobs, Zodomus Basic Auth provider calls, sandbox test reservation tooling, idempotent webhook event capture, inbound reservation import conflict detection, accept/reject review, cancellation/modification reconciliation, manager notifications, audit logging, and Integrations UI.
 - Stripe sandbox is implemented with tenant-scoped test settings, masked secret preservation, PaymentIntent creation/confirmation actions, and focused tests.
 - Accounting statements are implemented with fiscal periods, close/reopen controls, trial balance, profit and loss, balance sheet APIs, and Accounting UI tabs.
+- Walk-in booking polish is implemented with a faster front-desk mode, automatic today/tomorrow stay defaults, guest safety checks, room readiness context, and immediate folio review after check-in.
+- Checkout exception handling is implemented with readiness APIs, checkout blocking for missing/closed folios and unresolved restaurant postings, and front-desk blocker visibility.
+- Room transfer rate adjustment policy is implemented with keep-rate, upgrade-charge, complimentary-upgrade, and downgrade-credit options plus folio adjustment preview.
 - Local verification completed with focused backend tests, migration check, tenant migrations, and frontend TypeScript check.
 
 ## Next Enhancement
 
-Recommended next enhancement: **choose the next slice after the accounting statements checkpoint**.
+Recommended next enhancement: **tax/vendor accounting**.
 
 Suggested order:
 
-1. Commit the OTA, Stripe sandbox, and accounting statements checkpoint.
-2. Choose the next high-value slice such as POS analytics, tax/vendor accounting, or production-grade provider rollout.
+1. Add accounting tax configuration.
+2. Add vendor bill capture and posting.

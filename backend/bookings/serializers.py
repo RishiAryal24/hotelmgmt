@@ -53,6 +53,7 @@ class BookingSerializer(serializers.ModelSerializer):
     room_details = RoomSerializer(source='room', read_only=True)
     guest_details = GuestSerializer(source='guest', read_only=True)
     folio_details = serializers.SerializerMethodField()
+    checkout_readiness = serializers.SerializerMethodField()
 
     class Meta:
         model = Booking
@@ -60,24 +61,40 @@ class BookingSerializer(serializers.ModelSerializer):
         read_only_fields = ['total_amount']
 
     def get_folio_details(self, obj):
-        folio = getattr(obj, 'folio', None)
-        if not folio:
+        try:
+            folio = obj.folio
+        except GuestFolio.DoesNotExist:
             return None
         return GuestFolioSerializer(folio).data
 
+    def get_checkout_readiness(self, obj):
+        from bookings.services import get_checkout_readiness
+
+        return get_checkout_readiness(obj)
+
     def validate(self, data):
-        # Validate check-in and check-out dates
-        if data['check_out_date'] <= data['check_in_date']:
+        room = data.get('room') or getattr(self.instance, 'room', None)
+        guest = data.get('guest') or getattr(self.instance, 'guest', None)
+        check_in_date = data.get('check_in_date') or getattr(self.instance, 'check_in_date', None)
+        check_out_date = data.get('check_out_date') or getattr(self.instance, 'check_out_date', None)
+        number_of_guests = data.get('number_of_guests') or getattr(self.instance, 'number_of_guests', 1)
+
+        if guest and guest.vip_level == 'blacklist':
+            raise serializers.ValidationError("Guest is marked do not book.")
+        if check_in_date and check_out_date and check_out_date <= check_in_date:
             raise serializers.ValidationError("Check-out date must be after check-in date.")
+        if room and number_of_guests and number_of_guests > room.capacity:
+            raise serializers.ValidationError("Number of guests exceeds room capacity.")
 
-        # Check room availability (basic check - can be enhanced)
+        if not room or not check_in_date or not check_out_date:
+            return data
+
         overlapping_bookings = Booking.objects.filter(
-            room=data['room'],
-            check_in_date__lt=data['check_out_date'],
-            check_out_date__gt=data['check_in_date'],
-            status__in=['confirmed', 'checked_in']
+            room=room,
+            check_in_date__lt=check_out_date,
+            check_out_date__gt=check_in_date,
+            status__in=['confirmed', 'checked_in'],
         ).exclude(pk=getattr(self.instance, 'pk', None))
-
         if overlapping_bookings.exists():
             raise serializers.ValidationError("Room is not available for the selected dates.")
 

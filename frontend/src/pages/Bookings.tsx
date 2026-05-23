@@ -70,6 +70,15 @@ const emptyFollowUp = {
   booking: '',
 };
 
+const transferRatePolicies = [
+  { value: 'keep_rate', label: 'Keep original rate' },
+  { value: 'charge_difference', label: 'Charge upgrade difference' },
+  { value: 'complimentary_upgrade', label: 'Complimentary upgrade' },
+  { value: 'credit_downgrade', label: 'Credit downgrade difference' },
+] as const;
+
+type TransferRatePolicy = (typeof transferRatePolicies)[number]['value'];
+
 const statusClass: Record<Booking['status'] | GuestFolio['status'], string> = {
   confirmed: 'bg-blue-50 text-blue-700',
   checked_in: 'bg-emerald-50 text-emerald-700',
@@ -107,6 +116,8 @@ const paymentMethods = [
 
 type CheckoutPaymentMethod = (typeof paymentMethods)[number]['value'];
 type BookingTab = 'reservations' | 'guests' | 'availability' | 'folios' | 'new';
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
 
 const addDays = (date: string, days: number) => {
   const value = new Date(`${date}T00:00:00`);
@@ -165,7 +176,7 @@ const Bookings: React.FC = () => {
     number_of_guests: 1,
     special_requests: '',
   });
-  const [transferForm, setTransferForm] = useState({ room: '' });
+  const [transferForm, setTransferForm] = useState({ room: '', adjustment_policy: 'keep_rate' as TransferRatePolicy, transfer_date: '' });
   const [selectedFolio, setSelectedFolio] = useState<GuestFolio | null>(null);
   const [calendarStart, setCalendarStart] = useState(new Date().toISOString().slice(0, 10));
   const [guestForm, setGuestForm] = useState<Omit<Guest, 'id'>>(emptyGuest);
@@ -173,6 +184,7 @@ const Bookings: React.FC = () => {
   const [bookingForm, setBookingForm] = useState<Omit<Booking, 'id' | 'total_amount' | 'room_details' | 'guest_details'>>(
     emptyBooking,
   );
+  const [bookingFormError, setBookingFormError] = useState('');
   const [availabilityRange, setAvailabilityRange] = useState({ check_in_date: '', check_out_date: '' });
 
   const { data: bookableRooms, isFetching: roomsLoading } = useAvailableRooms(
@@ -200,6 +212,31 @@ const Bookings: React.FC = () => {
     () => guests?.find((guest) => guest.id === bookingForm.guest),
     [bookingForm.guest, guests],
   );
+
+  const selectedTransferRoom = useMemo(
+    () => transferRooms?.find((room) => room.id === transferForm.room),
+    [transferForm.room, transferRooms],
+  );
+
+  const transferAdjustment = useMemo(() => {
+    if (!transferBooking || !selectedTransferRoom) return null;
+    const transferDate = transferForm.transfer_date || todayIso();
+    const effectiveDate = transferDate < transferBooking.check_in_date ? transferBooking.check_in_date : transferDate;
+    const remainingNights = effectiveDate >= transferBooking.check_out_date
+      ? 0
+      : Math.max(0, Math.round((new Date(`${transferBooking.check_out_date}T00:00:00`).getTime() - new Date(`${effectiveDate}T00:00:00`).getTime()) / 86400000));
+    const oldRate = Number(transferBooking.room_details?.price_per_night || 0);
+    const newRate = Number(selectedTransferRoom.price_per_night || 0);
+    const rateDifference = newRate - oldRate;
+    let amount = 0;
+    if (transferForm.adjustment_policy === 'charge_difference' && rateDifference > 0) {
+      amount = rateDifference * remainingNights;
+    }
+    if (transferForm.adjustment_policy === 'credit_downgrade' && rateDifference < 0) {
+      amount = rateDifference * remainingNights;
+    }
+    return { oldRate, newRate, rateDifference, remainingNights, amount };
+  }, [selectedTransferRoom, transferBooking, transferForm.adjustment_policy, transferForm.transfer_date]);
 
   const selectedBookingGuestHistory = useMemo(() => {
     if (!selectedBookingGuest) return { bookings: [] as Booking[], folios: [] as GuestFolio[] };
@@ -253,7 +290,7 @@ const Bookings: React.FC = () => {
     [bookings, folios],
   );
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIso();
   const visibleBookings = useMemo(() => {
     const records = bookings || [];
     if (bookingFilter === 'arrivals_today') {
@@ -342,6 +379,19 @@ const Bookings: React.FC = () => {
     ...(can('bookings.reservation.create') ? [{ id: 'new', label: 'New Booking' }] : []),
   ];
 
+  const switchBookingMode = (status: Booking['status']) => {
+    const nextCheckIn = status === 'checked_in' ? todayIso() : bookingForm.check_in_date;
+    const nextCheckOut = status === 'checked_in' ? addDays(nextCheckIn, 1) : bookingForm.check_out_date;
+    setBookingForm({
+      ...bookingForm,
+      status,
+      check_in_date: nextCheckIn,
+      check_out_date: nextCheckOut,
+      room: '',
+    });
+    setBookingFormError('');
+  };
+
   const handleCreateGuest = (e: React.FormEvent) => {
     e.preventDefault();
     createGuest.mutate(guestForm, {
@@ -356,16 +406,30 @@ const Bookings: React.FC = () => {
   const handleCreateBooking = (e: React.FormEvent) => {
     e.preventDefault();
     if (!bookingForm.guest) return;
+    setBookingFormError('');
+    if (selectedBookingGuest?.vip_level === 'blacklist') {
+      setBookingFormError('This guest is marked do not book. Update the guest profile before creating a reservation.');
+      return;
+    }
     const onSuccess = () => {
       setBookingForm(emptyBooking);
       setGuestSearch('');
       setActiveTab('reservations');
     };
     if (bookingForm.status === 'checked_in') {
-      createWalkInBooking.mutate(bookingForm, { onSuccess });
+      createWalkInBooking.mutate(bookingForm, {
+        onSuccess: (result) => {
+          onSuccess();
+          setSelectedFolio(result.folio);
+        },
+        onError: () => setBookingFormError('Could not check in walk-in. Confirm the room is available, clean, and not reserved for these dates.'),
+      });
       return;
     }
-    createBooking.mutate(bookingForm, { onSuccess });
+    createBooking.mutate(bookingForm, {
+      onSuccess,
+      onError: () => setBookingFormError('Could not create booking. Check dates, guest, and room availability.'),
+    });
   };
 
   const selectGuestForBooking = (guest: Guest) => {
@@ -504,12 +568,13 @@ const Bookings: React.FC = () => {
 
   const openTransfer = (booking: Booking) => {
     setTransferBooking(booking);
-    setTransferForm({ room: '' });
+    setTransferForm({ room: '', adjustment_policy: 'keep_rate', transfer_date: todayIso() });
   };
 
   const handleCheckout = (e: React.FormEvent) => {
     e.preventDefault();
     if (!checkoutBooking) return;
+    if (checkoutBooking.checkout_readiness && !checkoutBooking.checkout_readiness.is_ready) return;
     bookingAction.mutate(
       {
         bookingId: checkoutBooking.id,
@@ -532,13 +597,19 @@ const Bookings: React.FC = () => {
     const restaurantLines = lines.filter((line) => line.source_module === 'restaurant_order');
     const facilityLines = lines.filter((line) => line.source_module.startsWith('facility_'));
     const roomChargeLines = lines.filter((line) => line.source_module === 'room_charge');
+    const readiness = booking.checkout_readiness;
     return {
       folio,
-      hasOpenFolio: folio?.status === 'open',
+      hasOpenFolio: readiness?.has_open_folio ?? folio?.status === 'open',
+      isReady: readiness?.is_ready ?? folio?.status === 'open',
+      blockers: readiness?.blockers || [],
+      warnings: readiness?.warnings || [],
+      unresolvedPostings: readiness?.unresolved_postings || [],
+      unresolvedPostingCount: readiness?.unresolved_posting_count || 0,
       roomChargeLines,
       restaurantLines,
       facilityLines,
-      totalDue: folio?.grand_total || booking.total_amount,
+      totalDue: readiness?.total_due || folio?.grand_total || booking.total_amount,
     };
   };
 
@@ -1218,6 +1289,34 @@ const Bookings: React.FC = () => {
 
       {activeTab === 'new' && can('bookings.reservation.create') && (
         <form onSubmit={handleCreateBooking} className="rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="mb-4 flex flex-col gap-3 border-b border-slate-100 pb-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">
+                {bookingForm.status === 'checked_in' ? 'Walk-in check-in' : 'New reservation'}
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                {bookingForm.status === 'checked_in'
+                  ? 'Creates the stay, marks the room occupied, opens the folio, and shows the folio for review.'
+                  : 'Creates a confirmed future reservation with guest history and availability checks.'}
+              </p>
+            </div>
+            <div className="inline-flex w-full rounded-xl border border-slate-200 bg-slate-50 p-1 md:w-auto">
+              <button
+                type="button"
+                onClick={() => switchBookingMode('confirmed')}
+                className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium md:flex-none ${bookingForm.status === 'confirmed' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                Reservation
+              </button>
+              <button
+                type="button"
+                onClick={() => switchBookingMode('checked_in')}
+                className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium md:flex-none ${bookingForm.status === 'checked_in' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+              >
+                Walk-in
+              </button>
+            </div>
+          </div>
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-3 md:col-span-2">
               <div>
@@ -1256,21 +1355,26 @@ const Bookings: React.FC = () => {
                 })}
               </div>
               {selectedBookingGuest && (
-                <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-sm">
+                <div className={`rounded-xl border p-3 text-sm ${selectedBookingGuest.vip_level === 'blacklist' ? 'border-rose-200 bg-rose-50' : 'border-emerald-100 bg-emerald-50'}`}>
                   <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                     <div>
                       <p className="font-semibold text-slate-900">
                         {selectedBookingGuest.first_name} {selectedBookingGuest.last_name}
                         {selectedBookingGuest.vip_level !== 'standard' && (
-                          <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs text-emerald-700">{selectedBookingGuest.vip_level.replace('_', ' ')}</span>
+                          <span className={`ml-2 rounded-full bg-white px-2 py-0.5 text-xs ${selectedBookingGuest.vip_level === 'blacklist' ? 'text-rose-700' : 'text-emerald-700'}`}>{selectedBookingGuest.vip_level.replace('_', ' ')}</span>
                         )}
                       </p>
                       <p className="mt-1 text-xs text-slate-600">{selectedBookingGuest.email} {selectedBookingGuest.phone ? `- ${selectedBookingGuest.phone}` : ''}</p>
                     </div>
-                    <button type="button" onClick={() => openGuestProfile(selectedBookingGuest.id)} className="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100">
+                    <button type="button" onClick={() => openGuestProfile(selectedBookingGuest.id)} className={`rounded-lg bg-white px-3 py-1.5 text-xs font-medium ${selectedBookingGuest.vip_level === 'blacklist' ? 'text-rose-700 hover:bg-rose-100' : 'text-emerald-700 hover:bg-emerald-100'}`}>
                       Open profile
                     </button>
                   </div>
+                  {selectedBookingGuest.vip_level === 'blacklist' && (
+                    <p className="mt-3 rounded-lg bg-white px-3 py-2 text-xs font-medium text-rose-700">
+                      This guest is marked do not book. Reservations and walk-ins are blocked until the profile is reviewed.
+                    </p>
+                  )}
                   <div className="mt-3 grid gap-2 md:grid-cols-4">
                     <span className="rounded-lg bg-white px-3 py-2">
                       <strong className="block text-slate-900">{selectedBookingGuestHistory.bookings.length}</strong>
@@ -1390,32 +1494,69 @@ const Bookings: React.FC = () => {
                 </div>
               )}
             </div>
-            <input type="number" value={bookingForm.number_of_guests} onChange={(e) => setBookingForm({ ...bookingForm, number_of_guests: Number(e.target.value) })} min="1" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
-            <input type="date" value={bookingForm.check_in_date} onChange={(e) => setBookingForm({ ...bookingForm, check_in_date: e.target.value, room: '' })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
-            <input type="date" value={bookingForm.check_out_date} onChange={(e) => setBookingForm({ ...bookingForm, check_out_date: e.target.value, room: '' })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+            <label className="grid gap-1 text-xs font-medium uppercase text-slate-500">
+              Guests
+              <input type="number" value={bookingForm.number_of_guests} onChange={(e) => setBookingForm({ ...bookingForm, number_of_guests: Number(e.target.value) })} min="1" className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal normal-case text-slate-900" required />
+            </label>
+            <label className="grid gap-1 text-xs font-medium uppercase text-slate-500">
+              Check-in
+              <input type="date" value={bookingForm.check_in_date} onChange={(e) => setBookingForm({ ...bookingForm, check_in_date: e.target.value, room: '' })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal normal-case text-slate-900" required />
+            </label>
+            <label className="grid gap-1 text-xs font-medium uppercase text-slate-500">
+              Checkout
+              <input type="date" value={bookingForm.check_out_date} onChange={(e) => setBookingForm({ ...bookingForm, check_out_date: e.target.value, room: '' })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal normal-case text-slate-900" required />
+            </label>
             <select value={bookingForm.room} onChange={(e) => setBookingForm({ ...bookingForm, room: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required disabled={!bookingForm.check_in_date || !bookingForm.check_out_date}>
               <option value="">{roomsLoading ? 'Checking rooms...' : 'Select available room'}</option>
               {bookableRooms?.map((room) => (
                 <option key={room.id} value={room.id}>
-                  Room {room.room_number} - {room.room_type_name} - {formatMoney(room.price_per_night, settings?.currency)}
+                  Room {room.room_number} - {room.room_type_name} - sleeps {room.capacity} - {formatMoney(room.price_per_night, settings?.currency)}
                 </option>
               ))}
             </select>
-            <select value={bookingForm.status} onChange={(e) => setBookingForm({ ...bookingForm, status: e.target.value as Booking['status'] })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
-              <option value="confirmed">Confirmed</option>
-              <option value="checked_in">Walk-in check-in</option>
-            </select>
             <textarea placeholder="Special requests" value={bookingForm.special_requests} onChange={(e) => setBookingForm({ ...bookingForm, special_requests: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2" />
+            {bookingForm.check_in_date && bookingForm.check_out_date && (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm md:col-span-2">
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <p className="font-medium text-slate-900">
+                    {roomsLoading ? 'Checking rooms...' : `${bookableRooms?.length || 0} room(s) available`}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {bookingForm.status === 'checked_in' ? 'Walk-ins require an available room because check-in happens immediately.' : 'Only rooms without overlapping active stays are shown.'}
+                  </p>
+                </div>
+                {selectedRoom && (
+                  <div className="mt-3 grid gap-2 md:grid-cols-4">
+                    <span className="rounded-lg bg-white px-3 py-2">
+                      <strong className="block text-slate-900">Room {selectedRoom.room_number}</strong>
+                      selected
+                    </span>
+                    <span className="rounded-lg bg-white px-3 py-2">
+                      <strong className="block text-slate-900">{selectedRoom.room_type_name}</strong>
+                      room type
+                    </span>
+                    <span className="rounded-lg bg-white px-3 py-2">
+                      <strong className="block text-slate-900">{selectedRoom.capacity}</strong>
+                      capacity
+                    </span>
+                    <span className="rounded-lg bg-white px-3 py-2">
+                      <strong className="block text-slate-900 capitalize">{selectedRoom.status}</strong>
+                      readiness
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
             <p className="text-sm text-slate-600">
               Estimated total: <span className="font-semibold text-slate-900">{formatMoney(estimatedTotal, settings?.currency)}</span>
             </p>
-            <button type="submit" disabled={!bookingForm.guest || createBooking.isPending || createWalkInBooking.isPending} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+            <button type="submit" disabled={!bookingForm.guest || selectedBookingGuest?.vip_level === 'blacklist' || createBooking.isPending || createWalkInBooking.isPending} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300">
               {bookingForm.status === 'checked_in' ? 'Check in walk-in' : 'Create reservation'}
             </button>
           </div>
-          {(createBooking.isError || createWalkInBooking.isError) && <p className="mt-3 text-sm text-red-600">Could not create booking. Check dates, guest, and room availability.</p>}
+          {(bookingFormError || createBooking.isError || createWalkInBooking.isError) && <p className="mt-3 text-sm text-red-600">{bookingFormError || 'Could not create booking. Check dates, guest, and room availability.'}</p>}
         </form>
       )}
 
@@ -1567,19 +1708,74 @@ const Bookings: React.FC = () => {
           onClose={() => setTransferBooking(null)}
         >
           <form onSubmit={handleTransferRoom}>
-            <select
-              value={transferForm.room}
-              onChange={(e) => setTransferForm({ room: e.target.value })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              required
-            >
-              <option value="">{transferRoomsLoading ? 'Checking rooms...' : 'Select available room'}</option>
-              {transferRooms?.map((room) => (
-                <option key={room.id} value={room.id}>
-                  Room {room.room_number} - {room.room_type_name} - {formatMoney(room.price_per_night, settings?.currency)}
-                </option>
-              ))}
-            </select>
+            <div className="grid gap-3">
+              <select
+                value={transferForm.room}
+                onChange={(e) => setTransferForm({ ...transferForm, room: e.target.value })}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                required
+              >
+                <option value="">{transferRoomsLoading ? 'Checking rooms...' : 'Select available room'}</option>
+                {transferRooms?.map((room) => (
+                  <option key={room.id} value={room.id}>
+                    Room {room.room_number} - {room.room_type_name} - {formatMoney(room.price_per_night, settings?.currency)}
+                  </option>
+                ))}
+              </select>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="grid gap-1 text-xs font-medium uppercase text-slate-500">
+                  Transfer date
+                  <input
+                    type="date"
+                    value={transferForm.transfer_date}
+                    min={transferBooking.check_in_date}
+                    max={transferBooking.check_out_date}
+                    onChange={(e) => setTransferForm({ ...transferForm, transfer_date: e.target.value })}
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal normal-case text-slate-900"
+                    required
+                  />
+                </label>
+                <label className="grid gap-1 text-xs font-medium uppercase text-slate-500">
+                  Rate policy
+                  <select
+                    value={transferForm.adjustment_policy}
+                    onChange={(e) => setTransferForm({ ...transferForm, adjustment_policy: e.target.value as TransferRatePolicy })}
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-normal normal-case text-slate-900"
+                  >
+                    {transferRatePolicies.map((policy) => (
+                      <option key={policy.value} value={policy.value}>{policy.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              {transferAdjustment && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
+                  <div className="grid gap-2 md:grid-cols-4">
+                    <span className="rounded-lg bg-white px-3 py-2">
+                      <strong className="block text-slate-900">{formatMoney(transferAdjustment.oldRate, settings?.currency)}</strong>
+                      old rate
+                    </span>
+                    <span className="rounded-lg bg-white px-3 py-2">
+                      <strong className="block text-slate-900">{formatMoney(transferAdjustment.newRate, settings?.currency)}</strong>
+                      new rate
+                    </span>
+                    <span className="rounded-lg bg-white px-3 py-2">
+                      <strong className="block text-slate-900">{transferAdjustment.remainingNights}</strong>
+                      night(s)
+                    </span>
+                    <span className="rounded-lg bg-white px-3 py-2">
+                      <strong className={`block ${transferAdjustment.amount < 0 ? 'text-emerald-700' : transferAdjustment.amount > 0 ? 'text-amber-700' : 'text-slate-900'}`}>
+                        {formatMoney(transferAdjustment.amount, settings?.currency)}
+                      </strong>
+                      folio adjustment
+                    </span>
+                  </div>
+                  <p className="mt-3 text-xs text-slate-600">
+                    Positive adjustments add a folio charge. Negative adjustments credit the guest folio.
+                  </p>
+                </div>
+              )}
+            </div>
             <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
               <button type="button" onClick={() => setTransferBooking(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
                 Cancel
@@ -1650,7 +1846,46 @@ const Bookings: React.FC = () => {
                       <ReadinessItem label="Room charge line" value={`${readiness.roomChargeLines.length} line(s)`} ok={readiness.roomChargeLines.length > 0} />
                       <ReadinessItem label="Restaurant postings" value={`${readiness.restaurantLines.length} line(s)`} ok />
                       <ReadinessItem label="Facility postings" value={`${readiness.facilityLines.length} line(s)`} ok />
+                      <ReadinessItem label="Unresolved orders" value={`${readiness.unresolvedPostingCount} order(s)`} ok={readiness.unresolvedPostingCount === 0} />
                     </div>
+                    {readiness.blockers.length > 0 && (
+                      <div className="mt-4 rounded-xl border border-rose-200 bg-white p-3">
+                        <p className="text-xs font-semibold uppercase text-rose-700">Blocking checkout</p>
+                        <ul className="mt-2 space-y-1 text-sm text-rose-700">
+                          {readiness.blockers.map((blocker) => (
+                            <li key={blocker}>{blocker}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {readiness.warnings.length > 0 && (
+                      <div className="mt-4 rounded-xl border border-amber-200 bg-white p-3">
+                        <p className="text-xs font-semibold uppercase text-amber-700">Needs attention</p>
+                        <ul className="mt-2 space-y-1 text-sm text-amber-700">
+                          {readiness.warnings.map((warning) => (
+                            <li key={warning}>{warning}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {readiness.unresolvedPostings.length > 0 && (
+                      <div className="mt-4 overflow-x-auto rounded-xl bg-white p-3">
+                        <table className="w-full min-w-[420px] text-left text-xs">
+                          <thead className="uppercase text-slate-500">
+                            <tr><th className="py-2 pr-3">Order</th><th className="py-2 pr-3">Status</th><th className="py-2 pr-3 text-right">Due</th></tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {readiness.unresolvedPostings.map((order) => (
+                              <tr key={order.id}>
+                                <td className="py-2 pr-3 font-medium text-slate-900">{order.order_number}</td>
+                                <td className="py-2 pr-3 capitalize text-slate-600">{order.status.replace('_', ' ')}</td>
+                                <td className="py-2 pr-3 text-right font-semibold text-slate-900">{formatMoney(order.grand_total, settings?.currency)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                     {readiness.folio && (
                       <div className="mt-4 flex flex-wrap gap-2">
                         <button type="button" onClick={() => setSelectedFolio(readiness.folio || null)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50">
@@ -1681,7 +1916,7 @@ const Bookings: React.FC = () => {
                   <button type="button" onClick={() => setCheckoutBooking(null)} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
                     Cancel
                   </button>
-                  <button type="submit" disabled={bookingAction.isPending || !readiness.hasOpenFolio} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300">
+                  <button type="submit" disabled={bookingAction.isPending || !readiness.isReady} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:cursor-not-allowed disabled:bg-slate-300">
                     Settle checkout
                   </button>
                 </div>

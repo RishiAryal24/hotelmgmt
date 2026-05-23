@@ -31,7 +31,7 @@ from bookings.serializers import (
     RoomSerializer,
     RoomTypeSerializer,
 )
-from bookings.services import check_in_booking, create_walk_in_booking, ensure_room_charge_line, extend_booking_stay, get_guest_history, modify_confirmed_booking, transfer_booking_room
+from bookings.services import CheckoutException, TRANSFER_RATE_POLICIES, check_in_booking, check_out_booking, create_walk_in_booking, extend_booking_stay, get_checkout_readiness, get_guest_history, modify_confirmed_booking, require_checkout_ready, transfer_booking_room
 from users.permissions import HasActionPermission
 from .tasks import queue_booking_confirmation_email
 
@@ -197,20 +197,6 @@ class BookingViewSet(viewsets.ModelViewSet):
                 return Response({'error': 'Invalid payment method'}, status=status.HTTP_400_BAD_REQUEST)
 
             with transaction.atomic():
-                folio, _ = GuestFolio.objects.get_or_create(
-                    booking=booking,
-                    defaults={
-                        'subtotal': booking.total_amount,
-                    },
-                )
-                ensure_room_charge_line(folio)
-                if folio.status != 'open':
-                    return Response({'error': 'Only open folios can be settled at checkout'}, status=status.HTTP_400_BAD_REQUEST)
-
-                paid_amount = Decimal(str(request.data.get('paid_amount') or folio.grand_total))
-                if paid_amount != folio.grand_total:
-                    return Response({'error': 'Partial hotel folio payments are not enabled yet'}, status=status.HTTP_400_BAD_REQUEST)
-
                 cashier_shift = None
                 if request.data.get('cashier_shift'):
                     from restaurant.services import get_open_cashier_shift
@@ -220,17 +206,16 @@ class BookingViewSet(viewsets.ModelViewSet):
                     except Exception:
                         return Response({'error': 'Select an open cashier shift for settlement'}, status=status.HTTP_400_BAD_REQUEST)
 
-                folio.settle(payment_method=payment_method, paid_amount=paid_amount, cashier_shift=cashier_shift)
-                from accounting.services import post_room_payment
-
-                post_room_payment(folio, posted_by=request.user)
-
-                booking.status = 'checked_out'
-                booking.save()
-
-                from housekeeping.services import create_checkout_cleaning_task
-
-                create_checkout_cleaning_task(booking)
+                try:
+                    booking, folio = check_out_booking(
+                        booking,
+                        payment_method=payment_method,
+                        paid_amount=request.data.get('paid_amount'),
+                        posted_by=request.user,
+                        cashier_shift=cashier_shift,
+                    )
+                except CheckoutException as exc:
+                    return Response({'error': str(exc), 'readiness': exc.readiness}, status=status.HTTP_400_BAD_REQUEST)
                 create_post_stay_follow_up(booking, created_by=request.user)
 
                 queue_booking_confirmation_email(booking.id, booking.guest.email)
@@ -239,6 +224,10 @@ class BookingViewSet(viewsets.ModelViewSet):
                 'folio': GuestFolioSerializer(folio).data,
             })
         return Response({'error': 'Cannot check out'}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['get'], url_path='checkout-readiness')
+    def checkout_readiness(self, request, pk=None):
+        return Response(get_checkout_readiness(self.get_object()))
 
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
@@ -319,15 +308,26 @@ class BookingViewSet(viewsets.ModelViewSet):
     def transfer_room(self, request, pk=None):
         booking = self.get_object()
         room_id = request.data.get('room')
+        adjustment_policy = request.data.get('adjustment_policy') or 'keep_rate'
+        transfer_date = parse_date(request.data.get('transfer_date') or '') if request.data.get('transfer_date') else None
         if not room_id:
             return Response({'room': 'Target room is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if adjustment_policy not in TRANSFER_RATE_POLICIES:
+            return Response({'adjustment_policy': 'Select a valid room transfer rate policy.'}, status=status.HTTP_400_BAD_REQUEST)
+        if request.data.get('transfer_date') and not transfer_date:
+            return Response({'transfer_date': 'Valid transfer date is required.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
             new_room = Room.objects.get(id=room_id)
         except Room.DoesNotExist:
             return Response({'room': 'Target room was not found.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            booking, folio = transfer_booking_room(booking, new_room)
+            booking, folio = transfer_booking_room(
+                booking,
+                new_room,
+                adjustment_policy=adjustment_policy,
+                transfer_date=transfer_date,
+            )
         except ValueError as exc:
             return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -385,6 +385,11 @@ class GuestFolioViewSet(viewsets.ReadOnlyModelViewSet):
         folio = self.get_object()
         if folio.status != 'open':
             return Response({'error': 'Only open folios can be settled'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            require_checkout_ready(folio.booking)
+        except CheckoutException as exc:
+            return Response({'error': str(exc), 'readiness': exc.readiness}, status=status.HTTP_400_BAD_REQUEST)
 
         payment_method = request.data.get('payment_method', 'cash')
         if payment_method not in dict(GuestFolio.PAYMENT_METHOD_CHOICES):

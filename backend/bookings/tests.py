@@ -15,6 +15,7 @@ from bookings.services import check_in_booking, create_walk_in_booking, extend_b
 from bookings.tasks import queue_booking_confirmation_email
 from housekeeping.models import HousekeepingTask
 from housekeeping.services import complete_housekeeping_task, create_checkout_cleaning_task
+from restaurant.models import RestaurantOrder
 from tenants.models import Domain, Tenant
 from users.models import PlatformUser
 
@@ -237,6 +238,102 @@ class StayExtensionTests(TenantTestCase):
         self.assertEqual(folio.grand_total, 200)
         self.assertTrue(HousekeepingTask.objects.filter(room=self.room, task_type='stayover_clean', status='open').exists())
         self.assertTrue(GuestFolioLine.objects.filter(folio=folio, source_module='room_transfer', amount=0).exists())
+
+    def test_room_transfer_can_charge_upgrade_difference(self):
+        new_room = Room.objects.create(
+            room_number='304',
+            room_type=self.room_type,
+            capacity=2,
+            price_per_night='160.00',
+            status='available',
+        )
+
+        booking, folio = transfer_booking_room(
+            self.booking,
+            new_room,
+            adjustment_policy='charge_difference',
+            transfer_date=date(2026, 5, 11),
+        )
+
+        folio.refresh_from_db()
+        adjustment = GuestFolioLine.objects.get(folio=folio, source_module='room_transfer_rate_adjustment')
+        self.assertEqual(booking.room_id, new_room.id)
+        self.assertEqual(adjustment.amount, 60)
+        self.assertEqual(folio.grand_total, 260)
+
+    def test_room_transfer_can_credit_downgrade_difference(self):
+        new_room = Room.objects.create(
+            room_number='305',
+            room_type=self.room_type,
+            capacity=2,
+            price_per_night='70.00',
+            status='available',
+        )
+
+        booking, folio = transfer_booking_room(
+            self.booking,
+            new_room,
+            adjustment_policy='credit_downgrade',
+            transfer_date=date(2026, 5, 11),
+        )
+
+        folio.refresh_from_db()
+        adjustment = GuestFolioLine.objects.get(folio=folio, source_module='room_transfer_rate_adjustment')
+        self.assertEqual(booking.room_id, new_room.id)
+        self.assertEqual(adjustment.amount, -30)
+        self.assertEqual(folio.grand_total, 170)
+
+    def test_room_transfer_can_record_complimentary_upgrade(self):
+        new_room = Room.objects.create(
+            room_number='306',
+            room_type=self.room_type,
+            capacity=2,
+            price_per_night='160.00',
+            status='available',
+        )
+
+        _booking, folio = transfer_booking_room(
+            self.booking,
+            new_room,
+            adjustment_policy='complimentary_upgrade',
+            transfer_date=date(2026, 5, 11),
+        )
+
+        adjustment = GuestFolioLine.objects.get(folio=folio, source_module='room_transfer_rate_adjustment')
+        self.assertEqual(adjustment.amount, 0)
+        self.assertIn('Complimentary upgrade', adjustment.description)
+
+    def test_room_transfer_api_accepts_rate_policy(self):
+        client = APIClient(HTTP_HOST=self.get_test_tenant_domain())
+        user = PlatformUser.objects.create_user(
+            email='transfer-rate@example.com',
+            password='testpass123456',
+            tenant=self.tenant,
+            is_tenant_admin=True,
+        )
+        client.force_authenticate(user)
+        new_room = Room.objects.create(
+            room_number='307',
+            room_type=self.room_type,
+            capacity=2,
+            price_per_night='160.00',
+            status='available',
+        )
+
+        response = client.post(
+            f'/api/v1/bookings/bookings/{self.booking.id}/transfer-room/',
+            {
+                'room': str(new_room.id),
+                'adjustment_policy': 'charge_difference',
+                'transfer_date': '2026-05-11',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        folio = GuestFolio.objects.get(booking=self.booking)
+        adjustment = GuestFolioLine.objects.get(folio=folio, source_module='room_transfer_rate_adjustment')
+        self.assertEqual(adjustment.amount, 60)
 
     def test_room_transfer_is_blocked_when_target_room_has_overlap(self):
         new_room = Room.objects.create(
@@ -733,6 +830,20 @@ class WalkInBookingTests(TenantTestCase):
 
         self.assertFalse(Booking.objects.exists())
 
+    def test_walk_in_service_rejects_do_not_book_guest(self):
+        self.guest.vip_level = 'blacklist'
+        self.guest.save(update_fields=['vip_level', 'updated_at'])
+
+        with self.assertRaises(ValueError):
+            create_walk_in_booking(
+                room=self.room,
+                guest=self.guest,
+                check_in_date=date(2026, 5, 20),
+                check_out_date=date(2026, 5, 21),
+            )
+
+        self.assertFalse(Booking.objects.exists())
+
     def test_tenant_user_can_create_walk_in_from_api(self):
         response = self.client.post(
             '/api/v1/bookings/bookings/walk-in/',
@@ -754,6 +865,25 @@ class WalkInBookingTests(TenantTestCase):
         self.assertEqual(self.room.status, 'occupied')
         self.assertTrue(GuestFolio.objects.filter(booking=booking, status='open').exists())
         self.assertEqual(response.data['booking']['special_requests'], 'Cash payer')
+
+    def test_tenant_user_cannot_create_walk_in_for_do_not_book_guest(self):
+        self.guest.vip_level = 'blacklist'
+        self.guest.save(update_fields=['vip_level', 'updated_at'])
+
+        response = self.client.post(
+            '/api/v1/bookings/bookings/walk-in/',
+            {
+                'room': str(self.room.id),
+                'guest': str(self.guest.id),
+                'check_in_date': '2026-05-20',
+                'check_out_date': '2026-05-21',
+                'number_of_guests': 1,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Booking.objects.exists())
 
 
 class ReservationCheckInFolioTests(TenantTestCase):
@@ -908,6 +1038,75 @@ class ReservationCheckInFolioTests(TenantTestCase):
         self.assertEqual(folio.status, 'paid')
         self.assertEqual(self.room.status, 'cleaning')
         self.assertTrue(HousekeepingTask.objects.filter(room=self.room, task_type='checkout_clean', status='open').exists())
+
+    def test_checkout_readiness_reports_missing_folio(self):
+        booking, folio = check_in_booking(self.booking)
+        folio.delete()
+
+        response = self.client.get(f'/api/v1/bookings/bookings/{booking.id}/checkout-readiness/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data['is_ready'])
+        self.assertEqual(response.data['folio_status'], 'missing')
+        self.assertIn('No guest folio is attached to this stay.', response.data['blockers'])
+
+    def test_checkout_api_blocks_missing_folio_without_recreating_it(self):
+        booking, folio = check_in_booking(self.booking)
+        folio.delete()
+
+        response = self.client.post(
+            f'/api/v1/bookings/bookings/{booking.id}/check_out/',
+            {
+                'payment_method': 'cash',
+                'paid_amount': str(booking.total_amount),
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(GuestFolio.objects.filter(booking=booking).exists())
+        self.assertEqual(response.data['readiness']['folio_status'], 'missing')
+
+    def test_checkout_api_blocks_closed_folio(self):
+        booking, folio = check_in_booking(self.booking)
+        folio.status = 'paid'
+        folio.save(update_fields=['status', 'updated_at'])
+
+        response = self.client.post(
+            f'/api/v1/bookings/bookings/{booking.id}/check_out/',
+            {
+                'payment_method': 'cash',
+                'paid_amount': str(folio.grand_total),
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        booking.refresh_from_db()
+        self.assertEqual(booking.status, 'checked_in')
+        self.assertIn('checkout requires an open folio', response.data['error'])
+
+    def test_checkout_api_blocks_unresolved_restaurant_order(self):
+        booking, folio = check_in_booking(self.booking)
+        RestaurantOrder.objects.create(
+            room_booking=booking,
+            order_type='room_service',
+            status='served',
+            grand_total='35.00',
+        )
+
+        response = self.client.post(
+            f'/api/v1/bookings/bookings/{booking.id}/check_out/',
+            {
+                'payment_method': 'cash',
+                'paid_amount': str(folio.grand_total),
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data['readiness']['unresolved_posting_count'], 1)
+        self.assertIn('Unresolved restaurant or room-service orders', response.data['error'])
 
     @override_settings(DEBUG=True, EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
     def test_email_queue_failure_does_not_block_local_flow(self):

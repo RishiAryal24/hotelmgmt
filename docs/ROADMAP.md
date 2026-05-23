@@ -126,6 +126,9 @@ Completed:
 - Availability checks.
 - Check-in and checkout.
 - Guest folios.
+- Walk-in booking polish with front-desk mode switching, guest safety checks, room readiness context, and immediate folio review.
+- Checkout exception handling for missing/closed folios and unresolved restaurant postings.
+- Room transfer rate adjustment policy with folio charge/credit handling.
 - Checkout creates housekeeping task.
 - Completing housekeeping task returns room to available.
 - Maintenance tickets with open/start/resolve/close/cancel workflow.
@@ -134,8 +137,6 @@ Completed:
 Remaining:
 
 - Broader booking modification workflow.
-- Walk-in booking polish.
-- Room transfer rate adjustment policy.
 
 ## Phase 3: Restaurant, POS, Inventory
 

@@ -130,12 +130,14 @@ Completed:
 - Room charge lines are created and backfilled so the room stay appears in folio line detail without double-counting totals.
 - Checkout readiness panel shows open folio status, room charge line status, restaurant postings, facility postings, total due, and quick folio actions.
 - POS can settle open room folios directly and print a dedicated room folio payment receipt.
+- Walk-in booking polish with front-desk mode switching, guest safety checks, room readiness context, and immediate folio review.
+- Checkout exception handling for missing/closed folios and unresolved restaurant postings.
+- Room transfer rate adjustment policy with keep-rate, upgrade-charge, complimentary-upgrade, and downgrade-credit options.
 
 Next slices:
 
-1. Walk-in booking polish.
-2. Room transfer rate adjustment policy.
-3. Checkout exception handling for missing/closed folios and unresolved postings.
+1. Tax configuration.
+2. Vendor bills.
 
 Acceptance criteria:
 
@@ -194,8 +196,8 @@ Next slices:
 2. Trial balance. Done.
 3. Profit and loss report. Done.
 4. Balance sheet. Done.
-5. Tax configuration.
-6. Vendor bills.
+5. Tax configuration. Next.
+6. Vendor bills. Next.
 
 Acceptance criteria:
 

@@ -64,6 +64,28 @@ export interface Booking {
   room_details?: Room;
   guest_details?: Guest;
   folio_details?: GuestFolio | null;
+  checkout_readiness?: CheckoutReadiness;
+}
+
+export interface CheckoutReadiness {
+  is_ready: boolean;
+  blockers: string[];
+  warnings: string[];
+  folio_id: string;
+  folio_status: string;
+  has_open_folio: boolean;
+  has_room_charge_line: boolean;
+  room_charge_line_count: number;
+  restaurant_posting_count: number;
+  facility_posting_count: number;
+  unresolved_posting_count: number;
+  unresolved_postings: {
+    id: string;
+    order_number: string;
+    status: string;
+    grand_total: string;
+  }[];
+  total_due: string;
 }
 
 export interface GuestFolio {

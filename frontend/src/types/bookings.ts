@@ -23,6 +23,18 @@ export interface Room {
   amenities: Record<string, any>;
 }
 
+export interface RatePlan {
+  id: string;
+  name: string;
+  room_type: string;
+  room_type_name?: string;
+  base_rate: string;
+  is_active: boolean;
+  valid_from: string;
+  valid_to: string;
+  conditions: Record<string, any>;
+}
+
 export interface Guest {
   id: string;
   first_name: string;

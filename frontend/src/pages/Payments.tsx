@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { CheckCircle2, CircleSlash, Loader2, Plus, RefreshCw, Search, XCircle } from 'lucide-react';
 import { getPaymentIntentExportUrl, useCreatePaymentIntent, usePaymentFollowUpAction, usePaymentIntentAction, usePaymentIntents, usePaymentProviderAction, usePaymentReconciliationSummary } from '../hooks/payments';
 import apiClient from '../services/api';
@@ -50,6 +50,13 @@ const emptyForm: PaymentIntentCreatePayload = {
 
 const formatMoney = (amount: string, currency: string) => `${currency} ${Number(amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const statusLabel = (status: string) => status.replace('_', ' ');
+const maskedSecret = '********';
+const defaultStripeSettings = {
+  publishable_key: '',
+  secret_key: '',
+  success_url: 'http://localhost:5173/payments',
+  cancel_url: 'http://localhost:5173/payments',
+};
 
 const Payments = () => {
   const { data: intents = [], isLoading, isError } = usePaymentIntents();
@@ -64,6 +71,22 @@ const Payments = () => {
   const { data: settings } = useQuery({ queryKey: ['tenant-settings'], queryFn: getTenantSettings });
   const [form, setForm] = useState<PaymentIntentCreatePayload>(emptyForm);
   const [actionNotes, setActionNotes] = useState<Record<string, string>>({});
+  const [stripeSettingsForm, setStripeSettingsForm] = useState(defaultStripeSettings);
+  const [stripeSettingsState, setStripeSettingsState] = useState<{ saving: boolean; message: string; error: string }>({
+    saving: false,
+    message: '',
+    error: '',
+  });
+
+  useEffect(() => {
+    const stripe = settings?.payment_settings?.stripe || {};
+    setStripeSettingsForm({
+      publishable_key: stripe.publishable_key || '',
+      secret_key: stripe.secret_key || '',
+      success_url: stripe.success_url || defaultStripeSettings.success_url,
+      cancel_url: stripe.cancel_url || defaultStripeSettings.cancel_url,
+    });
+  }, [settings]);
 
   const summary = useMemo(() => {
     const totalOpen = intents.filter((intent) => ['draft', 'requires_action', 'processing'].includes(intent.status)).length;
@@ -159,7 +182,7 @@ const Payments = () => {
     downloadCsv(`payment-reconciliation-summary-${date}.csv`, ['Group', 'Value', 'Count', 'Amount'], rows);
   };
 
-  const toggleProvider = (provider: 'khalti' | 'esewa', enabled: boolean) => {
+  const toggleProvider = (provider: 'khalti' | 'esewa' | 'stripe', enabled: boolean) => {
     updateTenantSettings({
       payment_settings: {
         [provider]: {
@@ -168,6 +191,32 @@ const Payments = () => {
         },
       },
     }).then(() => window.location.reload());
+  };
+
+  const saveStripeSettings = async () => {
+    setStripeSettingsState({ saving: true, message: '', error: '' });
+    try {
+      await updateTenantSettings({
+        payment_settings: {
+          stripe: {
+            ...(settings?.payment_settings?.stripe || {}),
+            enabled: Boolean(settings?.payment_settings?.stripe?.enabled),
+            mode: 'test',
+            publishable_key: stripeSettingsForm.publishable_key.trim(),
+            secret_key: stripeSettingsForm.secret_key.trim() || maskedSecret,
+            success_url: stripeSettingsForm.success_url.trim(),
+            cancel_url: stripeSettingsForm.cancel_url.trim(),
+          },
+        },
+      });
+      setStripeSettingsState({ saving: false, message: 'Stripe sandbox settings saved.', error: '' });
+    } catch (error) {
+      setStripeSettingsState({
+        saving: false,
+        message: '',
+        error: error instanceof Error ? error.message : 'Could not save Stripe sandbox settings.',
+      });
+    }
   };
 
   return (
@@ -227,12 +276,64 @@ const Payments = () => {
         <section className="rounded-lg bg-white p-5 shadow-sm">
           <h2 className="text-base font-semibold text-slate-900">Sandbox Providers</h2>
           <div className="mt-4 grid gap-3">
-            {(['khalti', 'esewa'] as const).map((provider) => (
+            {(['khalti', 'esewa', 'stripe'] as const).map((provider) => (
               <label key={provider} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
                 <span className="capitalize">{provider} sandbox</span>
                 <input type="checkbox" checked={Boolean(settings?.payment_settings?.[provider]?.enabled)} onChange={(event) => toggleProvider(provider, event.target.checked)} />
               </label>
             ))}
+          </div>
+        </section>
+
+        <section className="rounded-lg bg-white p-5 shadow-sm">
+          <h2 className="text-base font-semibold text-slate-900">Stripe Sandbox Settings</h2>
+          <div className="mt-4 grid gap-3">
+            <label className="grid gap-1 text-sm font-medium text-slate-700">
+              Publishable key
+              <input
+                className="rounded-lg border border-slate-200 px-3 py-2"
+                value={stripeSettingsForm.publishable_key}
+                onChange={(event) => setStripeSettingsForm({ ...stripeSettingsForm, publishable_key: event.target.value })}
+                placeholder="pk_test_..."
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-medium text-slate-700">
+              Secret key
+              <input
+                className="rounded-lg border border-slate-200 px-3 py-2"
+                value={stripeSettingsForm.secret_key}
+                onChange={(event) => setStripeSettingsForm({ ...stripeSettingsForm, secret_key: event.target.value })}
+                placeholder="sk_test_... or leave masked value unchanged"
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-medium text-slate-700">
+              Success URL
+              <input
+                className="rounded-lg border border-slate-200 px-3 py-2"
+                value={stripeSettingsForm.success_url}
+                onChange={(event) => setStripeSettingsForm({ ...stripeSettingsForm, success_url: event.target.value })}
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-medium text-slate-700">
+              Cancel URL
+              <input
+                className="rounded-lg border border-slate-200 px-3 py-2"
+                value={stripeSettingsForm.cancel_url}
+                onChange={(event) => setStripeSettingsForm({ ...stripeSettingsForm, cancel_url: event.target.value })}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={stripeSettingsState.saving}
+              onClick={saveStripeSettings}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
+            >
+              {stripeSettingsState.saving ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+              Save Stripe settings
+            </button>
+            <p className="text-xs text-slate-500">Masked secret keys are preserved unless you replace them with a new test key.</p>
+            {stripeSettingsState.message && <p className="text-sm text-emerald-700">{stripeSettingsState.message}</p>}
+            {stripeSettingsState.error && <p className="text-sm text-red-600">{stripeSettingsState.error}</p>}
           </div>
         </section>
 
@@ -329,7 +430,7 @@ const Payments = () => {
                           className="w-48 rounded-lg border border-slate-200 px-3 py-2 text-xs"
                           value={actionNotes[intent.id] || ''}
                           onChange={(event) => setActionNotes({ ...actionNotes, [intent.id]: event.target.value })}
-                          placeholder="Reference or note"
+                          placeholder={intent.provider === 'stripe' ? 'Stripe test payment method' : 'Reference or note'}
                         />
                       </td>
                       <td className="px-4 py-3">
@@ -342,10 +443,13 @@ const Payments = () => {
                           {intent.provider === 'khalti' && <IconButton label="Initiate Khalti" disabled={providerAction.isPending || intent.status === 'succeeded'} onClick={() => providerAction.mutate({ intentId: intent.id, action: 'initiate-khalti' })} icon={<Plus size={15} />} />}
                           {intent.provider === 'khalti' && <IconButton label="Lookup Khalti" disabled={providerAction.isPending || !intent.provider_reference || intent.status === 'succeeded'} onClick={() => providerAction.mutate({ intentId: intent.id, action: 'lookup-khalti' })} icon={<RefreshCw size={15} />} />}
                           {intent.provider === 'esewa' && <IconButton label="Initiate eSewa" disabled={providerAction.isPending || intent.status === 'succeeded'} onClick={() => providerAction.mutate({ intentId: intent.id, action: 'initiate-esewa' })} icon={<Plus size={15} />} />}
+                          {intent.provider === 'stripe' && <IconButton label="Initiate Stripe" disabled={providerAction.isPending || intent.status === 'succeeded'} onClick={() => providerAction.mutate({ intentId: intent.id, action: 'initiate-stripe' })} icon={<Plus size={15} />} />}
+                          {intent.provider === 'stripe' && <IconButton label="Confirm Stripe Test" disabled={providerAction.isPending || !intent.provider_reference || ['succeeded', 'failed', 'canceled'].includes(intent.status)} onClick={() => providerAction.mutate({ intentId: intent.id, action: 'confirm-stripe', payload: { payment_method: actionNotes[intent.id] || 'pm_card_visa' } })} icon={<CheckCircle2 size={15} />} />}
                           <TextButton label="Review" disabled={followUpAction.isPending || intent.follow_up_status === 'in_review'} onClick={() => runFollowUp(intent, 'in_review')} />
                           <TextButton label="Resolve" disabled={followUpAction.isPending || intent.follow_up_status === 'resolved'} onClick={() => runFollowUp(intent, 'resolved')} />
                         </div>
                         {typeof intent.provider_payload?.payment_url === 'string' && <a className="mt-2 inline-block text-xs font-semibold text-[#1F5E3B]" href={intent.provider_payload.payment_url as string} target="_blank" rel="noreferrer">Open hosted payment</a>}
+                        {intent.provider === 'stripe' && typeof intent.provider_payload?.client_secret === 'string' && <p className="mt-2 max-w-64 break-all text-xs text-slate-500">Client secret: {intent.provider_payload.client_secret as string}</p>}
                       </td>
                     </tr>
                   ))}

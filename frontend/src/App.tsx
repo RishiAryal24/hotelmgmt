@@ -18,6 +18,7 @@ import Maintenance from './pages/Maintenance';
 import AuditLogs from './pages/AuditLogs';
 import Notifications from './pages/Notifications';
 import Payments from './pages/Payments';
+import Integrations from './pages/Integrations';
 
 function App() {
   return (
@@ -50,6 +51,9 @@ function App() {
             </Route>
             <Route element={<ProtectedRoute permissions={['payments.intent.read', 'payments.intent.create']} />}>
               <Route path="/payments" element={<Payments />} />
+            </Route>
+            <Route element={<ProtectedRoute permissions={['integrations.ota.read', 'integrations.ota.manage']} />}>
+              <Route path="/integrations" element={<Integrations />} />
             </Route>
             <Route element={<ProtectedRoute permissions={['accounting.ledger.read', 'accounting.journal.create']} />}>
               <Route path="/accounting" element={<Accounting />} />

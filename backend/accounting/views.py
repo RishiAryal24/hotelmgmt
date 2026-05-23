@@ -1,13 +1,14 @@
 from django_filters.rest_framework import DjangoFilterBackend
+from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from accounting.models import Account, JournalEntry
-from accounting.serializers import AccountSerializer, JournalEntrySerializer
-from accounting.services import seed_default_accounts
+from accounting.models import Account, FiscalPeriod, JournalEntry
+from accounting.serializers import AccountSerializer, AccountingDateRangeSerializer, FiscalPeriodSerializer, JournalEntrySerializer
+from accounting.services import get_balance_sheet, get_profit_and_loss, get_trial_balance, seed_default_accounts
 from users.permissions import HasActionPermission
 
 
@@ -46,6 +47,9 @@ class JournalEntryViewSet(viewsets.ModelViewSet):
         'update': 'accounting.journal.create',
         'partial_update': 'accounting.journal.create',
         'destroy': 'accounting.journal.create',
+        'trial_balance': 'accounting.ledger.read',
+        'profit_and_loss': 'accounting.ledger.read',
+        'balance_sheet': 'accounting.ledger.read',
     }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'source_module']
@@ -54,3 +58,67 @@ class JournalEntryViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(posted_by=self.request.user)
+
+    @action(detail=False, methods=['get'], url_path='trial-balance')
+    def trial_balance(self, request):
+        serializer = AccountingDateRangeSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        report = get_trial_balance(
+            date_from=serializer.validated_data.get('date_from'),
+            date_to=serializer.validated_data.get('date_to'),
+        )
+        return Response(report)
+
+    @action(detail=False, methods=['get'], url_path='profit-and-loss')
+    def profit_and_loss(self, request):
+        serializer = AccountingDateRangeSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        date_from = serializer.validated_data.get('date_from')
+        date_to = serializer.validated_data.get('date_to')
+        if not date_from or not date_to:
+            return Response({'error': 'date_from and date_to are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(get_profit_and_loss(date_from=date_from, date_to=date_to))
+
+    @action(detail=False, methods=['get'], url_path='balance-sheet')
+    def balance_sheet(self, request):
+        serializer = AccountingDateRangeSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        return Response(get_balance_sheet(as_of=serializer.validated_data.get('as_of')))
+
+
+class FiscalPeriodViewSet(viewsets.ModelViewSet):
+    queryset = FiscalPeriod.objects.select_related('closed_by').all()
+    serializer_class = FiscalPeriodSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'accounting.ledger.read',
+        'retrieve': 'accounting.ledger.read',
+        'create': 'accounting.journal.create',
+        'update': 'accounting.journal.create',
+        'partial_update': 'accounting.journal.create',
+        'destroy': 'accounting.journal.create',
+        'close_period': 'accounting.journal.create',
+        'reopen_period': 'accounting.journal.create',
+    }
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['status']
+    search_fields = ['name']
+    ordering_fields = ['start_date', 'end_date', 'created_at']
+
+    @action(detail=True, methods=['post'], url_path='close')
+    def close_period(self, request, pk=None):
+        period = self.get_object()
+        period.status = 'closed'
+        period.closed_by = request.user
+        period.closed_at = timezone.now()
+        period.save(update_fields=['status', 'closed_by', 'closed_at', 'updated_at'])
+        return Response(self.get_serializer(period).data)
+
+    @action(detail=True, methods=['post'], url_path='reopen')
+    def reopen_period(self, request, pk=None):
+        period = self.get_object()
+        period.status = 'open'
+        period.closed_by = None
+        period.closed_at = None
+        period.save(update_fields=['status', 'closed_by', 'closed_at', 'updated_at'])
+        return Response(self.get_serializer(period).data)

@@ -28,6 +28,30 @@ class Account(UUIDModel):
         return f'{self.code} - {self.name}'
 
 
+class FiscalPeriod(UUIDModel):
+    STATUS_CHOICES = [
+        ('open', 'Open'),
+        ('closed', 'Closed'),
+    ]
+
+    name = models.CharField(max_length=120, unique=True)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    closed_at = models.DateTimeField(null=True, blank=True)
+    closed_by = models.ForeignKey('users.PlatformUser', on_delete=models.SET_NULL, null=True, blank=True, related_name='closed_fiscal_periods')
+
+    class Meta:
+        ordering = ['-start_date', '-created_at']
+
+    def clean(self):
+        if self.start_date > self.end_date:
+            raise ValueError('Fiscal period start date must be on or before end date.')
+
+    def __str__(self):
+        return self.name
+
+
 class JournalEntry(UUIDModel):
     STATUS_CHOICES = [
         ('draft', 'Draft'),
@@ -41,6 +65,7 @@ class JournalEntry(UUIDModel):
     source_module = models.CharField(max_length=80, blank=True)
     source_id = models.CharField(max_length=80, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='posted')
+    fiscal_period = models.ForeignKey('accounting.FiscalPeriod', on_delete=models.SET_NULL, null=True, blank=True, related_name='journal_entries')
     posted_by = models.ForeignKey('users.PlatformUser', on_delete=models.SET_NULL, null=True, blank=True)
     posted_at = models.DateTimeField(default=timezone.now)
 
@@ -80,4 +105,3 @@ class JournalLine(UUIDModel):
 
     def __str__(self):
         return f'{self.account.code} D{self.debit} C{self.credit}'
-

@@ -50,6 +50,7 @@ class PaymentIntentActionSerializer(serializers.Serializer):
 
 class PaymentInitiateSerializer(serializers.Serializer):
     customer_info = serializers.JSONField(required=False)
+    payment_method = serializers.CharField(required=False, allow_blank=True)
 
 
 class EsewaVerifySerializer(serializers.Serializer):

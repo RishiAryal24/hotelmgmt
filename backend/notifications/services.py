@@ -22,6 +22,7 @@ MODULE_MANAGER_ROLE_CODES = {
     'inventory': {'hotel_admin', 'inventory_manager'},
     'hrms': {'hotel_admin', 'hr_officer', 'accountant'},
     'housekeeping': {'hotel_admin', 'maintenance'},
+    'integrations': {'hotel_admin', 'receptionist', 'auditor'},
 }
 
 
@@ -160,6 +161,54 @@ def create_housekeeping_escalation_notification(task, ticket, *, created_by=None
             'room_id': str(task.room_id),
             'room_number': task.room.room_number,
             'priority': task.priority,
+        },
+        created_by=created_by,
+    )
+    return events[0]
+
+
+def create_ota_reservation_review_notification(reservation_import, *, created_by=None):
+    conflict = reservation_import.conflict_type.replace('_', ' ')
+    events = create_manager_notification_events(
+        channel='in_app',
+        event_type='ota.reservation_review',
+        module='integrations',
+        subject=f'OTA reservation needs review: {reservation_import.external_reservation_id}',
+        message=f'{reservation_import.channel.name} reservation {reservation_import.external_reservation_id} needs review ({conflict}).',
+        priority='high' if reservation_import.status == 'conflict' else 'normal',
+        payload={
+            'reservation_import_id': reservation_import.id,
+            'channel_id': reservation_import.channel_id,
+            'channel_name': reservation_import.channel.name,
+            'external_reservation_id': reservation_import.external_reservation_id,
+            'status': reservation_import.status,
+            'conflict_type': reservation_import.conflict_type,
+            'conflict_message': reservation_import.conflict_message,
+            'check_in_date': str(reservation_import.check_in_date or ''),
+            'check_out_date': str(reservation_import.check_out_date or ''),
+            'guest_email': reservation_import.guest_email,
+        },
+        created_by=created_by,
+    )
+    return events[0]
+
+
+def create_ota_reservation_reviewed_notification(reservation_import, *, action, created_by=None):
+    events = create_manager_notification_events(
+        channel='in_app',
+        event_type=f'ota.reservation_{action}',
+        module='integrations',
+        subject=f'OTA reservation {action}: {reservation_import.external_reservation_id}',
+        message=f'{reservation_import.channel.name} reservation {reservation_import.external_reservation_id} was {action}.',
+        priority='normal',
+        payload={
+            'reservation_import_id': reservation_import.id,
+            'booking_id': str(reservation_import.booking_id or ''),
+            'channel_id': reservation_import.channel_id,
+            'channel_name': reservation_import.channel.name,
+            'external_reservation_id': reservation_import.external_reservation_id,
+            'status': reservation_import.status,
+            'action': action,
         },
         created_by=created_by,
     )

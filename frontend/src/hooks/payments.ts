@@ -107,8 +107,16 @@ export const usePaymentProviderAction = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ intentId, action }: { intentId: string; action: 'initiate-khalti' | 'lookup-khalti' | 'initiate-esewa' }): Promise<PaymentIntent> => {
-      const response = await apiClient.post<PaymentIntent>(`/payments/intents/${intentId}/${action}/`, {});
+    mutationFn: async ({
+      intentId,
+      action,
+      payload,
+    }: {
+      intentId: string;
+      action: 'initiate-khalti' | 'lookup-khalti' | 'initiate-esewa' | 'initiate-stripe' | 'confirm-stripe';
+      payload?: Record<string, unknown>;
+    }): Promise<PaymentIntent> => {
+      const response = await apiClient.post<PaymentIntent>(`/payments/intents/${intentId}/${action}/`, payload || {});
       return response.data;
     },
     onSuccess: () => {

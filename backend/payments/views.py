@@ -8,7 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from payments.models import PaymentIntent
-from payments.providers import initiate_esewa_payment, initiate_khalti_payment, lookup_khalti_payment, verify_esewa_callback
+from payments.providers import confirm_stripe_test_payment, initiate_esewa_payment, initiate_khalti_payment, initiate_stripe_payment, lookup_khalti_payment, verify_esewa_callback
 from payments.serializers import EsewaVerifySerializer, PaymentFollowUpSerializer, PaymentInitiateSerializer, PaymentIntentActionSerializer, PaymentIntentCreateSerializer, PaymentIntentSerializer, PaymentProviderCallbackSerializer
 from payments.services import PaymentIntentError, cancel_payment_intent, handle_provider_callback, mark_payment_failed, mark_payment_processing, mark_payment_succeeded, reconcile_payment_intent
 from users.permissions import HasActionPermission
@@ -30,6 +30,8 @@ class PaymentIntentViewSet(viewsets.ModelViewSet):
         'lookup_khalti': 'payments.intent.update',
         'initiate_esewa': 'payments.intent.update',
         'verify_esewa': 'payments.intent.update',
+        'initiate_stripe': 'payments.intent.update',
+        'confirm_stripe': 'payments.intent.update',
         'reconcile': 'payments.intent.update',
         'follow_up': 'payments.intent.update',
         'summary': 'payments.intent.read',
@@ -46,7 +48,7 @@ class PaymentIntentViewSet(viewsets.ModelViewSet):
             return PaymentIntentCreateSerializer
         if self.action in ['processing', 'succeed', 'fail', 'cancel']:
             return PaymentIntentActionSerializer
-        if self.action in ['initiate_khalti', 'initiate_esewa']:
+        if self.action in ['initiate_khalti', 'initiate_esewa', 'initiate_stripe', 'confirm_stripe']:
             return PaymentInitiateSerializer
         if self.action == 'verify_esewa':
             return EsewaVerifySerializer
@@ -128,6 +130,26 @@ class PaymentIntentViewSet(viewsets.ModelViewSet):
                 encoded_data=serializer.validated_data.get('encoded_data'),
                 payload=serializer.validated_data.get('payload'),
             )
+        except PaymentIntentError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(PaymentIntentSerializer(intent, context=self.get_serializer_context()).data)
+
+    @action(detail=True, methods=['post'], url_path='initiate-stripe')
+    def initiate_stripe(self, request, pk=None):
+        intent = self.get_object()
+        try:
+            intent = initiate_stripe_payment(intent)
+        except PaymentIntentError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(PaymentIntentSerializer(intent, context=self.get_serializer_context()).data)
+
+    @action(detail=True, methods=['post'], url_path='confirm-stripe')
+    def confirm_stripe(self, request, pk=None):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        intent = self.get_object()
+        try:
+            intent = confirm_stripe_test_payment(intent, payment_method=serializer.validated_data.get('payment_method') or 'pm_card_visa')
         except PaymentIntentError as exc:
             return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(PaymentIntentSerializer(intent, context=self.get_serializer_context()).data)

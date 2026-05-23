@@ -42,6 +42,8 @@ DEFAULT_PERMISSIONS = [
     ('payments.intent.create', 'Create payment intents', 'payments'),
     ('payments.intent.update', 'Update payment intents', 'payments'),
     ('payments.intent.callback', 'Record provider payment callbacks', 'payments'),
+    ('integrations.ota.read', 'View OTA channels and sync jobs', 'integrations'),
+    ('integrations.ota.manage', 'Manage OTA channels and sync jobs', 'integrations'),
     ('reports.operational.read', 'View operational reports', 'reports'),
 ]
 

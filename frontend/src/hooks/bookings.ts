@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Room, RoomType, Guest, Booking, GuestCommunication, GuestFolio, GuestFollowUpReminder, GuestHistory, FacilityAmenity, FacilityService } from '../types/bookings';
+import { Room, RoomType, Guest, Booking, GuestCommunication, GuestFolio, GuestFollowUpReminder, GuestHistory, FacilityAmenity, FacilityService, RatePlan } from '../types/bookings';
 import apiClient from '../services/api';
 
 const getList = <T,>(data: T[] | { results: T[] }) => (Array.isArray(data) ? data : data.results);
@@ -35,6 +35,16 @@ export const useRoomTypes = () => {
     queryKey: ['room-types'],
     queryFn: async (): Promise<RoomType[]> => {
       const response = await apiClient.get<RoomType[] | { results: RoomType[] }>('/bookings/room-types/');
+      return getList(response.data);
+    },
+  });
+};
+
+export const useRatePlans = () => {
+  return useQuery({
+    queryKey: ['rate-plans'],
+    queryFn: async (): Promise<RatePlan[]> => {
+      const response = await apiClient.get<RatePlan[] | { results: RatePlan[] }>('/bookings/rate-plans/');
       return getList(response.data);
     },
   });

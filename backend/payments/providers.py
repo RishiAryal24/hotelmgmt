@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import json
 from decimal import Decimal, ROUND_HALF_UP
-from urllib import error, request
+from urllib import error, parse, request
 
 from django.db import connection
 
@@ -28,6 +28,15 @@ DEFAULT_PAYMENT_SETTINGS = {
         'secret_key': '8gBm/:&EnhH.1/q',
         'success_url': 'http://localhost:5173/payments',
         'failure_url': 'http://localhost:5173/payments',
+    },
+    'stripe': {
+        'enabled': False,
+        'mode': 'test',
+        'base_url': 'https://api.stripe.com/v1',
+        'publishable_key': '',
+        'secret_key': '',
+        'success_url': 'http://localhost:5173/payments',
+        'cancel_url': 'http://localhost:5173/payments',
     },
 }
 
@@ -74,6 +83,43 @@ def _post_json(url, payload, headers=None):
         raise PaymentIntentError(f'Provider request failed: {detail}') from exc
     except error.URLError as exc:
         raise PaymentIntentError(f'Provider request failed: {exc.reason}') from exc
+
+
+def _stripe_request(path, *, method='POST', data=None, secret_key=''):
+    if not secret_key:
+        raise PaymentIntentError('Stripe secret key is not configured.')
+    encoded = parse.urlencode(data or {}, doseq=True).encode()
+    req = request.Request(
+        path,
+        data=encoded if method != 'GET' else None,
+        headers={
+            'Authorization': f'Bearer {secret_key}',
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        method=method,
+    )
+    if method == 'GET' and data:
+        req.full_url = f'{path}?{parse.urlencode(data, doseq=True)}'
+    try:
+        with request.urlopen(req, timeout=20) as response:
+            return json.loads(response.read().decode())
+    except error.HTTPError as exc:
+        detail = exc.read().decode()
+        raise PaymentIntentError(f'Provider request failed: {detail}') from exc
+    except error.URLError as exc:
+        raise PaymentIntentError(f'Provider request failed: {exc.reason}') from exc
+
+
+def _stripe_status_to_intent_status(status):
+    if status in ['requires_payment_method', 'requires_confirmation', 'requires_action']:
+        return 'requires_action'
+    if status in ['processing', 'requires_capture']:
+        return 'processing'
+    if status == 'succeeded':
+        return 'succeeded'
+    if status == 'canceled':
+        return 'canceled'
+    return 'requires_action'
 
 
 def initiate_khalti_payment(intent, *, customer_info=None):
@@ -185,3 +231,56 @@ def verify_esewa_callback(intent, *, encoded_data=None, payload=None):
     if status == 'pending':
         return mark_payment_processing(intent, provider_reference=intent.provider_reference, payload=data)
     return mark_payment_failed(intent, message=f'eSewa status: {data.get("status")}', payload=data)
+
+
+def initiate_stripe_payment(intent):
+    config = _provider_settings('stripe')
+    if intent.provider != 'stripe':
+        raise PaymentIntentError('Payment intent provider must be Stripe.')
+    payload = {
+        'amount': _amount_to_paisa(intent.amount),
+        'currency': (intent.currency or 'USD').lower(),
+        'description': intent.description or f'{intent.source_module} {intent.source_id}',
+        'metadata[source_module]': intent.source_module,
+        'metadata[source_id]': intent.source_id,
+        'metadata[idempotency_key]': intent.idempotency_key,
+        'automatic_payment_methods[enabled]': 'true',
+    }
+    data = _stripe_request(
+        f"{config['base_url'].rstrip('/')}/payment_intents",
+        data=payload,
+        secret_key=config['secret_key'],
+    )
+    provider_reference = data.get('id')
+    if not provider_reference:
+        raise PaymentIntentError('Stripe did not return a payment intent identifier.')
+    return update_provider_payload(
+        intent,
+        provider_reference=provider_reference,
+        payload=data,
+        status=_stripe_status_to_intent_status(data.get('status', 'requires_action')),
+    )
+
+
+def confirm_stripe_test_payment(intent, *, payment_method='pm_card_visa'):
+    config = _provider_settings('stripe')
+    if intent.provider != 'stripe':
+        raise PaymentIntentError('Payment intent provider must be Stripe.')
+    if not intent.provider_reference:
+        raise PaymentIntentError('Stripe payment intent has no provider reference.')
+    data = _stripe_request(
+        f"{config['base_url'].rstrip('/')}/payment_intents/{intent.provider_reference}/confirm",
+        data={'payment_method': payment_method},
+        secret_key=config['secret_key'],
+    )
+    status = data.get('status', '')
+    if status == 'succeeded':
+        succeeded = mark_payment_succeeded(intent, provider_reference=intent.provider_reference, payload=data)
+        return reconcile_payment_intent(succeeded)
+    if status in ['processing', 'requires_capture']:
+        return mark_payment_processing(intent, provider_reference=intent.provider_reference, payload=data)
+    if status == 'requires_action':
+        return update_provider_payload(intent, provider_reference=intent.provider_reference, payload=data, status='requires_action')
+    if status in ['requires_payment_method', 'canceled']:
+        return mark_payment_failed(intent, message=data.get('last_payment_error', {}).get('message', f'Stripe status: {status}'), payload=data)
+    raise PaymentIntentError(f'Unsupported Stripe confirmation status: {status}')

@@ -1,8 +1,10 @@
+from collections import defaultdict
+from datetime import date
 from decimal import Decimal
 
 from django.db import transaction
 
-from accounting.models import Account, JournalEntry, JournalLine
+from accounting.models import Account, FiscalPeriod, JournalEntry, JournalLine
 
 
 DEFAULT_ACCOUNTS = [
@@ -42,6 +44,127 @@ def get_account(code: str) -> Account:
     return Account.objects.get(code=code)
 
 
+def get_fiscal_period_for_date(entry_date):
+    return (
+        FiscalPeriod.objects.filter(start_date__lte=entry_date, end_date__gte=entry_date)
+        .order_by('start_date')
+        .first()
+    )
+
+
+def ensure_open_fiscal_period(entry_date):
+    period = get_fiscal_period_for_date(entry_date)
+    if period and period.status == 'closed':
+        raise ValueError(f'Fiscal period "{period.name}" is closed for {entry_date}.')
+    return period
+
+
+def _posted_lines_queryset():
+    return JournalLine.objects.select_related('account', 'journal_entry').filter(journal_entry__status='posted')
+
+
+def _report_rows(lines):
+    grouped = defaultdict(lambda: {'account_code': '', 'account_name': '', 'account_type': '', 'debit': Decimal('0.00'), 'credit': Decimal('0.00')})
+    for line in lines:
+        bucket = grouped[str(line.account_id)]
+        bucket['account_code'] = line.account.code
+        bucket['account_name'] = line.account.name
+        bucket['account_type'] = line.account.account_type
+        bucket['debit'] += line.debit
+        bucket['credit'] += line.credit
+    rows = []
+    for bucket in grouped.values():
+        net = bucket['debit'] - bucket['credit']
+        rows.append(
+            {
+                **bucket,
+                'balance': net,
+                'debit_balance': net if net > 0 else Decimal('0.00'),
+                'credit_balance': abs(net) if net < 0 else Decimal('0.00'),
+            }
+        )
+    return sorted(rows, key=lambda row: row['account_code'])
+
+
+def get_trial_balance(*, date_from=None, date_to=None):
+    lines = _posted_lines_queryset()
+    if date_from:
+        lines = lines.filter(journal_entry__entry_date__gte=date_from)
+    if date_to:
+        lines = lines.filter(journal_entry__entry_date__lte=date_to)
+    rows = _report_rows(lines)
+    total_debits = sum((row['debit_balance'] for row in rows), Decimal('0.00'))
+    total_credits = sum((row['credit_balance'] for row in rows), Decimal('0.00'))
+    return {
+        'date_from': date_from,
+        'date_to': date_to,
+        'rows': rows,
+        'totals': {
+            'debit_balance': total_debits,
+            'credit_balance': total_credits,
+        },
+    }
+
+
+def get_profit_and_loss(*, date_from, date_to):
+    lines = _posted_lines_queryset().filter(
+        journal_entry__entry_date__gte=date_from,
+        journal_entry__entry_date__lte=date_to,
+        account__account_type__in=['revenue', 'expense'],
+    )
+    rows = _report_rows(lines)
+    revenue_rows = []
+    expense_rows = []
+    total_revenue = Decimal('0.00')
+    total_expenses = Decimal('0.00')
+    for row in rows:
+        amount = row['credit'] - row['debit'] if row['account_type'] == 'revenue' else row['debit'] - row['credit']
+        normalized = {**row, 'amount': amount}
+        if row['account_type'] == 'revenue':
+            total_revenue += amount
+            revenue_rows.append(normalized)
+        else:
+            total_expenses += amount
+            expense_rows.append(normalized)
+    return {
+        'date_from': date_from,
+        'date_to': date_to,
+        'revenue': revenue_rows,
+        'expenses': expense_rows,
+        'totals': {
+            'revenue': total_revenue,
+            'expenses': total_expenses,
+            'net_income': total_revenue - total_expenses,
+        },
+    }
+
+
+def get_balance_sheet(*, as_of=None):
+    as_of = as_of or date.today()
+    lines = _posted_lines_queryset().filter(
+        journal_entry__entry_date__lte=as_of,
+        account__account_type__in=['asset', 'liability', 'equity'],
+    )
+    rows = _report_rows(lines)
+    sections = {'asset': [], 'liability': [], 'equity': []}
+    totals = {'asset': Decimal('0.00'), 'liability': Decimal('0.00'), 'equity': Decimal('0.00')}
+    for row in rows:
+        amount = row['debit'] - row['credit'] if row['account_type'] == 'asset' else row['credit'] - row['debit']
+        normalized = {**row, 'amount': amount}
+        sections[row['account_type']].append(normalized)
+        totals[row['account_type']] += amount
+    return {
+        'as_of': as_of,
+        'assets': sections['asset'],
+        'liabilities': sections['liability'],
+        'equity': sections['equity'],
+        'totals': {
+            **totals,
+            'liabilities_and_equity': totals['liability'] + totals['equity'],
+        },
+    }
+
+
 @transaction.atomic
 def post_journal_entry(*, description: str, lines: list[dict], source_module: str = '', source_id: str = '', posted_by=None):
     debit_total = sum(Decimal(str(line.get('debit', '0') or '0')) for line in lines)
@@ -51,6 +174,8 @@ def post_journal_entry(*, description: str, lines: list[dict], source_module: st
         raise ValueError('Journal entry must include debit and credit amounts.')
     if debit_total != credit_total:
         raise ValueError('Journal entry is not balanced.')
+    entry_date = date.today()
+    fiscal_period = ensure_open_fiscal_period(entry_date)
 
     entry = JournalEntry.objects.create(
         description=description,
@@ -58,6 +183,8 @@ def post_journal_entry(*, description: str, lines: list[dict], source_module: st
         source_id=source_id,
         posted_by=posted_by,
         status='posted',
+        entry_date=entry_date,
+        fiscal_period=fiscal_period,
     )
 
     for line in lines:

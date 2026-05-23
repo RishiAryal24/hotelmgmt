@@ -6,7 +6,7 @@ from django.db import connection
 from django_tenants.test.cases import TenantTestCase
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from payments.providers import _esewa_signature, initiate_esewa_payment, initiate_khalti_payment, lookup_khalti_payment, verify_esewa_callback
+from payments.providers import _esewa_signature, confirm_stripe_test_payment, initiate_esewa_payment, initiate_khalti_payment, initiate_stripe_payment, lookup_khalti_payment, verify_esewa_callback
 from payments.models import PaymentIntent
 from accounting.models import JournalEntry
 from bookings.models import Booking, Guest, GuestFolio, Room, RoomType
@@ -221,6 +221,59 @@ class PaymentIntentFoundationTests(TenantTestCase):
 
         self.assertEqual(updated.status, 'succeeded')
         self.assertEqual(updated.provider_reference, 'ESEWA-100')
+        self.assertEqual(updated.settlement_status, 'skipped')
+
+    def test_stripe_initiation_returns_client_secret_payload(self):
+        tenant = connection.tenant
+        tenant.payment_settings = {
+            'stripe': {
+                'enabled': True,
+                'secret_key': 'sk_test_123',
+                'publishable_key': 'pk_test_123',
+            }
+        }
+        tenant.save(update_fields=['payment_settings'])
+        intent = create_payment_intent(
+            source_module='manual',
+            source_id='stripe-init',
+            amount='150.00',
+            currency='USD',
+            provider='stripe',
+            idempotency_key='stripe-init-key',
+        )
+
+        with patch('payments.providers._stripe_request', return_value={'id': 'pi_test_123', 'client_secret': 'pi_test_secret', 'status': 'requires_payment_method'}):
+            initiated = initiate_stripe_payment(intent)
+
+        self.assertEqual(initiated.provider_reference, 'pi_test_123')
+        self.assertEqual(initiated.provider_payload['client_secret'], 'pi_test_secret')
+        self.assertEqual(initiated.status, 'requires_action')
+
+    def test_stripe_confirm_marks_payment_succeeded(self):
+        tenant = connection.tenant
+        tenant.payment_settings = {
+            'stripe': {
+                'enabled': True,
+                'secret_key': 'sk_test_123',
+                'publishable_key': 'pk_test_123',
+            }
+        }
+        tenant.save(update_fields=['payment_settings'])
+        intent = create_payment_intent(
+            source_module='manual',
+            source_id='stripe-confirm',
+            amount='150.00',
+            currency='USD',
+            provider='stripe',
+            idempotency_key='stripe-confirm-key',
+        )
+        intent.provider_reference = 'pi_test_123'
+        intent.save(update_fields=['provider_reference'])
+
+        with patch('payments.providers._stripe_request', return_value={'id': 'pi_test_123', 'status': 'succeeded'}):
+            updated = confirm_stripe_test_payment(intent)
+
+        self.assertEqual(updated.status, 'succeeded')
         self.assertEqual(updated.settlement_status, 'skipped')
 
     def test_reconcile_succeeded_guest_folio_payment_settles_and_posts_once(self):

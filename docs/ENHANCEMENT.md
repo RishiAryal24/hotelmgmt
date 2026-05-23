@@ -21,7 +21,7 @@ The system is now a connected development-stage hospitality ERP with strong tena
 
 - Payment gateway production credentials and live-money provider rollout are still pending; Khalti/eSewa sandbox adapters are implemented.
 - SMS/WhatsApp credential setup and Twilio-style provider adapters are implemented; production vendor account rollout and live delivery monitoring are still pending.
-- OTA integration exists as a foundation but still needs live sync workflows, conflict handling, and webhook hardening.
+- OTA channel sync foundation is implemented with mappings, availability/rate sync jobs, idempotent webhook capture, Zodomus adapter calls, sandbox test-reservation tooling, inbound reservation import review with conflict detection, cancellation/modification reconciliation, manager notifications, and audit logging.
 - Security/compliance needs production hardening for PCI-DSS, GDPR, throttling, observability, and secrets management.
 - Staff mobile/PWA workflows are still pending.
 - Advanced analytics and multi-property operations are still future work.
@@ -71,10 +71,15 @@ The system is now a connected development-stage hospitality ERP with strong tena
 
 ### Phase 3: Advanced Features
 
-- [ ] OTA provider live sync, webhook idempotency, and conflict handling.
+- [x] OTA channel sync foundation with mappings, availability/rate sync jobs, and webhook idempotency.
+- [x] Zodomus OTA provider adapter foundation.
+- [x] Zodomus sandbox testing flow with credential check, room/rate mapping forms, ARI sync actions, and test reservation action.
+- [x] OTA inbound reservation import review with conflict detection.
+- [x] OTA cancellation/modification reconciliation for accepted imports.
+- [x] OTA manager notifications and audit trail for review actions.
 - [x] Nepal payment providers: Khalti/eSewa sandbox initiation/verification foundation.
-- [ ] International payment provider sandbox.
-- [ ] Fiscal periods, trial balance, profit and loss, and balance sheet.
+- [x] International payment provider sandbox.
+- [x] Fiscal periods, trial balance, profit and loss, and balance sheet.
 - [ ] Revenue forecasting and analytics.
 - [ ] Multi-property support.
 - [ ] Staff mobile/PWA workflows.
@@ -117,9 +122,15 @@ The system is now a connected development-stage hospitality ERP with strong tena
 #### OTA Integration
 
 - [x] OTAChannel model, views, serializers, and URLs.
-- [ ] Provider-specific channel sync.
-- [ ] Webhook idempotency and conflict handling.
-- [ ] Rate and inventory push/pull workflows.
+- [x] OTA channel room/rate mappings, sync job history, and webhook event idempotency.
+- [x] Integrations UI for channel setup, availability/rate sync actions, and webhook diagnostics.
+- [x] Zodomus provider-specific channel sync foundation.
+- [x] Zodomus sandbox testing controls for `/channels`, `/availability`, `/rates`, and `/reservations-createtest`.
+- [x] Webhook idempotency foundation.
+- [x] Rate and inventory push workflow foundation.
+- [x] Conflict handling foundation for OTA reservation imports.
+- [x] OTA cancellation/modification reconciliation for confirmed bookings.
+- [x] OTA review notifications and audit trail.
 
 #### Rate Management and Packages
 
@@ -202,7 +213,7 @@ The system is now a connected development-stage hospitality ERP with strong tena
 - [x] Provider reference and status transitions.
 - [x] Idempotent provider callback endpoint.
 - [x] Khalti/eSewa sandbox.
-- [ ] Stripe or international provider sandbox.
+- [x] Stripe or international provider sandbox.
 
 #### Notifications
 
@@ -223,8 +234,8 @@ The system is now a connected development-stage hospitality ERP with strong tena
 
 #### Third-Party APIs
 
-- [ ] OTA provider clients.
-- [ ] Payment provider clients.
+- [x] Zodomus OTA provider client foundation.
+- [x] Payment provider clients.
 - [ ] SMS/WhatsApp provider clients.
 
 #### Reporting Tools
@@ -250,16 +261,16 @@ The system is now a connected development-stage hospitality ERP with strong tena
 - Provider references are surfaced on folio serializers/PDFs, restaurant order serializers, restaurant payment rows, cashier close report rows, POS payment receipts, revenue/cashier reports, and management summaries.
 - Payment reconciliation exports and drill-down links are implemented with filtered UI CSV exports, server-side CSV export endpoint, and Payment Intents source links into POS folio/paid-order context.
 - SMS/WhatsApp credential setup is implemented with masked tenant settings, Twilio-style SMS/WhatsApp adapters, admin test-send diagnostics, and notification center controls.
+- OTA channel sync foundation is implemented with channel configuration, room/rate mappings, availability/rate payload jobs, Zodomus Basic Auth provider calls, sandbox test reservation tooling, idempotent webhook event capture, inbound reservation import conflict detection, accept/reject review, cancellation/modification reconciliation, manager notifications, audit logging, and Integrations UI.
+- Stripe sandbox is implemented with tenant-scoped test settings, masked secret preservation, PaymentIntent creation/confirmation actions, and focused tests.
+- Accounting statements are implemented with fiscal periods, close/reopen controls, trial balance, profit and loss, balance sheet APIs, and Accounting UI tabs.
 - Local verification completed with focused backend tests, migration check, tenant migrations, and frontend TypeScript check.
 
 ## Next Enhancement
 
-Recommended next enhancement: **Stripe or international provider sandbox**.
+Recommended next enhancement: **choose the next slice after the accounting statements checkpoint**.
 
 Suggested order:
 
-1. Add provider settings for an international sandbox gateway.
-2. Implement hosted-payment initiation and callback verification.
-3. Reuse the existing payment intent reconciliation workflow.
-4. Add focused provider tests and frontend operator controls.
-5. Keep production credentials disabled by default.
+1. Commit the OTA, Stripe sandbox, and accounting statements checkpoint.
+2. Choose the next high-value slice such as POS analytics, tax/vendor accounting, or production-grade provider rollout.

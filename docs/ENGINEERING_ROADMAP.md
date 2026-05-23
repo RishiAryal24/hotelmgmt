@@ -19,13 +19,13 @@ Verified foundations:
 - Tenant migrations apply with `migrate_schemas`.
 - Frontend and backend respond locally.
 - Authenticated bookings and folios endpoints return `200`.
-- Attendance exception reporting, department labor cost reporting, notifications foundation, manager/admin notification center UI, dashboard needs-attention panel, sidebar badge, operational notification triggers, acknowledge/resolve/reopen follow-up states, provider adapter foundation, tenant notification settings, retry/cancel delivery controls, SMS/WhatsApp credential setup with test delivery diagnostics, guest follow-up reminders, payment abstraction foundation, Khalti/eSewa sandbox foundation, payment settlement reconciliation, payment reconciliation reports/operator workflow, provider references on receipts/reports, and payment reconciliation exports/drill-down links are implemented and verified locally.
+- Attendance exception reporting, department labor cost reporting, notifications foundation, manager/admin notification center UI, dashboard needs-attention panel, sidebar badge, operational notification triggers, acknowledge/resolve/reopen follow-up states, provider adapter foundation, tenant notification settings, retry/cancel delivery controls, SMS/WhatsApp credential setup with test delivery diagnostics, guest follow-up reminders, payment abstraction foundation, Khalti/eSewa sandbox foundation, payment settlement reconciliation, payment reconciliation reports/operator workflow, provider references on receipts/reports, payment reconciliation exports/drill-down links, OTA channel sync foundation, Zodomus sandbox testing foundation, OTA reservation import review, OTA cancellation/modification reconciliation, OTA notification/audit trail, Stripe sandbox controls, fiscal periods, trial balance, profit and loss, and balance sheet are implemented and verified locally.
 
 Known local caveats:
 
 - Docker is not currently available on PATH on the development machine.
 - Redis is optional for normal web/API local development, but required for Celery workers.
-- The current payment reconciliation and SMS/WhatsApp notification provider slices are uncommitted and should be committed before starting another major enhancement.
+- The current OTA, Stripe sandbox, and accounting statements checkpoint is uncommitted and should be committed before starting another major enhancement.
 
 ## Operating Rules
 
@@ -190,10 +190,10 @@ Status: functional posting MVP.
 
 Next slices:
 
-1. Fiscal periods.
-2. Trial balance.
-3. Profit and loss report.
-4. Balance sheet.
+1. Fiscal periods. Done.
+2. Trial balance. Done.
+3. Profit and loss report. Done.
+4. Balance sheet. Done.
 5. Tax configuration.
 6. Vendor bills.
 
@@ -238,8 +238,12 @@ Recommended order:
 5. Provider references on receipts and management reports. Done.
 6. Payment reconciliation exports and receipt drill-down links. Done.
 7. Real SMS/WhatsApp provider credential setup. Done.
-8. Stripe or international provider sandbox.
-9. OTA channel sync foundation.
+8. Stripe or international provider sandbox. Done.
+9. OTA channel sync foundation. Done.
+10. Zodomus provider client adapter and sandbox testing foundation. Done.
+11. OTA reservation import conflict handling. Done.
+12. OTA cancellation/modification reconciliation. Done.
+13. OTA manager notifications and audit trail polish. Done.
 
 Acceptance criteria:
 
@@ -350,8 +354,8 @@ Verified on 2026-05-21:
 
 Resume point:
 
-1. Commit the current payment reconciliation export/drill-down and SMS/WhatsApp notification provider checkpoint.
-2. Continue with Stripe or another international payment provider sandbox, or OTA channel sync foundation.
+1. Commit the current OTA channel sync, Zodomus sandbox testing, reservation review, reconciliation, and notification/audit checkpoint.
+2. Continue with the next post-accounting enhancement after the fiscal-periods-and-statements checkpoint.
 
 ## Local Command Reference
 

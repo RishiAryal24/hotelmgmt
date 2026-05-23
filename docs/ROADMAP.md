@@ -6,9 +6,9 @@ The project is now a connected development-stage hospitality ERP. It is suitable
 
 Checkpoint note:
 
-- Current checkpoint includes the actionable notification center, dashboard follow-up panel, sidebar badge, operational trigger slice, provider adapter foundation, tenant notification settings, retry/cancel delivery controls, SMS/WhatsApp credential setup with test delivery diagnostics, guest follow-up reminders, and payment reconciliation exports/drill-down links.
-- Notification tests, Django check, migration check, and frontend TypeScript checks are passing locally. Frontend Vite output still hits the existing Windows `EPERM` writing `frontend/dist/assets`.
-- Recommended continuation: Stripe or another international payment provider sandbox, or OTA channel sync foundation.
+- Current checkpoint includes the actionable notification center, dashboard follow-up panel, sidebar badge, operational trigger slice, provider adapter foundation, tenant notification settings, retry/cancel delivery controls, SMS/WhatsApp credential setup with test delivery diagnostics, guest follow-up reminders, payment reconciliation exports/drill-down links, Stripe sandbox controls, fiscal periods, trial balance, profit and loss, balance sheet, OTA channel sync foundation, Zodomus adapter foundation, OTA reservation import review, cancellation/modification reconciliation, and OTA notification/audit trail.
+- Integration tests, Django check, migration check, tenant migrations, and frontend TypeScript checks are passing locally. Frontend Vite output still hits the existing Windows `EPERM` writing `frontend/dist/assets`.
+- Recommended continuation: choose the next enhancement after the accounting-statements checkpoint.
 
 Working foundations:
 
@@ -37,7 +37,7 @@ Working modules:
 - POS facility/amenity catalog and in-house guest facility charge posting.
 - Inventory vendors, items, purchase orders, stock receiving, adjustments, low-stock alerts, movement history.
 - Restaurant inventory deduction on settled orders.
-- Accounting chart of accounts, journal entries, automated postings, summary view, and journal filters.
+- Accounting chart of accounts, journal entries, automated postings, summary view, journal filters, fiscal periods, trial balance, profit and loss, and balance sheet.
 - Basic operational Reports for occupancy, revenue, restaurant sales, and inventory.
 - CSV exports for operational reports and payroll.
 - Printable management summary PDF export from Reports.
@@ -56,6 +56,8 @@ Working modules:
 - Payment reconciliation reporting and operator workflow with summary API, filters, attention counts, follow-up review/resolve actions, and reviewer tracking.
 - Provider references on folio PDFs, POS receipts, cashier close report rows, revenue/cashier reports, and management summaries.
 - Payment reconciliation exports and drill-down links from payment intents to POS folio/order context.
+- OTA channel sync foundation with channel configuration, room/rate mappings, availability and rate sync job history, Zodomus Basic Auth provider calls, sandbox test reservation tooling, idempotent webhook event capture, inbound reservation import conflict detection, accept/reject review, cancellation/modification reconciliation, manager notifications, audit logging, and Integrations UI.
+- Stripe sandbox payment intent initiation/confirmation with tenant-scoped settings, masked secret preservation, and Payment Intents UI controls.
 
 ## Local Testing
 
@@ -190,10 +192,6 @@ Completed:
 
 Remaining:
 
-- Fiscal periods.
-- Trial balance.
-- Profit and loss.
-- Balance sheet.
 - Tax configuration.
 - Vendor bills.
 
@@ -244,11 +242,9 @@ Planned:
 
 ## Recommended Immediate Next Step
 
-Resume with **real SMS/WhatsApp provider credential setup**.
+Resume with the next enhancement after the accounting-statements checkpoint.
 
 Suggested order:
 
-1. Add tenant-scoped SMS/WhatsApp credential fields with masked serializer output.
-2. Implement provider adapters and test-send actions.
-3. Add delivery diagnostics and keep providers disabled until credentials are configured.
-4. Preserve in-app notifications as the reliable fallback.
+1. Commit the OTA, Stripe sandbox, and accounting statements checkpoint.
+2. Pick the next product slice from POS analytics, tax/vendor accounting, or production-grade integrations.

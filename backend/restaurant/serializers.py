@@ -152,10 +152,17 @@ class ApplyOrderDiscountSerializer(serializers.Serializer):
 
 
 class RestaurantOrderPaymentSerializer(serializers.ModelSerializer):
+    payment_reference = serializers.SerializerMethodField()
+
     class Meta:
         model = RestaurantOrderPayment
         fields = '__all__'
         read_only_fields = ['order', 'cashier_shift', 'paid_at']
+
+    def get_payment_reference(self, obj):
+        from payments.services import get_settled_payment_reference
+
+        return get_settled_payment_reference(source_module='restaurant_order', source_id=obj.order_id)
 
 
 class RestaurantReceiptReprintSerializer(serializers.ModelSerializer):
@@ -251,6 +258,7 @@ class RestaurantOrderSerializer(serializers.ModelSerializer):
     receipt_reprints = RestaurantReceiptReprintSerializer(many=True, read_only=True)
     room_number = serializers.CharField(source='room_booking.room.room_number', read_only=True)
     guest_name = serializers.SerializerMethodField()
+    payment_reference = serializers.SerializerMethodField()
 
     class Meta:
         model = RestaurantOrder
@@ -271,6 +279,11 @@ class RestaurantOrderSerializer(serializers.ModelSerializer):
         if not obj.room_booking_id:
             return ''
         return str(obj.room_booking.guest)
+
+    def get_payment_reference(self, obj):
+        from payments.services import get_settled_payment_reference
+
+        return get_settled_payment_reference(source_module='restaurant_order', source_id=obj.id)
 
 
 class RestaurantOrderApprovalSerializer(serializers.ModelSerializer):

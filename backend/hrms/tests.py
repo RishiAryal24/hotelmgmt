@@ -7,6 +7,7 @@ from django.utils import timezone
 from accounting.models import JournalEntry
 from hrms.models import Attendance, Employee, PayrollPeriod, Shift
 from hrms.services import cancel_payroll_run, approve_payroll_run, generate_payroll_run, post_payroll_run, reverse_payroll_run, settle_payroll_run
+from notifications.models import NotificationEvent
 
 
 class EmployeeRecordTests(TenantTestCase):
@@ -137,6 +138,7 @@ class EmployeeRecordTests(TenantTestCase):
         self.assertEqual(payroll_run.status, 'posted')
         self.assertEqual(payroll_run.journal_entry, journal_entry)
         self.assertTrue(JournalEntry.objects.filter(source_module='payroll_run', source_id=str(payroll_run.id)).exists())
+        self.assertTrue(NotificationEvent.objects.filter(event_type='payroll.posted', module='hrms').exists())
 
         payment_entry = settle_payroll_run(payroll_run, payment_method='bank_transfer', payment_reference='BANK-001')
         payroll_run.refresh_from_db()

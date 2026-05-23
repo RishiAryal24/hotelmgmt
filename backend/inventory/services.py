@@ -1,6 +1,7 @@
 from django.utils import timezone
 
 from inventory.models import PurchaseOrder, StockMovement
+from notifications.services import create_low_stock_notification
 
 
 def receive_inventory_stock(
@@ -34,6 +35,9 @@ def receive_inventory_stock(
     from accounting.services import post_inventory_purchase
 
     post_inventory_purchase(movement, payment_account=payment_account, posted_by=posted_by)
+    item.refresh_from_db()
+    if item.is_low_stock:
+        create_low_stock_notification(item, created_by=posted_by, source=movement.source_module)
     return movement
 
 
@@ -123,6 +127,9 @@ def deduct_restaurant_order_inventory(order, posted_by=None):
                     },
                 )
                 if created:
+                    ingredient.item.refresh_from_db()
+                    if ingredient.item.is_low_stock:
+                        create_low_stock_notification(ingredient.item, created_by=posted_by, source='restaurant_recipe_ingredient')
                     movements.append(movement)
             continue
 
@@ -143,5 +150,8 @@ def deduct_restaurant_order_inventory(order, posted_by=None):
                 },
             )
             if created:
+                inventory_item.refresh_from_db()
+                if inventory_item.is_low_stock:
+                    create_low_stock_notification(inventory_item, created_by=posted_by, source='restaurant_order_line')
                 movements.append(movement)
     return movements

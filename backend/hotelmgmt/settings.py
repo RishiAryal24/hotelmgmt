@@ -69,6 +69,7 @@ TENANT_APPS = [
     'maintenance',
     'audit.apps.AuditConfig',
     'notifications.apps.NotificationsConfig',
+    'payments.apps.PaymentsConfig',
     'integrations',
 ]
 

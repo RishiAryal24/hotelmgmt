@@ -12,8 +12,11 @@ import {
   useCreateBooking,
   useCreateGuestCommunication,
   useCreateGuest,
+  useCreateGuestFollowUp,
   useCreateWalkInBooking,
   useGuestCommunications,
+  useGuestFollowUpAction,
+  useGuestFollowUps,
   useGuestFolios,
   useGuestHistory,
   useGuests,
@@ -23,7 +26,7 @@ import {
 import { usePermissions } from '../hooks/permissions';
 import { useCurrentCashierShift } from '../hooks/restaurant';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
-import { Booking, Guest, GuestCommunication, GuestFolio, GuestFolioLine } from '../types/bookings';
+import { Booking, Guest, GuestCommunication, GuestFolio, GuestFolioLine, GuestFollowUpReminder } from '../types/bookings';
 
 const emptyGuest = {
   first_name: '',
@@ -55,6 +58,15 @@ const emptyCommunication = {
   subject: '',
   message: '',
   status: 'logged' as GuestCommunication['status'],
+  booking: '',
+};
+
+const emptyFollowUp = {
+  reminder_type: 'custom' as GuestFollowUpReminder['reminder_type'],
+  priority: 'normal' as GuestFollowUpReminder['priority'],
+  subject: '',
+  message: '',
+  due_at: '',
   booking: '',
 };
 
@@ -123,6 +135,8 @@ const Bookings: React.FC = () => {
   const createGuest = useCreateGuest();
   const updateGuest = useUpdateGuest();
   const createCommunication = useCreateGuestCommunication();
+  const createFollowUp = useCreateGuestFollowUp();
+  const followUpAction = useGuestFollowUpAction();
   const createBooking = useCreateBooking();
   const createWalkInBooking = useCreateWalkInBooking();
   const bookingAction = useBookingAction();
@@ -138,6 +152,7 @@ const Bookings: React.FC = () => {
   const [isAddingGuestInBooking, setIsAddingGuestInBooking] = useState(false);
   const [guestProfileForm, setGuestProfileForm] = useState({ vip_level: 'standard' as Guest['vip_level'], notes: '', preferencesText: '', marketing_opt_in: false });
   const [communicationForm, setCommunicationForm] = useState(emptyCommunication);
+  const [followUpForm, setFollowUpForm] = useState(emptyFollowUp);
   const [checkoutPayment, setCheckoutPayment] = useState<{ payment_method: CheckoutPaymentMethod; paid_amount: string }>({
     payment_method: 'cash',
     paid_amount: '',
@@ -174,6 +189,7 @@ const Bookings: React.FC = () => {
   );
   const { data: guestHistory, isFetching: guestHistoryLoading } = useGuestHistory(selectedGuestId);
   const { data: guestCommunications, isFetching: guestCommunicationsLoading } = useGuestCommunications(selectedGuestId);
+  const { data: guestFollowUps, isFetching: guestFollowUpsLoading } = useGuestFollowUps({ guest: selectedGuestId }, Boolean(selectedGuestId));
 
   const selectedRoom = useMemo(
     () => bookableRooms?.find((room) => room.id === bookingForm.room),
@@ -430,6 +446,38 @@ const Bookings: React.FC = () => {
         onSuccess: () => setCommunicationForm(emptyCommunication),
       },
     );
+  };
+
+  const handleCreateFollowUp = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedGuestId || !followUpForm.subject.trim() || !followUpForm.due_at) return;
+    createFollowUp.mutate(
+      {
+        guest: selectedGuestId,
+        booking: followUpForm.booking || undefined,
+        reminder_type: followUpForm.reminder_type,
+        priority: followUpForm.priority,
+        subject: followUpForm.subject,
+        message: followUpForm.message,
+        due_at: new Date(followUpForm.due_at).toISOString(),
+      },
+      {
+        onSuccess: () => setFollowUpForm(emptyFollowUp),
+      },
+    );
+  };
+
+  const handleFollowUpAction = (reminderId: string, action: 'complete' | 'snooze' | 'cancel') => {
+    const notes = window.prompt(action === 'complete' ? 'Completion note' : 'Follow-up note', '');
+    if (notes === null) return;
+    if (action === 'snooze') {
+      const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 16);
+      const snoozedUntil = window.prompt('Snooze until', tomorrow);
+      if (!snoozedUntil) return;
+      followUpAction.mutate({ reminderId, action, notes, snoozed_until: new Date(snoozedUntil).toISOString() });
+      return;
+    }
+    followUpAction.mutate({ reminderId, action, notes });
   };
 
   const openCheckout = (booking: Booking) => {
@@ -828,6 +876,68 @@ const Bookings: React.FC = () => {
                           <p className="mt-1 text-lg font-semibold text-slate-900">{value}</p>
                         </div>
                       ))}
+                    </div>
+                    <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+                      {can('bookings.reservation.create') && <form onSubmit={handleCreateFollowUp} className="rounded-xl border border-sky-100 bg-sky-50 p-3">
+                        <h3 className="text-sm font-semibold text-slate-900">Create follow-up</h3>
+                        <div className="mt-3 grid gap-2">
+                          <select value={followUpForm.reminder_type} onChange={(e) => setFollowUpForm({ ...followUpForm, reminder_type: e.target.value as GuestFollowUpReminder['reminder_type'] })} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                            <option value="custom">Custom</option>
+                            <option value="arrival">Arrival</option>
+                            <option value="vip">VIP</option>
+                            <option value="payment">Payment</option>
+                            <option value="post_stay">Post-stay</option>
+                          </select>
+                          <select value={followUpForm.priority} onChange={(e) => setFollowUpForm({ ...followUpForm, priority: e.target.value as GuestFollowUpReminder['priority'] })} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                            <option value="low">Low</option>
+                            <option value="normal">Normal</option>
+                            <option value="high">High</option>
+                            <option value="urgent">Urgent</option>
+                          </select>
+                          <select value={followUpForm.booking} onChange={(e) => setFollowUpForm({ ...followUpForm, booking: e.target.value })} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                            <option value="">No booking link</option>
+                            {guestHistory.bookings.map((booking) => (
+                              <option key={booking.id} value={booking.id}>
+                                {booking.check_in_date} to {booking.check_out_date} - Room {booking.room_details?.room_number || '-'}
+                              </option>
+                            ))}
+                          </select>
+                          <input type="datetime-local" value={followUpForm.due_at} onChange={(e) => setFollowUpForm({ ...followUpForm, due_at: e.target.value })} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" required />
+                          <input value={followUpForm.subject} onChange={(e) => setFollowUpForm({ ...followUpForm, subject: e.target.value })} placeholder="Subject" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" required />
+                          <textarea value={followUpForm.message} onChange={(e) => setFollowUpForm({ ...followUpForm, message: e.target.value })} placeholder="Follow-up details" className="min-h-20 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+                          <button type="submit" disabled={createFollowUp.isPending || !followUpForm.subject.trim() || !followUpForm.due_at} className="rounded-lg bg-sky-700 px-3 py-2 text-sm font-medium text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-slate-300">
+                            Save follow-up
+                          </button>
+                          {createFollowUp.isError && <p className="text-sm text-red-600">Could not save follow-up.</p>}
+                        </div>
+                      </form>}
+                      <div className="rounded-xl border border-sky-100 bg-white p-3">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-semibold text-slate-900">Follow-up reminders</h3>
+                          <span className="text-xs text-slate-500">{guestFollowUps?.length || 0} item(s)</span>
+                        </div>
+                        <div className="mt-3 space-y-3">
+                          {guestFollowUpsLoading && <p className="text-sm text-slate-600">Loading follow-ups...</p>}
+                          {guestFollowUps?.map((reminder) => (
+                            <article key={reminder.id} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-sm font-medium text-slate-900">{reminder.subject}</p>
+                                <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-600">{reminder.status}</span>
+                              </div>
+                              <p className="mt-1 text-sm text-slate-700">{reminder.message || 'No details.'}</p>
+                              <p className="mt-2 text-xs text-slate-500">{reminder.reminder_type.replace('_', ' ')} - due {new Date(reminder.due_at).toLocaleString()}</p>
+                              {can('bookings.reservation.create') && ['open', 'snoozed'].includes(reminder.status) && (
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  <button onClick={() => handleFollowUpAction(reminder.id, 'complete')} className="rounded-lg border border-emerald-200 bg-white px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50">Complete</button>
+                                  <button onClick={() => handleFollowUpAction(reminder.id, 'snooze')} className="rounded-lg border border-sky-200 bg-white px-2.5 py-1 text-xs font-medium text-sky-700 hover:bg-sky-50">Snooze</button>
+                                  <button onClick={() => handleFollowUpAction(reminder.id, 'cancel')} className="rounded-lg border border-rose-200 bg-white px-2.5 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50">Cancel</button>
+                                </div>
+                              )}
+                            </article>
+                          ))}
+                          {!guestFollowUpsLoading && guestFollowUps?.length === 0 && <p className="text-sm text-slate-600">No follow-ups for this guest yet.</p>}
+                        </div>
+                      </div>
                     </div>
                     <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
                       {can('bookings.reservation.create') && <form onSubmit={handleCreateCommunication} className="rounded-xl border border-slate-100 bg-slate-50 p-3">

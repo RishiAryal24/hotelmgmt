@@ -11,6 +11,8 @@ export interface TenantSettings {
   schema_name: string;
   currency: string;
   currency_choices: CurrencyChoice[];
+  notification_settings: Record<string, any>;
+  payment_settings: Record<string, any>;
 }
 
 export const getTenantSettings = async (): Promise<TenantSettings> => {
@@ -18,7 +20,7 @@ export const getTenantSettings = async (): Promise<TenantSettings> => {
   return response.data;
 };
 
-export const updateTenantSettings = async (payload: Partial<Pick<TenantSettings, 'currency'>>): Promise<TenantSettings> => {
+export const updateTenantSettings = async (payload: Partial<Pick<TenantSettings, 'currency' | 'notification_settings' | 'payment_settings'>>): Promise<TenantSettings> => {
   const response = await apiClient.patch('/tenants/settings/', payload);
   return response.data;
 };

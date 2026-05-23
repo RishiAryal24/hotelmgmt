@@ -11,13 +11,16 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.permissions import IsAuthenticated
-from bookings.models import Booking, FacilityAmenity, FacilityService, Guest, GuestCommunication, GuestFolio, GuestFolioLine, GuestPoints, LoyaltyProgram, Package, RatePlan, Room, RoomType
+from bookings.followups import create_booking_follow_up_reminders, create_open_folio_follow_up, create_post_stay_follow_up
+from bookings.models import Booking, FacilityAmenity, FacilityService, Guest, GuestCommunication, GuestFolio, GuestFolioLine, GuestFollowUpReminder, GuestPoints, LoyaltyProgram, Package, RatePlan, Room, RoomType
 from bookings.pdf import booking_confirmation_pdf, guest_folio_pdf
 from bookings.serializers import (
     BookingSerializer,
     FacilityAmenitySerializer,
     FacilityServiceSerializer,
     GuestCommunicationSerializer,
+    GuestFollowUpActionSerializer,
+    GuestFollowUpReminderSerializer,
     GuestFolioChargeSerializer,
     GuestFolioSerializer,
     GuestPointsSerializer,
@@ -138,7 +141,10 @@ class BookingViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         if request.data.get('status') == 'checked_in':
             return self.walk_in(request)
-        return super().create(request, *args, **kwargs)
+        response = super().create(request, *args, **kwargs)
+        booking = self.get_queryset().get(pk=response.data['id'])
+        create_booking_follow_up_reminders(booking, created_by=request.user)
+        return response
 
     @action(detail=True, methods=['post'])
     def check_in(self, request, pk=None):
@@ -169,6 +175,7 @@ class BookingViewSet(viewsets.ModelViewSet):
                 number_of_guests=data.get('number_of_guests', 1),
                 special_requests=data.get('special_requests', ''),
             )
+            create_booking_follow_up_reminders(booking, created_by=request.user)
         except ValueError as exc:
             return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -224,6 +231,7 @@ class BookingViewSet(viewsets.ModelViewSet):
                 from housekeeping.services import create_checkout_cleaning_task
 
                 create_checkout_cleaning_task(booking)
+                create_post_stay_follow_up(booking, created_by=request.user)
 
                 queue_booking_confirmation_email(booking.id, booking.guest.email)
             return Response({
@@ -423,6 +431,7 @@ class GuestFolioViewSet(viewsets.ReadOnlyModelViewSet):
             amount=serializer.validated_data['amount'],
         )
         folio.recalculate_totals()
+        create_open_folio_follow_up(folio, created_by=request.user)
         return Response(GuestFolioSerializer(folio).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'], url_path='pdf')
@@ -557,3 +566,57 @@ class GuestCommunicationViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+
+class GuestFollowUpReminderViewSet(viewsets.ModelViewSet):
+    queryset = GuestFollowUpReminder.objects.select_related('guest', 'booking', 'booking__room', 'assigned_to', 'created_by').all()
+    serializer_class = GuestFollowUpReminderSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'bookings.reservation.read',
+        'retrieve': 'bookings.reservation.read',
+        'create': 'bookings.reservation.create',
+        'update': 'bookings.reservation.create',
+        'partial_update': 'bookings.reservation.create',
+        'destroy': 'bookings.reservation.create',
+        'complete': 'bookings.reservation.create',
+        'snooze': 'bookings.reservation.create',
+        'cancel': 'bookings.reservation.create',
+    }
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['guest', 'booking', 'reminder_type', 'status', 'priority', 'assigned_to']
+    search_fields = ['guest__first_name', 'guest__last_name', 'guest__email', 'subject', 'message']
+    ordering_fields = ['due_at', 'created_at', 'priority', 'status']
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    @action(detail=True, methods=['post'])
+    def complete(self, request, pk=None):
+        serializer = GuestFollowUpActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reminder = self.get_object()
+        reminder.complete(user=request.user, notes=serializer.validated_data.get('notes', ''))
+        reminder.refresh_from_db()
+        return Response(self.get_serializer(reminder).data)
+
+    @action(detail=True, methods=['post'])
+    def snooze(self, request, pk=None):
+        serializer = GuestFollowUpActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        snoozed_until = serializer.validated_data.get('snoozed_until')
+        if not snoozed_until:
+            return Response({'snoozed_until': 'A snooze date/time is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        reminder = self.get_object()
+        reminder.snooze(user=request.user, until=snoozed_until, notes=serializer.validated_data.get('notes', ''))
+        reminder.refresh_from_db()
+        return Response(self.get_serializer(reminder).data)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        serializer = GuestFollowUpActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reminder = self.get_object()
+        reminder.cancel(user=request.user, notes=serializer.validated_data.get('notes', ''))
+        reminder.refresh_from_db()
+        return Response(self.get_serializer(reminder).data)

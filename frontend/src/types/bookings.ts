@@ -73,6 +73,17 @@ export interface GuestFolio {
   check_in_date: string;
   check_out_date: string;
   lines: GuestFolioLine[];
+  payment_reference?: PaymentReference | null;
+}
+
+export interface PaymentReference {
+  id: string;
+  provider: string;
+  provider_reference: string;
+  idempotency_key: string;
+  status: string;
+  settlement_status: string;
+  settled_at: string | null;
 }
 
 export interface GuestFolioLine {
@@ -135,4 +146,28 @@ export interface GuestCommunication {
   guest_name?: string;
   booking_reference?: string;
   created_by_email?: string;
+}
+
+export interface GuestFollowUpReminder {
+  id: string;
+  guest: string;
+  booking?: string | null;
+  reminder_type: 'arrival' | 'vip' | 'payment' | 'post_stay' | 'custom';
+  status: 'open' | 'snoozed' | 'completed' | 'canceled';
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  subject: string;
+  message: string;
+  due_at: string;
+  snoozed_until?: string | null;
+  completed_at?: string | null;
+  canceled_at?: string | null;
+  assigned_to?: string | null;
+  created_by?: string | null;
+  follow_up_notes: string;
+  guest_details?: Guest;
+  booking_details?: Booking | null;
+  assigned_to_email?: string;
+  created_by_email?: string;
+  created_at: string;
+  updated_at: string;
 }

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import patch
 
 from django.test import override_settings
@@ -7,7 +7,10 @@ from rest_framework.test import APIClient
 from django_tenants.test.cases import TenantTestCase
 from django_tenants.utils import schema_context, tenant_context
 
-from bookings.models import Booking, FacilityAmenity, FacilityService, Guest, GuestCommunication, GuestFolio, GuestFolioLine, Room, RoomType
+from django.utils import timezone
+
+from bookings.followups import create_booking_follow_up_reminders, create_open_folio_follow_up, create_post_stay_follow_up
+from bookings.models import Booking, FacilityAmenity, FacilityService, Guest, GuestCommunication, GuestFolio, GuestFolioLine, GuestFollowUpReminder, Room, RoomType
 from bookings.services import check_in_booking, create_walk_in_booking, extend_booking_stay, get_guest_history, modify_confirmed_booking, transfer_booking_room
 from bookings.tasks import queue_booking_confirmation_email
 from housekeeping.models import HousekeepingTask
@@ -418,6 +421,112 @@ class GuestCommunicationApiTests(TenantTestCase):
         results = response.data['results'] if isinstance(response.data, dict) else response.data
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]['subject'], 'Dietary note')
+
+
+class GuestFollowUpReminderTests(TenantTestCase):
+    @classmethod
+    def get_test_schema_name(cls):
+        return 'tenant_guest_followups'
+
+    @classmethod
+    def get_test_tenant_domain(cls):
+        return 'tenant-guest-followups.test.com'
+
+    @classmethod
+    def setup_tenant(cls, tenant):
+        tenant.name = 'Tenant Guest Followups'
+        tenant.created_by = 'test'
+
+    def setUp(self):
+        super().setUp()
+        suffix = str(abs(hash(self._testMethodName)) % 100000)
+        self.user = PlatformUser.objects.create_user(
+            email=f'followup-{suffix}@example.com',
+            password='testpass123456',
+            tenant=self.tenant,
+            is_tenant_admin=True,
+        )
+        self.client = APIClient(HTTP_HOST=self.get_test_tenant_domain())
+        self.client.force_authenticate(self.user)
+        self.room_type = RoomType.objects.create(name=f'Followup Deluxe {suffix}', code=f'FU-{suffix}', base_rate='100.00')
+        self.room = Room.objects.create(room_number=f'FU{suffix[-3:]}', room_type=self.room_type, price_per_night='100.00')
+        self.guest = Guest.objects.create(
+            first_name='Follow',
+            last_name='Guest',
+            email=f'followguest-{suffix}@example.com',
+            vip_level='vip',
+        )
+        self.booking = Booking.objects.create(
+            room=self.room,
+            guest=self.guest,
+            check_in_date=date(2026, 6, 1),
+            check_out_date=date(2026, 6, 3),
+            number_of_guests=1,
+            total_amount='200.00',
+        )
+
+    def test_booking_follow_up_triggers_create_arrival_and_vip_reminders(self):
+        reminders = create_booking_follow_up_reminders(self.booking, created_by=self.user)
+
+        self.assertEqual(len(reminders), 2)
+        self.assertTrue(GuestFollowUpReminder.objects.filter(booking=self.booking, reminder_type='arrival', status='open').exists())
+        self.assertTrue(GuestFollowUpReminder.objects.filter(booking=self.booking, reminder_type='vip', priority='high').exists())
+
+        create_booking_follow_up_reminders(self.booking, created_by=self.user)
+        self.assertEqual(GuestFollowUpReminder.objects.filter(booking=self.booking, status__in=['open', 'snoozed']).count(), 2)
+
+    def test_post_stay_and_open_folio_follow_ups_can_be_created(self):
+        folio = GuestFolio.objects.create(booking=self.booking, subtotal=self.booking.total_amount)
+
+        post_stay = create_post_stay_follow_up(self.booking, created_by=self.user)
+        payment = create_open_folio_follow_up(folio, created_by=self.user)
+
+        self.assertEqual(post_stay.reminder_type, 'post_stay')
+        self.assertEqual(payment.reminder_type, 'payment')
+        self.assertEqual(payment.priority, 'high')
+
+    def test_follow_up_api_supports_complete_snooze_and_cancel(self):
+        reminder = GuestFollowUpReminder.objects.create(
+            guest=self.guest,
+            booking=self.booking,
+            reminder_type='custom',
+            subject='Call guest',
+            message='Confirm pickup time.',
+            due_at=timezone.now(),
+            created_by=self.user,
+        )
+
+        complete_response = self.client.post(
+            f'/api/v1/bookings/guest-follow-ups/{reminder.id}/complete/',
+            {'notes': 'Guest confirmed.'},
+            format='json',
+        )
+        self.assertEqual(complete_response.status_code, 200)
+        reminder.refresh_from_db()
+        self.assertEqual(reminder.status, 'completed')
+        self.assertEqual(reminder.follow_up_notes, 'Guest confirmed.')
+
+        reminder.status = 'open'
+        reminder.completed_at = None
+        reminder.save(update_fields=['status', 'completed_at', 'updated_at'])
+        snooze_until = (timezone.now() + timedelta(days=1)).isoformat()
+        snooze_response = self.client.post(
+            f'/api/v1/bookings/guest-follow-ups/{reminder.id}/snooze/',
+            {'snoozed_until': snooze_until, 'notes': 'Call tomorrow.'},
+            format='json',
+        )
+        self.assertEqual(snooze_response.status_code, 200)
+        reminder.refresh_from_db()
+        self.assertEqual(reminder.status, 'snoozed')
+
+        cancel_response = self.client.post(
+            f'/api/v1/bookings/guest-follow-ups/{reminder.id}/cancel/',
+            {'notes': 'No longer needed.'},
+            format='json',
+        )
+        self.assertEqual(cancel_response.status_code, 200)
+        reminder.refresh_from_db()
+        self.assertEqual(reminder.status, 'canceled')
 
 
 class BookingModificationTests(TenantTestCase):

@@ -12,7 +12,7 @@ class NotificationTemplateAdmin(admin.ModelAdmin):
 
 @admin.register(NotificationEvent)
 class NotificationEventAdmin(admin.ModelAdmin):
-    list_display = ('event_type', 'module', 'channel', 'status', 'recipient_email', 'created_at')
-    list_filter = ('channel', 'status', 'priority', 'module')
+    list_display = ('event_type', 'module', 'channel', 'status', 'workflow_status', 'priority', 'recipient_email', 'created_at')
+    list_filter = ('channel', 'status', 'workflow_status', 'priority', 'module')
     search_fields = ('event_type', 'module', 'subject', 'message', 'recipient_email', 'recipient_phone')
-    readonly_fields = ('attempts', 'queued_at', 'sent_at', 'failed_at', 'created_at', 'updated_at')
+    readonly_fields = ('attempts', 'queued_at', 'sent_at', 'failed_at', 'acknowledged_at', 'resolved_at', 'created_at', 'updated_at')

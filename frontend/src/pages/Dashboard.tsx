@@ -1,10 +1,11 @@
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { useRooms, useBookings, useGuestFolios } from '../hooks/bookings';
+import { useRooms, useBookings, useGuestFollowUpAction, useGuestFollowUps, useGuestFolios } from '../hooks/bookings';
 import { useHousekeepingTasks } from '../hooks/housekeeping';
 import { useInventoryItems, useStockMovements } from '../hooks/inventory';
 import { useMaintenanceTickets } from '../hooks/maintenance';
+import { useNotificationEvents, useNotificationWorkflowAction } from '../hooks/notifications';
 import { useRestaurantOrders } from '../hooks/restaurant';
 import { getCurrentUser } from '../services/auth';
 import { canAccess } from '../services/permissions';
@@ -102,6 +103,14 @@ const Dashboard = () => {
   const { data: restaurantOrders, isLoading: restaurantLoading } = useRestaurantOrders();
   const { data: inventoryItems, isLoading: inventoryLoading } = useInventoryItems();
   const { data: stockMovements, isLoading: movementsLoading } = useStockMovements();
+  const canReadNotifications = canAccess(user, ['notifications.event.read', 'notifications.template.read']);
+  const canUpdateNotifications = canAccess(user, ['notifications.event.update']);
+  const { data: openNotifications } = useNotificationEvents({ workflow_status: 'open' }, Boolean(user && canReadNotifications));
+  const notificationWorkflowAction = useNotificationWorkflowAction();
+  const canReadBookings = canAccess(user, ['bookings.reservation.read']);
+  const canUpdateBookings = canAccess(user, ['bookings.reservation.create']);
+  const { data: guestFollowUps } = useGuestFollowUps({ status: 'open' }, Boolean(user && canReadBookings));
+  const guestFollowUpAction = useGuestFollowUpAction();
 
   const today = new Date().toISOString().slice(0, 10);
   const totalRooms = rooms?.length || 0;
@@ -126,6 +135,12 @@ const Dashboard = () => {
     stockMovements?.filter((movement) => ['waste', 'adjustment_in', 'adjustment_out'].includes(movement.movement_type)).length || 0;
   const journalReady = Number(roomRevenue + restaurantRevenue) > 0 ? 'Active' : 'No postings';
   const hasLoadedCore = !roomsLoading && !bookingsLoading;
+  const needsAttention = (openNotifications || [])
+    .filter((event) => ['open', 'acknowledged'].includes(event.workflow_status))
+    .slice(0, 6);
+  const urgentNotifications = needsAttention.filter((event) => event.priority === 'urgent').length;
+  const dueGuestFollowUps = (guestFollowUps || []).slice(0, 6);
+  const urgentGuestFollowUps = dueGuestFollowUps.filter((reminder) => ['urgent', 'high'].includes(reminder.priority)).length;
 
   const insightTabs = [
     {
@@ -167,6 +182,8 @@ const Dashboard = () => {
     .filter((module) => canAccess(user, module.permissions));
 
   const watchlist = [
+    needsAttention.length ? ['Manager notifications', `${needsAttention.length} open follow-up items${urgentNotifications ? `, ${urgentNotifications} urgent` : ''}`, '/notifications'] : null,
+    dueGuestFollowUps.length ? ['Guest follow-ups', `${dueGuestFollowUps.length} reminders${urgentGuestFollowUps ? `, ${urgentGuestFollowUps} high priority` : ''}`, '/bookings?tab=guests'] : null,
     openTasks ? ['Rooms pending cleaning', `${openTasks} housekeeping tasks are still open`, '/housekeeping?status=open'] : null,
     lowStockItems.length ? ['Inventory reorder', `${lowStockItems.length} items are at or below reorder level`, '/inventory'] : null,
     openFolios ? ['Open folios', `${openFolios} folios are awaiting settlement`, '/bookings?tab=folios&filter=open_folios'] : null,
@@ -174,6 +191,25 @@ const Dashboard = () => {
       ? ['Kitchen queue', `${restaurantOrders.filter((order) => ['sent_to_kitchen', 'preparing'].includes(order.status)).length} orders are in kitchen workflow`, '/restaurant']
       : null,
   ].filter(Boolean) as string[][];
+
+  const submitNotificationAction = (eventId: string, action: 'acknowledge' | 'resolve') => {
+    const notes = window.prompt(action === 'resolve' ? 'Resolution or follow-up note' : 'Follow-up note', '');
+    if (notes === null) return;
+    notificationWorkflowAction.mutate({ eventId, action, notes });
+  };
+
+  const submitGuestFollowUpAction = (reminderId: string, action: 'complete' | 'snooze' | 'cancel') => {
+    const notes = window.prompt(action === 'complete' ? 'Completion note' : 'Follow-up note', '');
+    if (notes === null) return;
+    if (action === 'snooze') {
+      const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 16);
+      const snoozedUntil = window.prompt('Snooze until', tomorrow);
+      if (!snoozedUntil) return;
+      guestFollowUpAction.mutate({ reminderId, action, notes, snoozed_until: new Date(snoozedUntil).toISOString() });
+      return;
+    }
+    guestFollowUpAction.mutate({ reminderId, action, notes });
+  };
 
   return (
     <div className="space-y-6">
@@ -252,11 +288,106 @@ const Dashboard = () => {
         <div className="rounded-3xl bg-white p-5 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-xl font-bold text-[#1F5E3B]">Priority Watchlist</h2>
-              <p className="mt-1 text-sm text-slate-500">Operational items that need attention.</p>
+              <h2 className="text-xl font-bold text-[#1F5E3B]">Needs Attention</h2>
+              <p className="mt-1 text-sm text-slate-500">Open manager follow-ups and operational items that need action.</p>
             </div>
             <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">{watchlist.length} signals</span>
           </div>
+
+          {canReadNotifications && (
+            <div className="mb-4 grid gap-3 xl:grid-cols-2">
+              {needsAttention.map((event) => (
+                <article key={event.id} className="rounded-2xl border border-amber-100 bg-amber-50/60 p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <div className="flex flex-wrap gap-2">
+                        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-amber-700">{event.module}</span>
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${event.priority === 'urgent' ? 'bg-rose-50 text-rose-700' : 'bg-white text-slate-600'}`}>
+                          {event.priority}
+                        </span>
+                      </div>
+                      <p className="mt-3 font-semibold text-slate-900">{event.subject || event.event_type}</p>
+                      <p className="mt-1 line-clamp-2 text-sm text-slate-600">{event.message || 'No message body captured.'}</p>
+                      <p className="mt-2 text-xs text-slate-500">
+                        {event.recipient_user_details?.full_name || event.recipient_email || 'Assigned follow-up'} - {new Date(event.created_at).toLocaleString()}
+                      </p>
+                    </div>
+                    {canUpdateNotifications && (
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        {event.workflow_status === 'open' && (
+                          <button
+                            onClick={() => submitNotificationAction(event.id, 'acknowledge')}
+                            className="rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50"
+                          >
+                            Acknowledge
+                          </button>
+                        )}
+                        <button
+                          onClick={() => submitNotificationAction(event.id, 'resolve')}
+                          className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+                        >
+                          Resolve
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </article>
+              ))}
+              {needsAttention.length === 0 && (
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 xl:col-span-2">
+                  <p className="font-semibold text-[#1F5E3B]">No open manager notifications</p>
+                  <p className="mt-1 text-sm text-emerald-700">All assigned notification follow-ups are resolved.</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {canReadBookings && (
+            <div className="mb-4 grid gap-3 xl:grid-cols-2">
+              {dueGuestFollowUps.map((reminder) => (
+                <article key={reminder.id} className="rounded-2xl border border-sky-100 bg-sky-50/70 p-4">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <div className="flex flex-wrap gap-2">
+                        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-sky-700">{reminder.reminder_type.replace('_', ' ')}</span>
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${['urgent', 'high'].includes(reminder.priority) ? 'bg-rose-50 text-rose-700' : 'bg-white text-slate-600'}`}>
+                          {reminder.priority}
+                        </span>
+                      </div>
+                      <p className="mt-3 font-semibold text-slate-900">{reminder.subject}</p>
+                      <p className="mt-1 line-clamp-2 text-sm text-slate-600">{reminder.message || 'No reminder details captured.'}</p>
+                      <p className="mt-2 text-xs text-slate-500">
+                        {reminder.guest_details?.full_name || reminder.guest_details?.email || 'Guest'} - due {new Date(reminder.due_at).toLocaleString()}
+                      </p>
+                    </div>
+                    {canUpdateBookings && (
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        <button
+                          onClick={() => submitGuestFollowUpAction(reminder.id, 'complete')}
+                          className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+                        >
+                          Complete
+                        </button>
+                        <button
+                          onClick={() => submitGuestFollowUpAction(reminder.id, 'snooze')}
+                          className="rounded-lg border border-sky-200 bg-white px-3 py-1.5 text-xs font-medium text-sky-700 hover:bg-sky-50"
+                        >
+                          Snooze
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </article>
+              ))}
+              {dueGuestFollowUps.length === 0 && (
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 xl:col-span-2">
+                  <p className="font-semibold text-[#1F5E3B]">No open guest follow-ups</p>
+                  <p className="mt-1 text-sm text-emerald-700">Guest reminders are clear for now.</p>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid gap-3 md:grid-cols-2">
             {watchlist.map(([title, detail, path]) => (
               <Link key={title} to={path} className="rounded-2xl border border-slate-100 bg-slate-50 p-4 transition hover:border-emerald-200 hover:bg-white hover:shadow-sm">

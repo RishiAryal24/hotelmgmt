@@ -11,6 +11,7 @@ from housekeeping.serializers import HousekeepingTaskSerializer
 from housekeeping.services import complete_housekeeping_task
 from maintenance.serializers import MaintenanceTicketSerializer
 from maintenance.services import create_maintenance_ticket
+from notifications.services import create_housekeeping_escalation_notification
 from users.permissions import HasActionPermission
 
 
@@ -76,6 +77,7 @@ class HousekeepingTaskViewSet(viewsets.ModelViewSet):
             priority='urgent',
             reported_by=request.user,
         )
+        create_housekeeping_escalation_notification(task, ticket, created_by=request.user)
         return Response(
             {
                 'status': 'Escalated to maintenance',

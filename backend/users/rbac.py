@@ -35,8 +35,13 @@ DEFAULT_PERMISSIONS = [
     ('maintenance.ticket.update', 'Update maintenance tickets', 'maintenance'),
     ('audit.log.read', 'View audit logs', 'audit'),
     ('notifications.event.read', 'View notification events', 'notifications'),
+    ('notifications.event.update', 'Update notification follow-up state', 'notifications'),
     ('notifications.template.read', 'View notification templates', 'notifications'),
     ('notifications.template.manage', 'Manage notification templates', 'notifications'),
+    ('payments.intent.read', 'View payment intents', 'payments'),
+    ('payments.intent.create', 'Create payment intents', 'payments'),
+    ('payments.intent.update', 'Update payment intents', 'payments'),
+    ('payments.intent.callback', 'Record provider payment callbacks', 'payments'),
     ('reports.operational.read', 'View operational reports', 'reports'),
 ]
 
@@ -58,7 +63,17 @@ DEFAULT_ROLES = [
         'accountant',
         'Accountant',
         'Accounting, payments, and financial reports',
-        ['accounting.ledger.read', 'accounting.journal.create', 'reports.operational.read'],
+        [
+            'accounting.ledger.read',
+            'accounting.journal.create',
+            'payments.intent.read',
+            'payments.intent.create',
+            'payments.intent.update',
+            'payments.intent.callback',
+            'reports.operational.read',
+            'notifications.event.read',
+            'notifications.event.update',
+        ],
     ),
     (
         'housekeeping',
@@ -76,7 +91,7 @@ DEFAULT_ROLES = [
         'restaurant_manager',
         'Restaurant Manager',
         'Restaurant order supervision and approval',
-        ['restaurant.order.create', 'restaurant.order.update', 'restaurant.order.approve', 'restaurant.kitchen.update', 'pos.sale.create'],
+        ['restaurant.order.create', 'restaurant.order.update', 'restaurant.order.approve', 'restaurant.kitchen.update', 'pos.sale.create', 'notifications.event.read', 'notifications.event.update'],
     ),
     (
         'kitchen',
@@ -88,13 +103,13 @@ DEFAULT_ROLES = [
         'cashier',
         'Cashier',
         'POS settlement and billing',
-        ['pos.sale.create', 'restaurant.order.update', 'bookings.reservation.read'],
+        ['pos.sale.create', 'restaurant.order.update', 'bookings.reservation.read', 'payments.intent.read', 'payments.intent.create', 'payments.intent.update'],
     ),
     (
         'inventory_manager',
         'Inventory Manager',
         'Stock and purchase management',
-        ['inventory.stock.read', 'inventory.purchase.create'],
+        ['inventory.stock.read', 'inventory.purchase.create', 'notifications.event.read', 'notifications.event.update'],
     ),
     (
         'hr_officer',
@@ -111,9 +126,11 @@ DEFAULT_ROLES = [
             'hrms.payroll.create',
             'hrms.payroll.approve',
             'hrms.payroll.post',
+            'notifications.event.read',
+            'notifications.event.update',
         ],
     ),
-    ('maintenance', 'Maintenance', 'Maintenance ticket handling', ['rooms.room.read', 'maintenance.ticket.update']),
+    ('maintenance', 'Maintenance', 'Maintenance ticket handling', ['rooms.room.read', 'maintenance.ticket.update', 'notifications.event.read', 'notifications.event.update']),
     ('auditor', 'Auditor', 'Read-only operational, accounting, and audit review', ['accounting.ledger.read', 'reports.operational.read', 'audit.log.read', 'notifications.event.read']),
 ]
 

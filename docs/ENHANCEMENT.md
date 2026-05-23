@@ -1,246 +1,265 @@
-
 # Hotel & Restaurant Management System Enhancements
 
 > Engineering execution plan: see `docs/ENGINEERING_ROADMAP.md`.
 
 ## Overview
-This document outlines targeted improvements to elevate the hotel and restaurant management system to meet international hospitality industry standards (e.g., PMS/POS systems like Opera, Amadeus, Micros). The system currently has a solid multi-tenant foundation but lacks critical features for global deployment, compliance, and user experience.
+
+This document tracks product enhancements needed to move the hotel and restaurant management system toward international hospitality standards such as PMS/POS systems like Opera, Amadeus, and Micros.
+
+The system is now a connected development-stage hospitality ERP with strong tenant isolation, operational modules, accounting flows, POS workflows, HRMS/payroll, reporting, audit logs, and actionable manager notifications.
 
 ## Current System Strengths
-- Multi-tenant SaaS architecture with PostgreSQL schema isolation
-- Comprehensive modules: Bookings, Accounting, Inventory, HRMS, Housekeeping, Restaurant/POS
-- Automated workflows (e.g., checkout triggers housekeeping)
-- RBAC with 23 permissions
-- Double-entry accounting with source tracking
+
+- Multi-tenant SaaS architecture with PostgreSQL schema isolation.
+- JWT authentication, tenant-aware API access, and role-based permissions.
+- Comprehensive modules: Bookings, Accounting, Inventory, HRMS, Housekeeping, Maintenance, Restaurant/POS, Reports, Audit, and Notifications.
+- Automated workflows such as checkout-to-housekeeping, room transfer housekeeping tasks, POS-to-folio posting, payroll accounting postings, and operational notification triggers.
+- Double-entry accounting with source tracking.
+- Manager/admin notification center with acknowledge, resolve, reopen, dashboard attention panel, and sidebar open-count badge.
 
 ## Key Gaps
-- No OTA integrations, dynamic pricing, or night audit
-- Missing loyalty programs, payment gateways, and notifications
-- Limited security/compliance (PCI-DSS, GDPR)
-- No async processing, advanced reporting, or mobile access
-- Basic user experience and scalability issues
+
+- Payment gateway production credentials and live-money provider rollout are still pending; Khalti/eSewa sandbox adapters are implemented.
+- SMS/WhatsApp credential setup and Twilio-style provider adapters are implemented; production vendor account rollout and live delivery monitoring are still pending.
+- OTA integration exists as a foundation but still needs live sync workflows, conflict handling, and webhook hardening.
+- Security/compliance needs production hardening for PCI-DSS, GDPR, throttling, observability, and secrets management.
+- Staff mobile/PWA workflows are still pending.
+- Advanced analytics and multi-property operations are still future work.
 
 ## Enhancement Roadmap
-### Phase 1: Core Infrastructure (1-2 months)
-- Configure Celery for async tasks ✅
-- Implement basic security (rate limiting, API versioning) ✅
-- Add night audit automation ✅
-- Set up email/SMS notifications ✅
 
-### Phase 2: Functional Expansions (2-3 months)
-- OTA integration and rate management
-- Loyalty program and CRM
-- Payment gateway integration
-- Advanced POS features
+### Phase 1: Core Infrastructure
 
-### Phase 3: Advanced Features (3-6 months)
-- Revenue forecasting and analytics
-- Multi-property support
-- Mobile app development
-- Full compliance (PCI-DSS, GDPR)
+- [x] Multi-tenant schema foundation.
+- [x] Local development scripts and bootstrap flow.
+- [x] JWT auth and current-user flow.
+- [x] RBAC permissions and role seeding.
+- [x] Protected frontend routes.
+- [x] Tenant-scoped audit logging.
+- [x] Celery foundation for async tasks.
+- [x] Night audit automation command.
+- [x] Notifications app foundation with templates, delivery state, retry metadata, and API endpoints.
+- [x] Actionable notification center for admins/managers.
+- [x] Dashboard needs-attention panel and sidebar notification badge.
+- [ ] CI workflow.
+- [ ] Stronger production token/session hardening.
+- [ ] Structured logging and Sentry-style observability.
 
-## Detailed Improvement Suggestions
+### Phase 2: Functional Expansions
+
+- [x] Room, room type, guest, reservation, check-in, checkout, and folio workflows.
+- [x] Availability calendar.
+- [x] Booking modification foundation.
+- [x] Stay extension workflow.
+- [x] Room transfer workflow.
+- [x] Guest history/CRM profile with notes, preferences, stay history, and VIP level.
+- [x] Checkout-to-housekeeping automation.
+- [x] Maintenance workflow and housekeeping escalation.
+- [x] Rate plans and packages.
+- [x] Loyalty program and guest points foundation.
+- [x] Restaurant/POS advanced workflows: modifiers, split bills, table transfer/merge, approvals, cashier shifts, receipt numbering, reprint audit, taxes, service charge, reconciliation, and exception reports.
+- [x] Inventory stock receiving, adjustments, purchase orders, low-stock alerts, and restaurant inventory deduction.
+- [x] HRMS employee, shift, attendance, payroll, payslip, reversal, labor report, and attendance exception report.
+- [x] Operational reports with CSV/PDF outputs.
+- [x] Provider-backed notification delivery adapter foundation.
+- [x] Tenant-scoped SMS/WhatsApp credential setup with masked settings and test delivery diagnostics.
+- [x] Retry/cancel actions for notification deliveries.
+- [x] Payment abstraction foundation with payment intent records, provider references, status transitions, idempotent callback handling, RBAC, API endpoints, and Payment Intents UI.
+- [x] Guest communication follow-up reminders.
+- [ ] Walk-in booking polish.
+- [ ] Broader POS manager analytics.
+
+### Phase 3: Advanced Features
+
+- [ ] OTA provider live sync, webhook idempotency, and conflict handling.
+- [x] Nepal payment providers: Khalti/eSewa sandbox initiation/verification foundation.
+- [ ] International payment provider sandbox.
+- [ ] Fiscal periods, trial balance, profit and loss, and balance sheet.
+- [ ] Revenue forecasting and analytics.
+- [ ] Multi-property support.
+- [ ] Staff mobile/PWA workflows.
+- [ ] Full compliance hardening for PCI-DSS and GDPR.
+- [ ] Object storage for media.
+- [ ] Backups and restore procedure.
+
+## Detailed Improvement Tracker
 
 ### 1. System Flow and User Experience
+
 #### Unified Dashboard
-- **Description**: Centralized dashboard with real-time KPIs (occupancy, revenue, tasks).
-- **Workflow**:
-  ```mermaid
-  graph TD
-      A[User Logs In] --> B[Fetch KPIs from API]
-      B --> C[Display Charts & Alerts]
-      C --> D[Drill-Down to Details]
-  ```
-- **Actions**:
-  - Create `/api/v1/dashboard/` endpoint in `core/views.py`.
-  - Add `Dashboard.tsx` in frontend with Chart.js.
+
+- [x] Live dashboard with occupancy, arrivals, departures, housekeeping, maintenance, revenue, inventory, and operational signals.
+- [x] Dashboard needs-attention panel backed by open manager notifications.
+- [ ] Add richer charts and time-series trend cards.
 
 #### Workflow Automation
-- **Description**: Enhance automations (e.g., housekeeping on checkout, approval workflows).
-- **Workflow**:
-  ```mermaid
-  graph TD
-      A[Event Trigger] --> B[Celery Task Queued]
-      B --> C[Process Async]
-      C --> D[Notify Stakeholders]
-  ```
-- **Actions**:
-  - Configure Celery in `settings.py`.
-  - Add tasks in `tasks.py` files.
+
+- [x] Checkout creates housekeeping task.
+- [x] Housekeeping escalation creates maintenance ticket.
+- [x] Payroll posting creates accounting journal and notification event.
+- [x] Low-stock conditions create manager notification events.
+- [ ] Add scheduled automation for recurring notifications and night audit execution.
 
 #### Guest Journey Optimization
-- **Description**: Self-check-in, mobile services, personalized recommendations.
-- **Workflow**:
-  ```mermaid
-  graph TD
-      A[Guest Arrives] --> B[QR Check-In]
-      B --> C[Personalized Services]
-      C --> D[Feedback Collection]
-  ```
-- **Actions**:
-  - Extend `bookings` with QR generation.
-  - Add recommendation engine.
+
+- [x] Guest profile with stay history, folio value, VIP level, preferences, and internal notes.
+- [x] Guest communication follow-up reminders.
+- [ ] Self-check-in or QR check-in.
+- [ ] Guest feedback collection.
 
 #### Staff Mobile Access
-- **Description**: PWA for housekeeping/restaurant staff.
-- **Actions**:
-  - Develop with React for mobile.
 
-### 2. Full Functionalities for International Standards
+- [ ] Mobile/PWA workflow for housekeeping and maintenance.
+- [ ] Mobile/PWA workflow for restaurant floor staff.
+
+### 2. Hospitality Functional Standards
+
 #### OTA Integration
-- **Description**: Sync with Booking.com, Expedia.
-- **Workflow**:
-  ```mermaid
-  graph TD
-      A[OTA Request] --> B[API Query]
-      B --> C[Return Data]
-      C --> D[Webhook Update]
-  ```
-- **Actions**:
-  - New `integrations` app with webhook handlers.
-  - ✅ Created OTAChannel model, views, serializers, URLs.
 
-#### Rate Management & Packages
-- **Description**: Dynamic pricing, bundles.
-- **Actions**:
-  - Add `RatePlan`, `Package` models in `bookings`.
-  - ✅ Implemented RatePlan and Package models, serializers, viewsets, URLs.
+- [x] OTAChannel model, views, serializers, and URLs.
+- [ ] Provider-specific channel sync.
+- [ ] Webhook idempotency and conflict handling.
+- [ ] Rate and inventory push/pull workflows.
+
+#### Rate Management and Packages
+
+- [x] RatePlan and Package models, serializers, viewsets, and URLs.
+- [ ] Dynamic pricing rules.
+- [ ] Package booking polish and reporting.
 
 #### Night Audit
-- **Description**: Automate EOD processes.
-- **Workflow**:
-  ```mermaid
-  graph TD
-      A[EOD Trigger] --> B[Post Charges]
-      B --> C[Reconcile]
-      C --> D[Generate Reports]
-  ```
-- **Actions**:
-  - `night_audit` management command.
-  - ✅ Created night_audit command.
 
-#### Loyalty & CRM
-- **Description**: Points-based rewards.
-- **Actions**:
-  - `LoyaltyProgram` model in `bookings`.
-  - ✅ Implemented LoyaltyProgram and GuestPoints models, serializers, viewsets, URLs.
+- [x] `night_audit` management command.
+- [ ] Scheduler setup.
+- [ ] Night audit review UI and exception handling.
+
+#### Loyalty and CRM
+
+- [x] LoyaltyProgram and GuestPoints foundation.
+- [x] Guest history/CRM profile.
+- [x] Guest follow-up reminder records with complete, snooze, and cancel actions.
+- [ ] Guest communication timeline polish and campaign-ready segmentation.
+- [ ] Campaign-ready segmentation.
 
 #### Advanced POS Features
-- **Description**: Modifiers, split bills, table operations, approvals, cashier shifts, receipt output, and configurable restaurant charges.
-- **Actions**:
-  - Update `restaurant` models.
-  - Completed menu modifiers with line-level price impact.
-  - Completed item-quantity split bills and amount-based split payments.
-  - Completed table transfer and table merge for active dine-in orders.
-  - Completed void, discount, and complimentary approval workflow.
-  - Completed kitchen display polish with ticket age, filters, modifiers, notes, and order context.
-  - Completed cashier shift summary and close report.
-  - Completed POS settlement for restaurant orders and room folios.
-  - Completed restaurant tax and service-charge configuration with receipt and accounting breakdowns.
-  - Completed restaurant receipt numbering and reprint audit trail.
-  - Completed cash drawer reconciliation by payment row and cashier shift.
-  - Completed POS operational reports for cashier exceptions.
-  - Remaining: broader POS manager analytics.
 
-#### Revenue Forecasting
-- **Description**: Predictive analytics.
-- **Actions**:
-  - New `analytics` app with Prophet.
-
-#### Multi-Property Support
-- **Description**: Manage multiple hotels.
-- **Actions**:
-  - `Property` model linked to tenants.
+- [x] Menu modifiers with line-level price impact.
+- [x] Item-quantity split bills and amount-based split payments.
+- [x] Active dine-in table transfer and table merge.
+- [x] Void, discount, and complimentary approval workflow.
+- [x] Kitchen display polish with ticket age, filters, modifiers, notes, and order context.
+- [x] Cashier shift summary and close report.
+- [x] POS settlement for restaurant orders and room folios.
+- [x] Restaurant tax and service-charge configuration with receipt and accounting breakdowns.
+- [x] Restaurant receipt numbering and reprint audit trail.
+- [x] Cash drawer reconciliation by payment row and cashier shift.
+- [x] POS operational reports for cashier exceptions.
+- [ ] Broader POS manager analytics.
 
 ### 3. Security Enhancements
+
 #### PCI-DSS Compliance
-- **Description**: Tokenize payments.
-- **Actions**:
-  - Integrate Stripe; new `payments` app.
+
+- [x] Payment abstraction and tokenized provider flow foundation.
+- [ ] No raw card data storage.
+- [x] Provider callback idempotency.
 
 #### GDPR Compliance
-- **Description**: Data export/deletion.
-- **Actions**:
-  - Views in `users` for portability.
 
-#### Rate Limiting
-- **Description**: Protect APIs.
-- **Actions**:
-  - `django-ratelimit` in settings.
+- [ ] Data export.
+- [ ] Data anonymization/deletion workflow.
+- [ ] Retention policy design.
 
-#### API Security
-- **Description**: OAuth2, versioning.
-- **Actions**:
-  - Add `djangorestframework-oauth`.
+#### Rate Limiting and API Security
+
+- [ ] Login throttling.
+- [ ] Account lock policy.
+- [ ] Consistent API error envelope.
+- [ ] Refresh token rotation review.
 
 ### 4. Scalability and Performance
-#### Async Processing
-- **Description**: Celery for tasks.
-- **Actions**:
-  - Configure with Redis.
 
-#### Caching
-- **Description**: Redis for responses.
-- **Actions**:
-  - `django-redis`.
-
-#### Database Optimization
-- **Description**: Indexes on queries.
-- **Actions**:
-  - Migration updates.
-
-#### Load Balancing
-- **Description**: Gunicorn/Nginx.
-- **Actions**:
-  - Update Docker Compose.
+- [x] Celery task foundation.
+- [ ] Redis setup guidance for Celery workers.
+- [ ] Redis caching for selected high-read endpoints.
+- [ ] Query/index review for high-volume operational tables.
+- [ ] Production deployment hardening for workers, web processes, and static/media storage.
 
 ### 5. Code Quality and Maintainability
-#### Testing
-- **Description**: Unit/integration tests.
-- **Actions**:
-  - `pytest-django`.
 
-#### Documentation
-- **Description**: API docs.
-- **Actions**:
-  - Swagger UI.
-
-#### Error Handling
-- **Description**: Global handlers.
-- **Actions**:
-  - Custom middleware.
-
-#### Code Standards
-- **Description**: PEP8 enforcement.
-- **Actions**:
-  - Pre-commit hooks.
+- [x] Focused backend tests for bookings, restaurant, inventory, HRMS, notifications, and RBAC slices.
+- [x] Frontend TypeScript checks used during enhancement slices.
+- [x] Roadmap and enhancement docs maintained as resume points.
+- [ ] CI checks for backend tests and frontend build.
+- [ ] API documentation UI.
+- [ ] Pre-commit formatting/linting.
 
 ### 6. Integration Capabilities
+
 #### Payment Gateways
-- **Description**: Stripe/PayPal.
-- **Actions**:
-  - SDK integration.
+
+- [x] Payment intent model.
+- [x] Provider reference and status transitions.
+- [x] Idempotent provider callback endpoint.
+- [x] Khalti/eSewa sandbox.
+- [ ] Stripe or international provider sandbox.
 
 #### Notifications
-- **Description**: Email/SMS.
-- **Actions**:
-  - `notifications` app with Celery.
+
+- [x] Notifications app with Celery delivery foundation.
+- [x] Notification event/template API with delivery status and retry metadata.
+- [x] Operational triggers for low stock, payroll posting, and housekeeping escalation.
+- [x] Manager/admin notification center UI.
+- [x] Acknowledge, resolve, and reopen follow-up states.
+- [x] Dashboard needs-attention panel.
+- [x] Sidebar open-count badge.
+- [x] Provider adapter structure for email, SMS, WhatsApp, in-app, and system notifications.
+- [x] Tenant notification delivery settings field.
+- [x] Tenant-scoped SMS/WhatsApp credentials with masked serializer output.
+- [x] SMS/WhatsApp test-send diagnostics from the notification center.
+- [x] Retry/cancel actions for queued or failed provider deliveries.
+- [x] Real SMS/WhatsApp vendor credential setup foundation.
+- [ ] Production SMS/WhatsApp account rollout, delivery webhooks, and monitoring.
 
 #### Third-Party APIs
-- **Description**: Amadeus, POS systems.
-- **Actions**:
-  - Client libraries.
+
+- [ ] OTA provider clients.
+- [ ] Payment provider clients.
+- [ ] SMS/WhatsApp provider clients.
 
 #### Reporting Tools
-- **Description**: Power BI integration.
-- **Actions**:
-  - API exposure.
 
-## Implementation Notes for AI Agent
-- Prioritize Phase 1 for stability. ✅ Completed
-- Use existing models/serializers as base.
-- Ensure tenant-awareness in all new features.
-- Test against PMS standards post-implementation.
-- Document all changes in this file.
-- Current checkpoint: notifications foundation is implemented and verified locally.
-- Next: add notification center UI and operational triggers.
+- [x] Operational reports.
+- [x] CSV exports.
+- [x] Printable management summary PDF.
+- [ ] Power BI or external BI API exposure.
+
+## Current Checkpoint
+
+- Actionable notification center UI is implemented.
+- Dashboard needs-attention panel is implemented.
+- Sidebar notification badge is implemented.
+- Operational triggers are implemented for low stock, payroll posting, and housekeeping escalation.
+- Manager/admin visibility and follow-up states are implemented.
+- Provider adapter foundation, tenant notification delivery settings, and retry/cancel controls are implemented.
+- Guest follow-up reminder records, APIs, dashboard surfacing, Notifications surfacing, guest profile surfacing, and reminder actions are implemented.
+- Payment abstraction foundation is implemented with payment intents, provider/status transitions, callback idempotency, tenant API routes, RBAC, focused tests, and Payment Intents UI.
+- Khalti/eSewa sandbox foundation is implemented with tenant-scoped masked settings, Khalti initiate/lookup adapters, eSewa signed form generation, eSewa callback signature verification, provider UI actions, migrations, and focused tests.
+- Payment settlement reconciliation is implemented for successful payment intents linked to guest folios and restaurant orders, with idempotent settlement, accounting posting reuse, settlement status tracking, and Payment Intents UI reconciliation visibility.
+- Payment reconciliation reports and operator workflow are implemented with filtered summaries by provider/status/settlement/follow-up state, attention counts, review/resolve actions, reviewer tracking, and Payment Intents UI filters.
+- Provider references are surfaced on folio serializers/PDFs, restaurant order serializers, restaurant payment rows, cashier close report rows, POS payment receipts, revenue/cashier reports, and management summaries.
+- Payment reconciliation exports and drill-down links are implemented with filtered UI CSV exports, server-side CSV export endpoint, and Payment Intents source links into POS folio/paid-order context.
+- SMS/WhatsApp credential setup is implemented with masked tenant settings, Twilio-style SMS/WhatsApp adapters, admin test-send diagnostics, and notification center controls.
+- Local verification completed with focused backend tests, migration check, tenant migrations, and frontend TypeScript check.
+
+## Next Enhancement
+
+Recommended next enhancement: **Stripe or international provider sandbox**.
+
+Suggested order:
+
+1. Add provider settings for an international sandbox gateway.
+2. Implement hosted-payment initiation and callback verification.
+3. Reuse the existing payment intent reconciliation workflow.
+4. Add focused provider tests and frontend operator controls.
+5. Keep production credentials disabled by default.

@@ -176,6 +176,29 @@ const Reports = () => {
     });
   }, [paidFolios, paidOrders]);
 
+  const providerPaymentRows = useMemo(() => {
+    const rows = new Map<string, { provider: string; restaurantTotal: number; folioTotal: number; count: number }>();
+    paidOrders.forEach((order) => {
+      const reference = order.payment_reference;
+      if (!reference?.provider_reference) return;
+      const key = reference.provider || 'provider';
+      const current = rows.get(key) || { provider: key, restaurantTotal: 0, folioTotal: 0, count: 0 };
+      current.restaurantTotal += Number(order.paid_amount || order.grand_total || 0);
+      current.count += 1;
+      rows.set(key, current);
+    });
+    paidFolios.forEach((folio) => {
+      const reference = folio.payment_reference;
+      if (!reference?.provider_reference) return;
+      const key = reference.provider || 'provider';
+      const current = rows.get(key) || { provider: key, restaurantTotal: 0, folioTotal: 0, count: 0 };
+      current.folioTotal += Number(folio.paid_amount || folio.grand_total || 0);
+      current.count += 1;
+      rows.set(key, current);
+    });
+    return Array.from(rows.values()).map((row) => ({ ...row, total: row.restaurantTotal + row.folioTotal })).sort((a, b) => b.total - a.total);
+  }, [paidFolios, paidOrders]);
+
   const restaurantItemSales = useMemo(() => {
     const rows = new Map<string, { name: string; quantity: number; total: number }>();
     paidOrders.forEach((order) => {
@@ -216,7 +239,7 @@ const Reports = () => {
     if (activeTab === 'revenue') {
       downloadCsv(
         `revenue-report-${today}.csv`,
-        ['Folio', 'Guest', 'Room', 'Grand Total', 'Paid Amount', 'Payment Method', 'Status'],
+        ['Folio', 'Guest', 'Room', 'Grand Total', 'Paid Amount', 'Payment Method', 'Status', 'Provider Reference'],
         (folios || []).map((folio) => [
           folio.folio_number,
           folio.guest_name,
@@ -225,6 +248,7 @@ const Reports = () => {
           folio.paid_amount,
           folio.payment_method,
           folio.status,
+          folio.payment_reference?.provider_reference || '',
         ]),
       );
       return;
@@ -364,10 +388,22 @@ const Reports = () => {
                 <td className="px-4 py-3">{folio.guest_name}</td>
                 <td className="px-4 py-3">{folio.room_number}</td>
                 <td className="px-4 py-3 text-right">{formatMoney(folio.grand_total, settings?.currency)}</td>
-                <td className="px-4 py-3">{folio.status}</td>
+                <td className="px-4 py-3 text-right">{folio.status}</td>
               </tr>
             ))}
             {!folios?.length && <EmptyRow columns={5} label="No folios yet." />}
+          </RowsTable>
+          <RowsTable headers={['Provider', 'Restaurant', 'Rooms/Folios', 'Total', 'Count']}>
+            {providerPaymentRows.map((row) => (
+              <tr key={row.provider}>
+                <td className="px-4 py-3 font-medium capitalize text-slate-900">{row.provider}</td>
+                <td className="px-4 py-3 text-right">{formatMoney(row.restaurantTotal, settings?.currency)}</td>
+                <td className="px-4 py-3 text-right">{formatMoney(row.folioTotal, settings?.currency)}</td>
+                <td className="px-4 py-3 text-right font-semibold">{formatMoney(row.total, settings?.currency)}</td>
+                <td className="px-4 py-3 text-right">{row.count}</td>
+              </tr>
+            ))}
+            {!providerPaymentRows.length && <EmptyRow columns={5} label="No provider-settled payments yet." />}
           </RowsTable>
         </section>
       )}
@@ -494,6 +530,18 @@ const Reports = () => {
               </tr>
             ))}
           </RowsTable>
+          <RowsTable headers={['Provider', 'Restaurant', 'Rooms/Folios', 'Total', 'Count']}>
+            {providerPaymentRows.map((row) => (
+              <tr key={row.provider}>
+                <td className="px-4 py-3 font-medium capitalize text-slate-900">{row.provider}</td>
+                <td className="px-4 py-3 text-right">{formatMoney(row.restaurantTotal, settings?.currency)}</td>
+                <td className="px-4 py-3 text-right">{formatMoney(row.folioTotal, settings?.currency)}</td>
+                <td className="px-4 py-3 text-right font-semibold text-slate-900">{formatMoney(row.total, settings?.currency)}</td>
+                <td className="px-4 py-3 text-right">{row.count}</td>
+              </tr>
+            ))}
+            {!providerPaymentRows.length && <EmptyRow columns={5} label="No provider-settled payments yet." />}
+          </RowsTable>
 
           <RowsTable headers={['Type', 'Reference', 'Actor', 'Context', 'Status', 'Amount', 'Occurred', 'Detail']}>
             {cashierExceptionRows.slice(0, 50).map((row, index) => (
@@ -575,6 +623,7 @@ const Reports = () => {
             reportData={reportData}
             bookingStatusRows={bookingStatusRows}
             paymentMethodRows={paymentMethodRows}
+            providerPaymentRows={providerPaymentRows}
             restaurantItemSales={restaurantItemSales}
             lowStockItems={lowStockItems}
             cashierExceptionRows={cashierExceptionRows}
@@ -639,6 +688,7 @@ const ManagementSummary = ({
   reportData,
   bookingStatusRows,
   paymentMethodRows,
+  providerPaymentRows,
   restaurantItemSales,
   lowStockItems,
   cashierExceptionRows,
@@ -672,6 +722,7 @@ const ManagementSummary = ({
   };
   bookingStatusRows: Array<[string, string | number]>;
   paymentMethodRows: Array<{ method: string; label: string; restaurantTotal: number; folioTotal: number; total: number }>;
+  providerPaymentRows: Array<{ provider: string; restaurantTotal: number; folioTotal: number; total: number; count: number }>;
   restaurantItemSales: Array<{ name: string; quantity: number; total: number }>;
   lowStockItems: Array<{ id: string; name: string; sku: string; current_stock: string; unit: string; reorder_level: string }>;
   cashierExceptionRows: CashierExceptionRow[];
@@ -718,6 +769,19 @@ const ManagementSummary = ({
           <td className="py-2 pr-3 text-right font-semibold">{formatMoney(row.total, currency)}</td>
         </tr>
       ))}
+    </SummaryTable>
+
+    <SummaryTable title="Provider Payments" headers={['Provider', 'Restaurant', 'Rooms/Folios', 'Total', 'Count']}>
+      {providerPaymentRows.map((row) => (
+        <tr key={row.provider}>
+          <td className="py-2 pr-3 capitalize">{row.provider}</td>
+          <td className="py-2 pr-3 text-right">{formatMoney(row.restaurantTotal, currency)}</td>
+          <td className="py-2 pr-3 text-right">{formatMoney(row.folioTotal, currency)}</td>
+          <td className="py-2 pr-3 text-right font-semibold">{formatMoney(row.total, currency)}</td>
+          <td className="py-2 pr-3 text-right">{row.count}</td>
+        </tr>
+      ))}
+      {!providerPaymentRows.length && <tr><td colSpan={5} className="py-4 text-center text-slate-500">No provider-settled payments yet.</td></tr>}
     </SummaryTable>
 
     <div className="print-section grid gap-4 md:grid-cols-2">

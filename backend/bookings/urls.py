@@ -4,6 +4,7 @@ from bookings.views import (
     FacilityAmenityViewSet,
     FacilityServiceViewSet,
     GuestCommunicationViewSet,
+    GuestFollowUpReminderViewSet,
     GuestFolioViewSet,
     GuestPointsViewSet,
     GuestViewSet,
@@ -27,5 +28,6 @@ router.register(r'packages', PackageViewSet)
 router.register(r'loyalty-programs', LoyaltyProgramViewSet)
 router.register(r'guest-points', GuestPointsViewSet)
 router.register(r'guest-communications', GuestCommunicationViewSet)
+router.register(r'guest-follow-ups', GuestFollowUpReminderViewSet)
 
 urlpatterns = router.urls

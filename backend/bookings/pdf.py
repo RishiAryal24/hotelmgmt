@@ -88,6 +88,12 @@ def guest_folio_pdf(folio, tenant=None):
     currency = getattr(tenant, 'currency', '')
     tenant_name = getattr(tenant, 'name', 'Hotel')
     booking = folio.booking
+    try:
+        from payments.services import get_settled_payment_reference
+
+        payment_reference = get_settled_payment_reference(source_module='guest_folio', source_id=folio.id)
+    except Exception:
+        payment_reference = None
     lines = [
         tenant_name,
         '',
@@ -110,6 +116,8 @@ def guest_folio_pdf(folio, tenant=None):
             f'Grand total: {_money(folio.grand_total, currency)}',
             f'Paid amount: {_money(folio.paid_amount, currency)}',
             f'Payment method: {folio.payment_method or "-"}',
+            f'Provider: {(payment_reference or {}).get("provider", "-")}',
+            f'Provider reference: {(payment_reference or {}).get("provider_reference", "-")}',
         ],
     )
     return build_text_pdf('Guest Folio', lines)

@@ -107,6 +107,17 @@ export interface RestaurantOrderPayment {
   amount: string;
   cashier_shift?: string | null;
   paid_at: string;
+  payment_reference?: PaymentReference | null;
+}
+
+export interface PaymentReference {
+  id: string;
+  provider: string;
+  provider_reference: string;
+  idempotency_key: string;
+  status: string;
+  settlement_status: string;
+  settled_at: string | null;
 }
 
 export interface RestaurantReceiptReprint {
@@ -146,6 +157,7 @@ export interface RestaurantOrder {
   lines: RestaurantOrderLine[];
   payments: RestaurantOrderPayment[];
   receipt_reprints?: RestaurantReceiptReprint[];
+  payment_reference?: PaymentReference | null;
 }
 
 export interface RestaurantOrderApproval {
@@ -231,6 +243,8 @@ export interface CashierShiftPaymentBreakdown {
 export interface CashierShiftPaymentRow {
   source: 'restaurant' | 'folio';
   reference: string;
+  provider: string;
+  provider_reference: string;
   guest_or_table: string;
   payment_method: RestaurantOrder['payment_method'];
   amount: string;

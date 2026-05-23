@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Room, RoomType, Guest, Booking, GuestCommunication, GuestFolio, GuestHistory, FacilityAmenity, FacilityService } from '../types/bookings';
+import { Room, RoomType, Guest, Booking, GuestCommunication, GuestFolio, GuestFollowUpReminder, GuestHistory, FacilityAmenity, FacilityService } from '../types/bookings';
 import apiClient from '../services/api';
 
 const getList = <T,>(data: T[] | { results: T[] }) => (Array.isArray(data) ? data : data.results);
@@ -68,6 +68,22 @@ export const useGuestCommunications = (guestId?: string) => {
     queryFn: async (): Promise<GuestCommunication[]> => {
       const response = await apiClient.get<GuestCommunication[] | { results: GuestCommunication[] }>('/bookings/guest-communications/', {
         params: { guest: guestId },
+      });
+      return getList(response.data);
+    },
+  });
+};
+
+export const useGuestFollowUps = (params?: Record<string, string | undefined>, enabled = true) => {
+  return useQuery({
+    queryKey: ['guest-follow-ups', params || {}],
+    enabled,
+    queryFn: async (): Promise<GuestFollowUpReminder[]> => {
+      const response = await apiClient.get<GuestFollowUpReminder[] | { results: GuestFollowUpReminder[] }>('/bookings/guest-follow-ups/', {
+        params: {
+          ordering: 'due_at',
+          ...params,
+        },
       });
       return getList(response.data);
     },
@@ -154,6 +170,51 @@ export const useCreateGuestCommunication = () => {
     onSuccess: (_communication, variables) => {
       queryClient.invalidateQueries({ queryKey: ['guest-communications', variables.guest] });
       queryClient.invalidateQueries({ queryKey: ['guest-history', variables.guest] });
+    },
+  });
+};
+
+export const useCreateGuestFollowUp = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (
+      reminder: Pick<GuestFollowUpReminder, 'guest' | 'reminder_type' | 'priority' | 'subject' | 'message' | 'due_at'> & {
+        booking?: string;
+      },
+    ): Promise<GuestFollowUpReminder> => {
+      const response = await apiClient.post('/bookings/guest-follow-ups/', reminder);
+      return response.data;
+    },
+    onSuccess: (reminder) => {
+      queryClient.invalidateQueries({ queryKey: ['guest-follow-ups'] });
+      queryClient.invalidateQueries({ queryKey: ['guest-follow-ups', { guest: reminder.guest }] });
+    },
+  });
+};
+
+export const useGuestFollowUpAction = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      reminderId,
+      action,
+      notes,
+      snoozed_until,
+    }: {
+      reminderId: string;
+      action: 'complete' | 'snooze' | 'cancel';
+      notes?: string;
+      snoozed_until?: string;
+    }): Promise<GuestFollowUpReminder> => {
+      const response = await apiClient.post(`/bookings/guest-follow-ups/${reminderId}/${action}/`, {
+        notes: notes || '',
+        snoozed_until,
+      });
+      return response.data;
+    },
+    onSuccess: (reminder) => {
+      queryClient.invalidateQueries({ queryKey: ['guest-follow-ups'] });
+      queryClient.invalidateQueries({ queryKey: ['guest-follow-ups', { guest: reminder.guest }] });
     },
   });
 };

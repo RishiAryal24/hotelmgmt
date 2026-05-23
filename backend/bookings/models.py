@@ -334,3 +334,87 @@ class GuestCommunication(UUIDModel):
     def __str__(self):
         subject = self.subject or self.get_channel_display()
         return f"{self.guest} - {subject}"
+
+
+class GuestFollowUpReminder(UUIDModel):
+    REMINDER_TYPE_CHOICES = [
+        ('arrival', 'Upcoming Arrival'),
+        ('vip', 'VIP Follow Up'),
+        ('payment', 'Payment Follow Up'),
+        ('post_stay', 'Post-Stay Follow Up'),
+        ('custom', 'Custom'),
+    ]
+    STATUS_CHOICES = [
+        ('open', 'Open'),
+        ('snoozed', 'Snoozed'),
+        ('completed', 'Completed'),
+        ('canceled', 'Canceled'),
+    ]
+    PRIORITY_CHOICES = [
+        ('low', 'Low'),
+        ('normal', 'Normal'),
+        ('high', 'High'),
+        ('urgent', 'Urgent'),
+    ]
+
+    guest = models.ForeignKey(Guest, on_delete=models.CASCADE, related_name='follow_up_reminders')
+    booking = models.ForeignKey(Booking, on_delete=models.SET_NULL, related_name='follow_up_reminders', null=True, blank=True)
+    reminder_type = models.CharField(max_length=30, choices=REMINDER_TYPE_CHOICES, default='custom')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open', db_index=True)
+    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='normal')
+    subject = models.CharField(max_length=160)
+    message = models.TextField(blank=True)
+    due_at = models.DateTimeField(db_index=True)
+    snoozed_until = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    canceled_at = models.DateTimeField(null=True, blank=True)
+    assigned_to = models.ForeignKey('users.PlatformUser', on_delete=models.SET_NULL, related_name='assigned_guest_follow_ups', null=True, blank=True)
+    created_by = models.ForeignKey('users.PlatformUser', on_delete=models.SET_NULL, related_name='created_guest_follow_ups', null=True, blank=True)
+    follow_up_notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['status', 'due_at', '-priority']
+        indexes = [
+            models.Index(fields=['status', 'due_at']),
+            models.Index(fields=['guest', 'status']),
+            models.Index(fields=['booking', 'status']),
+            models.Index(fields=['reminder_type', 'status']),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['guest', 'booking', 'reminder_type', 'subject'],
+                condition=models.Q(status__in=['open', 'snoozed']),
+                name='unique_active_guest_follow_up',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.guest} - {self.subject}'
+
+    def complete(self, *, user=None, notes=''):
+        self.status = 'completed'
+        self.completed_at = timezone.now()
+        if user and not self.assigned_to_id:
+            self.assigned_to = user
+        if notes:
+            self.follow_up_notes = notes
+        self.save(update_fields=['status', 'completed_at', 'assigned_to', 'follow_up_notes', 'updated_at'])
+
+    def snooze(self, *, until, user=None, notes=''):
+        self.status = 'snoozed'
+        self.snoozed_until = until
+        self.due_at = until
+        if user and not self.assigned_to_id:
+            self.assigned_to = user
+        if notes:
+            self.follow_up_notes = notes
+        self.save(update_fields=['status', 'snoozed_until', 'due_at', 'assigned_to', 'follow_up_notes', 'updated_at'])
+
+    def cancel(self, *, user=None, notes=''):
+        self.status = 'canceled'
+        self.canceled_at = timezone.now()
+        if user and not self.assigned_to_id:
+            self.assigned_to = user
+        if notes:
+            self.follow_up_notes = notes
+        self.save(update_fields=['status', 'canceled_at', 'assigned_to', 'follow_up_notes', 'updated_at'])

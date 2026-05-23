@@ -27,6 +27,8 @@ class Tenant(TenantMixin, UUIDModel):
     created_by = models.CharField(max_length=255, blank=True, default='system')
     description = models.TextField(blank=True)
     currency = models.CharField(max_length=3, choices=CURRENCY_CHOICES, default='NPR')
+    notification_settings = models.JSONField(default=dict, blank=True)
+    payment_settings = models.JSONField(default=dict, blank=True)
 
     auto_create_schema = True
 

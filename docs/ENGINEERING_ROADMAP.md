@@ -8,7 +8,7 @@ Use this document when deciding what to build next. Use `docs/ENHANCEMENT.md` fo
 
 ## Current Baseline
 
-Status: notifications foundation checkpoint stabilized locally.
+Status: payment reconciliation exports and drill-down links checkpoint stabilized locally.
 
 Verified foundations:
 
@@ -19,13 +19,13 @@ Verified foundations:
 - Tenant migrations apply with `migrate_schemas`.
 - Frontend and backend respond locally.
 - Authenticated bookings and folios endpoints return `200`.
-- Attendance exception reporting, department labor cost reporting, and notifications foundation are implemented and verified locally.
+- Attendance exception reporting, department labor cost reporting, notifications foundation, manager/admin notification center UI, dashboard needs-attention panel, sidebar badge, operational notification triggers, acknowledge/resolve/reopen follow-up states, provider adapter foundation, tenant notification settings, retry/cancel delivery controls, SMS/WhatsApp credential setup with test delivery diagnostics, guest follow-up reminders, payment abstraction foundation, Khalti/eSewa sandbox foundation, payment settlement reconciliation, payment reconciliation reports/operator workflow, provider references on receipts/reports, and payment reconciliation exports/drill-down links are implemented and verified locally.
 
 Known local caveats:
 
 - Docker is not currently available on PATH on the development machine.
 - Redis is optional for normal web/API local development, but required for Celery workers.
-- The current notifications foundation slice is uncommitted and should be committed before starting another major enhancement.
+- The current payment reconciliation and SMS/WhatsApp notification provider slices are uncommitted and should be committed before starting another major enhancement.
 
 ## Operating Rules
 
@@ -212,8 +212,8 @@ Status: MVP started.
 
 Next slices:
 
-1. Notification center UI and operational triggers.
-2. Guest communication timeline and follow-up reminders.
+1. Real SMS/WhatsApp provider credential setup.
+2. Real SMS/WhatsApp provider credential setup.
 3. Broader labor analytics by role, shift, and overtime trend.
 
 Acceptance criteria:
@@ -231,11 +231,15 @@ Status: scaffolded, not production-ready.
 
 Recommended order:
 
-1. Notification center UI and operational triggers.
-2. Payment abstraction: payment intent, provider reference, status transitions.
-3. Nepal payment providers: Khalti/eSewa sandbox.
-4. Stripe or international provider sandbox.
-5. OTA channel sync foundation.
+1. Payment abstraction: payment intent, provider reference, status transitions. Done.
+2. Nepal payment providers: Khalti/eSewa sandbox. Done.
+3. Payment settlement reconciliation into folios, POS, and accounting. Done.
+4. Payment reconciliation reports and operator workflow. Done.
+5. Provider references on receipts and management reports. Done.
+6. Payment reconciliation exports and receipt drill-down links. Done.
+7. Real SMS/WhatsApp provider credential setup. Done.
+8. Stripe or international provider sandbox.
+9. OTA channel sync foundation.
 
 Acceptance criteria:
 
@@ -346,8 +350,8 @@ Verified on 2026-05-21:
 
 Resume point:
 
-1. Commit the current notifications foundation checkpoint.
-2. Start notification center UI and operational triggers.
+1. Commit the current payment reconciliation export/drill-down and SMS/WhatsApp notification provider checkpoint.
+2. Continue with Stripe or another international payment provider sandbox, or OTA channel sync foundation.
 
 ## Local Command Reference
 

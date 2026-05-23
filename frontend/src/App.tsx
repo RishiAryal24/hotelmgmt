@@ -16,6 +16,8 @@ import Reports from './pages/Reports';
 import HRMS from './pages/HRMS';
 import Maintenance from './pages/Maintenance';
 import AuditLogs from './pages/AuditLogs';
+import Notifications from './pages/Notifications';
+import Payments from './pages/Payments';
 
 function App() {
   return (
@@ -46,6 +48,9 @@ function App() {
             <Route element={<ProtectedRoute permissions={['pos.sale.create']} />}>
               <Route path="/pos" element={<POS />} />
             </Route>
+            <Route element={<ProtectedRoute permissions={['payments.intent.read', 'payments.intent.create']} />}>
+              <Route path="/payments" element={<Payments />} />
+            </Route>
             <Route element={<ProtectedRoute permissions={['accounting.ledger.read', 'accounting.journal.create']} />}>
               <Route path="/accounting" element={<Accounting />} />
             </Route>
@@ -60,6 +65,9 @@ function App() {
             </Route>
             <Route element={<ProtectedRoute permissions={['audit.log.read']} />}>
               <Route path="/audit-logs" element={<AuditLogs />} />
+            </Route>
+            <Route element={<ProtectedRoute permissions={['notifications.event.read', 'notifications.template.read']} />}>
+              <Route path="/notifications" element={<Notifications />} />
             </Route>
             <Route element={<ProtectedRoute permissions={['platform.tenants.create']} />}>
               <Route path="/onboarding" element={<TenantOnboarding />} />

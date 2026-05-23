@@ -1,10 +1,12 @@
 import {
   BarChart3,
   BedDouble,
+  Bell,
   Building2,
   Calculator,
   CalendarCheck,
   ClipboardList,
+  CreditCard,
   FileClock,
   LayoutDashboard,
   LogOut,
@@ -19,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { useNotificationEvents } from '../hooks/notifications';
 import { getCurrentUser, logout } from '../services/auth';
 import { canAccess } from '../services/permissions';
 
@@ -32,10 +35,12 @@ const navItems = [
   { title: 'Maintenance', path: '/maintenance', icon: Wrench, permissions: ['maintenance.ticket.update'] },
   { title: 'Restaurant', path: '/restaurant', icon: Utensils, permissions: ['restaurant.order.create', 'restaurant.order.update', 'restaurant.kitchen.update'] },
   { title: 'POS', path: '/pos', icon: Receipt, permissions: ['pos.sale.create'] },
+  { title: 'Payments', path: '/payments', icon: CreditCard, permissions: ['payments.intent.read', 'payments.intent.create'] },
   { title: 'Inventory', path: '/inventory', icon: Package, permissions: ['inventory.stock.read', 'inventory.purchase.create'] },
   { title: 'Accounting', path: '/accounting', icon: Calculator, permissions: ['accounting.ledger.read', 'accounting.journal.create'] },
   { title: 'Reports', path: '/reports', icon: BarChart3, permissions: ['reports.operational.read'] },
   { title: 'HRMS', path: '/hrms', icon: Users, permissions: ['hrms.employee.read', 'hrms.employee.create', 'hrms.attendance.read', 'hrms.payroll.read'] },
+  { title: 'Notifications', path: '/notifications', icon: Bell, permissions: ['notifications.event.read', 'notifications.template.read'] },
   { title: 'Audit Logs', path: '/audit-logs', icon: FileClock, permissions: ['audit.log.read'] },
 ];
 
@@ -45,6 +50,8 @@ const AppShell = () => {
     queryKey: ['current-user'],
     queryFn: getCurrentUser,
   });
+  const canReadNotifications = canAccess(user, ['notifications.event.read', 'notifications.template.read']);
+  const { data: openNotifications } = useNotificationEvents({ workflow_status: 'open' }, Boolean(user && canReadNotifications));
 
   if (isLoading) {
     return (
@@ -65,6 +72,7 @@ const AppShell = () => {
   });
 
   const initials = (user?.full_name || user?.email || 'A').slice(0, 1).toUpperCase();
+  const openNotificationCount = openNotifications?.length || 0;
 
   return (
     <div className="min-h-screen bg-[#edf7f1] text-slate-800 lg:flex">
@@ -83,10 +91,16 @@ const AppShell = () => {
           {visibleItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
+            const showBadge = item.path === '/notifications' && openNotificationCount > 0;
             const content = (
               <>
                 <Icon size={19} />
-                <span>{item.title}</span>
+                <span className="min-w-0 flex-1">{item.title}</span>
+                {showBadge && (
+                  <span className={`ml-auto rounded-full px-2 py-0.5 text-xs font-bold ${isActive ? 'bg-[#1F5E3B] text-white' : 'bg-white text-[#1F5E3B]'}`}>
+                    {openNotificationCount > 99 ? '99+' : openNotificationCount}
+                  </span>
+                )}
               </>
             );
 

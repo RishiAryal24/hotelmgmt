@@ -44,6 +44,11 @@ class NotificationEvent(UUIDModel):
         ('failed', 'Failed'),
         ('canceled', 'Canceled'),
     ]
+    WORKFLOW_STATUS_CHOICES = [
+        ('open', 'Open'),
+        ('acknowledged', 'Acknowledged'),
+        ('resolved', 'Resolved'),
+    ]
     PRIORITY_CHOICES = [
         ('low', 'Low'),
         ('normal', 'Normal'),
@@ -54,6 +59,7 @@ class NotificationEvent(UUIDModel):
     template = models.ForeignKey(NotificationTemplate, on_delete=models.SET_NULL, null=True, blank=True, related_name='events')
     channel = models.CharField(max_length=20, choices=CHANNEL_CHOICES)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True)
+    workflow_status = models.CharField(max_length=20, choices=WORKFLOW_STATUS_CHOICES, default='open', db_index=True)
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='normal')
     event_type = models.CharField(max_length=120, db_index=True)
     module = models.CharField(max_length=80, db_index=True)
@@ -72,11 +78,17 @@ class NotificationEvent(UUIDModel):
     sent_at = models.DateTimeField(null=True, blank=True)
     failed_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_notification_events')
+    acknowledged_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='acknowledged_notification_events')
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='resolved_notification_events')
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    follow_up_notes = models.TextField(blank=True)
 
     class Meta:
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['status', 'channel']),
+            models.Index(fields=['workflow_status', 'priority']),
             models.Index(fields=['module', 'event_type']),
             models.Index(fields=['created_at']),
         ]
@@ -110,3 +122,41 @@ class NotificationEvent(UUIDModel):
         self.error_message = str(error_message)
         self.next_retry_at = next_retry_at
         self.save(update_fields=['status', 'failed_at', 'error_message', 'next_retry_at', 'updated_at'])
+
+    def mark_canceled(self, *, reason=''):
+        self.status = 'canceled'
+        if reason:
+            self.error_message = reason
+        self.next_retry_at = None
+        self.save(update_fields=['status', 'error_message', 'next_retry_at', 'updated_at'])
+
+    def reset_for_retry(self):
+        self.status = 'pending'
+        self.error_message = ''
+        self.next_retry_at = None
+        self.failed_at = None
+        self.save(update_fields=['status', 'error_message', 'next_retry_at', 'failed_at', 'updated_at'])
+
+    def acknowledge(self, *, user=None, notes=''):
+        self.workflow_status = 'acknowledged'
+        self.acknowledged_by = user
+        self.acknowledged_at = timezone.now()
+        if notes:
+            self.follow_up_notes = notes
+        self.save(update_fields=['workflow_status', 'acknowledged_by', 'acknowledged_at', 'follow_up_notes', 'updated_at'])
+
+    def resolve(self, *, user=None, notes=''):
+        self.workflow_status = 'resolved'
+        self.resolved_by = user
+        self.resolved_at = timezone.now()
+        if notes:
+            self.follow_up_notes = notes
+        self.save(update_fields=['workflow_status', 'resolved_by', 'resolved_at', 'follow_up_notes', 'updated_at'])
+
+    def reopen(self, *, notes=''):
+        self.workflow_status = 'open'
+        self.resolved_by = None
+        self.resolved_at = None
+        if notes:
+            self.follow_up_notes = notes
+        self.save(update_fields=['workflow_status', 'resolved_by', 'resolved_at', 'follow_up_notes', 'updated_at'])

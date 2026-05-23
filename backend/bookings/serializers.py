@@ -7,6 +7,7 @@ from bookings.models import (
     GuestCommunication,
     GuestFolio,
     GuestFolioLine,
+    GuestFollowUpReminder,
     GuestPoints,
     LoyaltyProgram,
     Package,
@@ -112,6 +113,7 @@ class GuestFolioChargeSerializer(serializers.Serializer):
 class GuestFolioSerializer(serializers.ModelSerializer):
     lines = GuestFolioLineSerializer(many=True, read_only=True)
     guest_name = serializers.SerializerMethodField()
+    payment_reference = serializers.SerializerMethodField()
     room_number = serializers.CharField(source='booking.room.room_number', read_only=True)
     booking_status = serializers.CharField(source='booking.status', read_only=True)
     check_in_date = serializers.DateField(source='booking.check_in_date', read_only=True)
@@ -134,6 +136,11 @@ class GuestFolioSerializer(serializers.ModelSerializer):
 
     def get_guest_name(self, obj):
         return str(obj.booking.guest)
+
+    def get_payment_reference(self, obj):
+        from payments.services import get_settled_payment_reference
+
+        return get_settled_payment_reference(source_module='guest_folio', source_id=obj.id)
 
 
 class RatePlanSerializer(serializers.ModelSerializer):
@@ -179,3 +186,20 @@ class GuestCommunicationSerializer(serializers.ModelSerializer):
             return ''
         room_number = getattr(getattr(obj.booking, 'room', None), 'room_number', '')
         return f"{obj.booking.check_in_date} - Room {room_number}" if room_number else str(obj.booking_id)
+
+
+class GuestFollowUpReminderSerializer(serializers.ModelSerializer):
+    guest_details = GuestSerializer(source='guest', read_only=True)
+    booking_details = BookingSerializer(source='booking', read_only=True)
+    assigned_to_email = serializers.EmailField(source='assigned_to.email', read_only=True)
+    created_by_email = serializers.EmailField(source='created_by.email', read_only=True)
+
+    class Meta:
+        model = GuestFollowUpReminder
+        fields = '__all__'
+        read_only_fields = ['completed_at', 'canceled_at', 'created_by']
+
+
+class GuestFollowUpActionSerializer(serializers.Serializer):
+    notes = serializers.CharField(required=False, allow_blank=True)
+    snoozed_until = serializers.DateTimeField(required=False)

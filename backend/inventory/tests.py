@@ -5,6 +5,7 @@ from django_tenants.test.cases import TenantTestCase
 from accounting.models import JournalEntry, JournalLine
 from inventory.models import InventoryItem, PurchaseOrder, PurchaseOrderLine, StockMovement, Vendor
 from inventory.services import pay_purchase_order, receive_inventory_stock, receive_purchase_order, submit_purchase_order
+from notifications.models import NotificationEvent
 
 
 class InventoryReceivingTests(TenantTestCase):
@@ -72,6 +73,7 @@ class InventoryReceivingTests(TenantTestCase):
 
         self.item.refresh_from_db()
         self.assertTrue(self.item.is_low_stock)
+        self.assertTrue(NotificationEvent.objects.filter(event_type='inventory.low_stock', module='inventory').exists())
 
         receive_inventory_stock(
             item=self.item,

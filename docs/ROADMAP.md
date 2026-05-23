@@ -6,9 +6,9 @@ The project is now a connected development-stage hospitality ERP. It is suitable
 
 Checkpoint note:
 
-- Current checkpoint is stable as of the notifications foundation slice.
-- Restaurant tests, migration check, tenant migrations, and frontend TypeScript build step are passing locally. Frontend Vite output still hits the existing Windows `EPERM` writing `frontend/dist/assets`.
-- Recommended continuation: notification center UI and operational triggers.
+- Current checkpoint includes the actionable notification center, dashboard follow-up panel, sidebar badge, operational trigger slice, provider adapter foundation, tenant notification settings, retry/cancel delivery controls, SMS/WhatsApp credential setup with test delivery diagnostics, guest follow-up reminders, and payment reconciliation exports/drill-down links.
+- Notification tests, Django check, migration check, and frontend TypeScript checks are passing locally. Frontend Vite output still hits the existing Windows `EPERM` writing `frontend/dist/assets`.
+- Recommended continuation: Stripe or another international payment provider sandbox, or OTA channel sync foundation.
 
 Working foundations:
 
@@ -28,6 +28,7 @@ Working modules:
 - Stay extension for in-house guests with availability validation and folio extension charges.
 - Room transfer for in-house guests with target-room availability validation and old-room cleaning task creation.
 - Guest history/CRM profile with stay history, folio value, VIP level, preferences, and internal notes.
+- Guest follow-up reminders linked to guests/bookings with complete, snooze, and cancel actions.
 - Checkout-to-housekeeping automation.
 - Housekeeping task workflow and room readiness updates.
 - Maintenance tickets with room downtime status, resolution workflow, and housekeeping escalation.
@@ -48,7 +49,13 @@ Working modules:
 - Attendance exception report for late, absent, half-day, and missing clock-out records.
 - Department-level labor cost report with period filter, CSV export, and printable PDF view.
 - Audit Logs page with action/module filters and field-change summaries.
-- Notifications foundation with tenant notification events, templates, delivery status, retry metadata, API endpoints, and booking confirmation logging.
+- Notifications foundation with tenant notification events, templates, delivery status, retry metadata, API endpoints, booking confirmation logging, manager/admin notification center UI, dashboard needs-attention panel, sidebar open-count badge, operational triggers for low stock, payroll posting, and housekeeping escalation, acknowledge/resolve/reopen follow-up states, provider adapter foundation, tenant notification settings, masked SMS/WhatsApp credentials, test delivery diagnostics, and retry/cancel delivery controls.
+- Payment abstraction foundation with tenant-scoped payment intents, provider references, status transitions, idempotent callback handling, RBAC, API endpoints, and Payment Intents UI.
+- Khalti/eSewa sandbox initiation/verification foundation with tenant-scoped masked settings, Khalti lookup, eSewa signed form payloads, and signature verification.
+- Payment settlement reconciliation for successful provider payment intents into guest folios, restaurant orders, and existing accounting posting services.
+- Payment reconciliation reporting and operator workflow with summary API, filters, attention counts, follow-up review/resolve actions, and reviewer tracking.
+- Provider references on folio PDFs, POS receipts, cashier close report rows, revenue/cashier reports, and management summaries.
+- Payment reconciliation exports and drill-down links from payment intents to POS folio/order context.
 
 ## Local Testing
 
@@ -207,11 +214,12 @@ Completed:
 - Shift setup.
 - Attendance scheduling.
 - Clock-in/clock-out tracking.
+- Guest communication timeline and follow-up reminders.
 
 Next:
 
-- Notification center UI and operational triggers.
-- Guest communication timeline and follow-up reminders.
+- Real SMS/WhatsApp provider credential setup.
+- Real SMS/WhatsApp provider credential setup.
 
 ## Phase 6: Scale And Integrations
 
@@ -222,6 +230,12 @@ Planned:
 - Multi-property support.
 - OTA integrations.
 - Payment gateways.
+- Payment abstraction foundation. Done.
+- Khalti/eSewa sandbox foundation. Done.
+- Payment settlement reconciliation. Done.
+- Payment reconciliation reports and operator workflow. Done.
+- Provider references on receipts and management reports. Done.
+- Payment reconciliation exports and receipt drill-down links. Done.
 - Nepal gateways: Khalti/eSewa.
 - SMS/WhatsApp/email notifications.
 - Object storage for media.
@@ -230,10 +244,11 @@ Planned:
 
 ## Recommended Immediate Next Step
 
-Resume with **notification center UI and operational triggers**.
+Resume with **real SMS/WhatsApp provider credential setup**.
 
 Suggested order:
 
-1. Commit the current notifications foundation checkpoint if it has not been committed.
-2. Add a notification center page for event/template visibility.
-3. Add operational triggers for low stock, payroll posting, and housekeeping escalation.
+1. Add tenant-scoped SMS/WhatsApp credential fields with masked serializer output.
+2. Implement provider adapters and test-send actions.
+3. Add delivery diagnostics and keep providers disabled until credentials are configured.
+4. Preserve in-app notifications as the reliable fallback.

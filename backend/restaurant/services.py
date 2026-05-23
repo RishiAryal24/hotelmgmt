@@ -463,10 +463,17 @@ def _reconciliation_amounts(shift):
 
 
 def _cashier_shift_payment_rows(restaurant_orders, folios):
-    restaurant_rows = [
-        {
+    from payments.services import get_settled_payment_reference
+
+    restaurant_rows = []
+    for payment in RestaurantOrderPayment.objects.filter(order__in=restaurant_orders).select_related('order', 'order__table', 'order__room_booking', 'order__room_booking__room').order_by('paid_at', 'created_at'):
+        payment_reference = get_settled_payment_reference(source_module='restaurant_order', source_id=payment.order_id) or {}
+        restaurant_rows.append(
+            {
             'source': 'restaurant',
             'reference': payment.order.receipt_number or payment.order.order_number,
+            'provider_reference': payment_reference.get('provider_reference', ''),
+            'provider': payment_reference.get('provider', ''),
             'guest_or_table': (
                 f'Table {payment.order.table.table_number}'
                 if payment.order.table_id
@@ -477,22 +484,23 @@ def _cashier_shift_payment_rows(restaurant_orders, folios):
             'payment_method': payment.payment_method,
             'amount': payment.amount,
             'paid_at': payment.paid_at,
-        }
-        for payment in RestaurantOrderPayment.objects.filter(order__in=restaurant_orders)
-        .select_related('order', 'order__table', 'order__room_booking', 'order__room_booking__room')
-        .order_by('paid_at', 'created_at')
-    ]
-    folio_rows = [
-        {
+            }
+        )
+    folio_rows = []
+    for folio in folios.select_related('booking', 'booking__guest', 'booking__room').order_by('paid_at', 'created_at'):
+        payment_reference = get_settled_payment_reference(source_module='guest_folio', source_id=folio.id) or {}
+        folio_rows.append(
+            {
             'source': 'folio',
             'reference': folio.folio_number,
+            'provider_reference': payment_reference.get('provider_reference', ''),
+            'provider': payment_reference.get('provider', ''),
             'guest_or_table': f'Room {folio.booking.room.room_number} - {folio.booking.guest}',
             'payment_method': folio.payment_method,
             'amount': folio.paid_amount,
             'paid_at': folio.paid_at,
-        }
-        for folio in folios.select_related('booking', 'booking__guest', 'booking__room').order_by('paid_at', 'created_at')
-    ]
+            }
+        )
     return sorted(restaurant_rows + folio_rows, key=lambda row: row['paid_at'] or timezone.now())
 
 

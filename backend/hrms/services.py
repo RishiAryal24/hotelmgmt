@@ -5,6 +5,7 @@ from django.utils import timezone
 
 from accounting.services import post_journal_entry, seed_default_accounts
 from hrms.models import Attendance, Employee, PayrollLine, PayrollPeriod, PayrollRun
+from notifications.services import create_payroll_posted_notification
 
 
 MONEY = Decimal('0.01')
@@ -177,6 +178,7 @@ def post_payroll_run(payroll_run: PayrollRun, posted_by=None):
     payroll_run.save(update_fields=['status', 'posted_at', 'journal_entry', 'updated_at'])
     payroll_run.period.status = 'closed'
     payroll_run.period.save(update_fields=['status', 'updated_at'])
+    create_payroll_posted_notification(payroll_run, created_by=posted_by)
     return journal_entry
 
 

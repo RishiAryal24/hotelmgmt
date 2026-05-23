@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
 import { useAddGuestFolioCharge, useBookings, useCreateFacilityAmenity, useCreateFacilityService, useFacilityAmenities, useFacilityServices, useGuestFolios, useSettleGuestFolio } from '../hooks/bookings';
@@ -63,6 +64,7 @@ const formatFolioLineSource = (line: { source_module: string }) => {
 };
 
 const POS: React.FC = () => {
+  const [searchParams] = useSearchParams();
   const { data: settings } = useQuery({ queryKey: ['tenant-settings'], queryFn: getTenantSettings });
   const { data: orders, isLoading, error } = useRestaurantOrders();
   const { data: chargeConfig } = useRestaurantChargeConfig();
@@ -107,8 +109,8 @@ const POS: React.FC = () => {
   const [folioPaymentReceipt, setFolioPaymentReceipt] = useState<GuestFolio | null>(null);
   const [restaurantPaymentReceipt, setRestaurantPaymentReceipt] = useState<RestaurantOrder | null>(null);
   const [restaurantBillPreview, setRestaurantBillPreview] = useState<RestaurantOrder | null>(null);
-  const [paidOrderSearch, setPaidOrderSearch] = useState('');
-  const [activeTab, setActiveTab] = useState('settlement');
+  const [paidOrderSearch, setPaidOrderSearch] = useState(searchParams.get('order') || searchParams.get('folio') || '');
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'settlement');
   const [facilityChargeForm, setFacilityChargeForm] = useState({
     folioId: '',
     facility_service: '',
@@ -150,6 +152,14 @@ const POS: React.FC = () => {
     });
   }, [chargeConfig]);
 
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    const order = searchParams.get('order');
+    const folio = searchParams.get('folio');
+    if (tab) setActiveTab(tab);
+    if (order || folio) setPaidOrderSearch(order || folio || '');
+  }, [searchParams]);
+
   const payableOrders = orders?.filter((order) => order.status === 'served') || [];
   const paidOrders = orders?.filter((order) => order.status === 'paid') || [];
   const filteredPaidOrders = paidOrders.filter((order) => {
@@ -164,6 +174,9 @@ const POS: React.FC = () => {
       order.guest_name,
       order.order_type,
       order.paid_amount,
+      order.id,
+      order.payment_reference?.provider_reference,
+      order.payment_reference?.idempotency_key,
     ]
       .filter(Boolean)
       .some((value) => String(value).toLowerCase().includes(query));
@@ -201,6 +214,8 @@ const POS: React.FC = () => {
   const expectedRoomPosting = liveTotals?.expected_room_posting || currentShift?.expected_room_posting || '0.00';
   const paymentLabel = (method: string) =>
     restaurantPaymentMethods.find((item) => item.value === method)?.label || folioPaymentMethods.find((item) => item.value === method)?.label || method.replace('_', ' ');
+  const paymentReferenceLabel = (reference?: { provider?: string; provider_reference?: string } | null) =>
+    reference?.provider_reference ? `${reference.provider || 'provider'} ${reference.provider_reference}` : '-';
   const closeVariances = [
     { label: 'Cash', actual: closeShiftForm.actual_cash, expected: expectedCash },
     { label: 'Card', actual: closeShiftForm.actual_card, expected: expectedCard },
@@ -1187,7 +1202,7 @@ const POS: React.FC = () => {
               <div className="print-section overflow-x-auto">
                 <table className="w-full min-w-[760px] text-left text-xs">
                   <thead className="border-b border-slate-200 text-xs uppercase text-slate-500">
-                    <tr><th className="py-2 pr-3">Time</th><th className="py-2 pr-3">Source</th><th className="py-2 pr-3">Reference</th><th className="py-2 pr-3">Guest/Table</th><th className="py-2 pr-3">Method</th><th className="py-2 pr-3 text-right">Amount</th></tr>
+                    <tr><th className="py-2 pr-3">Time</th><th className="py-2 pr-3">Source</th><th className="py-2 pr-3">Reference</th><th className="py-2 pr-3">Provider Ref</th><th className="py-2 pr-3">Guest/Table</th><th className="py-2 pr-3">Method</th><th className="py-2 pr-3 text-right">Amount</th></tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {closedShiftReport.live_totals.payment_rows.map((row, index) => (
@@ -1195,6 +1210,7 @@ const POS: React.FC = () => {
                         <td className="py-2 pr-3">{row.paid_at ? new Date(row.paid_at).toLocaleTimeString() : '-'}</td>
                         <td className="py-2 pr-3 capitalize">{row.source}</td>
                         <td className="py-2 pr-3 font-medium text-slate-900">{row.reference}</td>
+                        <td className="py-2 pr-3">{row.provider_reference ? `${row.provider} ${row.provider_reference}` : '-'}</td>
                         <td className="py-2 pr-3">{row.guest_or_table}</td>
                         <td className="py-2 pr-3 capitalize">{paymentLabel(row.payment_method)}</td>
                         <td className="py-2 pr-3 text-right font-semibold">{formatMoney(row.amount, settings?.currency)}</td>
@@ -1237,6 +1253,7 @@ const POS: React.FC = () => {
               <ShiftMetric label="Paid Amount" value={formatMoney(folioPaymentReceipt.paid_amount || '0.00', settings?.currency)} />
               <ShiftMetric label="Folio Total" value={formatMoney(folioPaymentReceipt.grand_total, settings?.currency)} />
               <ShiftMetric label="Paid At" value={folioPaymentReceipt.paid_at ? new Date(folioPaymentReceipt.paid_at).toLocaleString() : '-'} />
+              <ShiftMetric label="Provider Reference" value={paymentReferenceLabel(folioPaymentReceipt.payment_reference)} />
               <ShiftMetric label="Counter" value={currentShift?.counter_details?.name || '-'} />
               <ShiftMetric label="Cashier" value={currentShift?.cashier_email || '-'} />
             </div>
@@ -1333,6 +1350,7 @@ const POS: React.FC = () => {
               <ShiftMetric label="Paid Amount" value={formatMoney(restaurantPaymentReceipt.paid_amount || '0.00', settings?.currency)} />
               <ShiftMetric label="Order Total" value={formatMoney(restaurantPaymentReceipt.grand_total, settings?.currency)} />
               <ShiftMetric label="Paid At" value={restaurantPaymentReceipt.paid_at ? new Date(restaurantPaymentReceipt.paid_at).toLocaleString() : '-'} />
+              <ShiftMetric label="Provider Reference" value={paymentReferenceLabel(restaurantPaymentReceipt.payment_reference)} />
               <ShiftMetric label="Counter" value={currentShift?.counter_details?.name || '-'} />
               <ShiftMetric label="Cashier" value={currentShift?.cashier_email || '-'} />
               <ShiftMetric label="Reprints" value={String(restaurantPaymentReceipt.receipt_reprint_count || 0)} />
@@ -1344,7 +1362,10 @@ const POS: React.FC = () => {
                   {restaurantPaymentReceipt.payments.map((payment) => (
                     <div key={payment.id} className="flex justify-between gap-4">
                       <span className="capitalize text-slate-600">{payment.payment_method.replace('_', ' ')}</span>
-                      <span className="font-semibold text-slate-900">{formatMoney(payment.amount, settings?.currency)}</span>
+                      <span className="text-right">
+                        <span className="block font-semibold text-slate-900">{formatMoney(payment.amount, settings?.currency)}</span>
+                        {payment.payment_reference?.provider_reference && <span className="text-xs text-slate-500">{paymentReferenceLabel(payment.payment_reference)}</span>}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -1413,6 +1434,7 @@ const POS: React.FC = () => {
               <ShiftMetric label="Payment" value={selectedFolioReport.payment_method || '-'} />
               <ShiftMetric label="Paid Amount" value={formatMoney(selectedFolioReport.paid_amount || '0.00', settings?.currency)} />
               <ShiftMetric label="Paid At" value={selectedFolioReport.paid_at ? new Date(selectedFolioReport.paid_at).toLocaleString() : '-'} />
+              <ShiftMetric label="Provider Reference" value={paymentReferenceLabel(selectedFolioReport.payment_reference)} />
             </div>
             <div className="print-section overflow-x-auto">
               <table className="w-full min-w-[620px] text-left text-xs">

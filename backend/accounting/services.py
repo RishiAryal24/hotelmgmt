@@ -1,10 +1,11 @@
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from django.db import transaction
+from django.utils import timezone
 
-from accounting.models import Account, FiscalPeriod, JournalEntry, JournalLine
+from accounting.models import Account, FiscalPeriod, JournalEntry, JournalLine, NightAuditRun, NightAuditSchedule
 
 
 DEFAULT_ACCOUNTS = [
@@ -435,3 +436,114 @@ def post_purchase_order_payment(purchase_order, payment_account='1000', posted_b
             },
         ],
     )
+
+
+def get_night_audit_schedule():
+    schedule = NightAuditSchedule.objects.order_by('-created_at').first()
+    if schedule:
+        return schedule
+    return NightAuditSchedule.objects.create()
+
+
+@transaction.atomic
+def update_night_audit_schedule(*, enabled, run_time, timezone_name, notes=''):
+    schedule = get_night_audit_schedule()
+    schedule.enabled = enabled
+    schedule.run_time = datetime.strptime(run_time, '%H:%M').time() if isinstance(run_time, str) else run_time
+    schedule.timezone = timezone_name
+    schedule.notes = notes
+    schedule.save(update_fields=['enabled', 'run_time', 'timezone', 'notes', 'updated_at'])
+    return schedule
+
+
+@transaction.atomic
+def run_night_audit(*, audit_date=None, triggered_by=None):
+    from bookings.models import Booking, GuestFolio, GuestFolioLine
+    from bookings.services import ensure_room_charge_line
+    from restaurant.models import RestaurantOrder
+
+    audit_date = audit_date or timezone.localdate()
+    existing_run = NightAuditRun.objects.filter(audit_date=audit_date).first()
+    if existing_run and existing_run.status != 'failed':
+        raise ValueError(f'Night audit already ran for {audit_date}.')
+
+    run = existing_run or NightAuditRun.objects.create(audit_date=audit_date, triggered_by=triggered_by)
+    run.started_at = timezone.now()
+    run.triggered_by = triggered_by or run.triggered_by
+    run.status = 'completed'
+    run.error_message = ''
+    run.save(update_fields=['started_at', 'triggered_by', 'status', 'error_message', 'updated_at'])
+
+    exceptions = []
+    room_charge_lines_created = 0
+
+    try:
+        checked_in_bookings = list(
+            Booking.objects.select_related('room', 'guest')
+            .filter(status='checked_in', check_in_date__lte=audit_date)
+            .order_by('check_in_date')
+        )
+        for booking in checked_in_bookings:
+            folio, _ = GuestFolio.objects.get_or_create(
+                booking=booking,
+                defaults={'status': 'open', 'subtotal': booking.total_amount},
+            )
+            before_exists = GuestFolioLine.objects.filter(
+                folio=folio,
+                source_module='room_charge',
+                source_id=str(booking.id),
+            ).exists()
+            ensure_room_charge_line(folio)
+            if not before_exists:
+                room_charge_lines_created += 1
+            if folio.status != 'open':
+                exceptions.append(
+                    {
+                        'type': 'folio_not_open',
+                        'booking_id': str(booking.id),
+                        'folio_id': str(folio.id),
+                        'message': f'Folio {folio.folio_number} is {folio.status}.',
+                    }
+                )
+            unresolved_orders = RestaurantOrder.objects.filter(room_booking=booking).exclude(status__in=['paid', 'cancelled']).count()
+            if unresolved_orders:
+                exceptions.append(
+                    {
+                        'type': 'unresolved_room_service',
+                        'booking_id': str(booking.id),
+                        'folio_id': str(folio.id),
+                        'message': f'{unresolved_orders} room-service order(s) remain unresolved.',
+                    }
+                )
+
+        open_folios = GuestFolio.objects.filter(status='open').count()
+        paid_folios = GuestFolio.objects.filter(status='paid').count()
+        run.checked_in_bookings = len(checked_in_bookings)
+        run.folios_reviewed = GuestFolio.objects.count()
+        run.room_charge_lines_created = room_charge_lines_created
+        run.open_folios = open_folios
+        run.paid_folios = paid_folios
+        run.exceptions = exceptions
+        run.summary = {
+            'checked_in_bookings': len(checked_in_bookings),
+            'folios_reviewed': run.folios_reviewed,
+            'open_folios': open_folios,
+            'paid_folios': paid_folios,
+            'room_charge_lines_created': room_charge_lines_created,
+            'exception_count': len(exceptions),
+        }
+        run.status = 'completed_with_exceptions' if exceptions else 'completed'
+        run.completed_at = timezone.now()
+        run.save()
+    except Exception as exc:
+        run.status = 'failed'
+        run.error_message = str(exc)
+        run.completed_at = timezone.now()
+        run.save(update_fields=['status', 'error_message', 'completed_at', 'updated_at'])
+        raise
+
+    schedule = NightAuditSchedule.objects.order_by('-created_at').first()
+    if schedule:
+        schedule.last_run_at = run.completed_at
+        schedule.save(update_fields=['last_run_at', 'updated_at'])
+    return run

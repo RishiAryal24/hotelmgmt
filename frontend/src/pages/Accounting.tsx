@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import ActionModal from '../components/ActionModal';
 import CompactTabs from '../components/CompactTabs';
@@ -12,10 +12,14 @@ import {
   useFiscalPeriodAction,
   useFiscalPeriods,
   useJournalEntries,
+  useNightAuditRuns,
+  useNightAuditSchedule,
   useProfitAndLoss,
+  useRunNightAudit,
   useSeedAccounts,
   useTaxRates,
   useTrialBalance,
+  useUpdateNightAuditSchedule,
   useVendorBillAction,
   useVendorBills,
 } from '../hooks/accounting';
@@ -73,7 +77,7 @@ type VendorBillForm = {
   lines: VendorBillLineInput[];
 };
 
-type AccountingTab = 'summary' | 'statements' | 'journals' | 'fiscal_periods' | 'taxes' | 'vendor_bills' | 'accounts' | 'create';
+type AccountingTab = 'summary' | 'statements' | 'journals' | 'fiscal_periods' | 'taxes' | 'vendor_bills' | 'night_audit' | 'accounts' | 'create';
 type JournalSourceFilter = 'all' | 'guest_folio' | 'restaurant_order' | 'inventory_purchase' | 'manual';
 type JournalStatusFilter = 'all' | JournalEntry['status'];
 
@@ -215,6 +219,8 @@ const Accounting = () => {
   const { data: fiscalPeriods = [], isLoading: fiscalPeriodsLoading } = useFiscalPeriods();
   const { data: taxRates = [], isLoading: taxRatesLoading } = useTaxRates();
   const { data: vendorBills = [], isLoading: vendorBillsLoading } = useVendorBills();
+  const { data: nightAuditRuns = [], isLoading: nightAuditRunsLoading } = useNightAuditRuns();
+  const { data: nightAuditSchedule } = useNightAuditSchedule();
   const { data: vendors = [] } = useVendors();
   const seedAccounts = useSeedAccounts();
   const createJournalEntry = useCreateJournalEntry();
@@ -223,6 +229,8 @@ const Accounting = () => {
   const createVendorBill = useCreateVendorBill();
   const vendorBillAction = useVendorBillAction();
   const fiscalPeriodAction = useFiscalPeriodAction();
+  const updateNightAuditSchedule = useUpdateNightAuditSchedule();
+  const runNightAudit = useRunNightAudit();
   const { can } = usePermissions();
 
   const [activeTab, setActiveTab] = useState<AccountingTab>('summary');
@@ -231,6 +239,13 @@ const Accounting = () => {
   const [fiscalPeriodForm, setFiscalPeriodForm] = useState<FiscalPeriodForm>(emptyFiscalPeriod);
   const [taxRateForm, setTaxRateForm] = useState<TaxRateForm>(emptyTaxRate);
   const [vendorBillForm, setVendorBillForm] = useState<VendorBillForm>(emptyVendorBill());
+  const [nightAuditDate, setNightAuditDate] = useState(todayIso());
+  const [nightAuditScheduleForm, setNightAuditScheduleForm] = useState({
+    enabled: false,
+    run_time: '02:00',
+    timezone: 'Asia/Katmandu',
+    notes: '',
+  });
   const [sourceFilter, setSourceFilter] = useState<JournalSourceFilter>('all');
   const [statusFilter, setStatusFilter] = useState<JournalStatusFilter>('all');
   const [dateFrom, setDateFrom] = useState('');
@@ -245,6 +260,7 @@ const Accounting = () => {
   const { data: trialBalance } = useTrialBalance({ date_from: statementRange.date_from, date_to: statementRange.date_to });
   const { data: profitAndLoss } = useProfitAndLoss({ date_from: statementRange.date_from, date_to: statementRange.date_to });
   const { data: balanceSheet } = useBalanceSheet({ as_of: statementRange.as_of });
+  const latestNightAudit = nightAuditRuns[0];
   const taxControlAccounts = useMemo(() => accounts?.filter((account) => account.account_type === 'liability' && account.is_active) || [], [accounts]);
   const vendorBillAccounts = useMemo(() => accounts?.filter((account) => ['asset', 'expense'].includes(account.account_type) && account.is_active) || [], [accounts]);
   const purchaseTaxRates = useMemo(() => taxRates.filter((taxRate) => taxRate.is_active && ['purchase', 'both'].includes(taxRate.tax_type)), [taxRates]);
@@ -334,6 +350,16 @@ const Accounting = () => {
     setActiveTab(tabId as AccountingTab);
   };
 
+  useEffect(() => {
+    if (!nightAuditSchedule) return;
+    setNightAuditScheduleForm({
+      enabled: nightAuditSchedule.enabled,
+      run_time: nightAuditSchedule.run_time?.slice(0, 5) || '02:00',
+      timezone: nightAuditSchedule.timezone || 'Asia/Katmandu',
+      notes: nightAuditSchedule.notes || '',
+    });
+  }, [nightAuditSchedule]);
+
   return (
     <div className="mx-auto max-w-7xl space-y-5 p-6">
       <div className="flex flex-col gap-4 border-b border-slate-200 pb-4 md:flex-row md:items-end md:justify-between">
@@ -364,6 +390,7 @@ const Accounting = () => {
           { id: 'fiscal_periods', label: 'Fiscal Periods', count: fiscalPeriods.length },
           { id: 'taxes', label: 'Taxes', count: taxRates.length },
           { id: 'vendor_bills', label: 'Vendor Bills', count: vendorBills.length },
+          { id: 'night_audit', label: 'Night Audit', count: nightAuditRuns.length },
           { id: 'accounts', label: 'Accounts', count: totals.activeAccounts },
           ...(can('accounting.journal.create') ? [{ id: 'create', label: 'Create Entry' }] : []),
         ]}
@@ -932,6 +959,104 @@ const Accounting = () => {
             {vendorBillsLoading && <p className="p-4 text-sm text-slate-600">Loading vendor bills...</p>}
             {!vendorBillsLoading && vendorBills.length === 0 && <p className="p-4 text-sm text-slate-600">No vendor bills captured yet.</p>}
             {vendorBillAction.isError && <p className="border-t border-slate-100 p-4 text-sm text-red-600">{getApiErrorMessage(vendorBillAction.error, 'Could not post vendor bill.')}</p>}
+          </div>
+        </section>
+      )}
+
+      {activeTab === 'night_audit' && (
+        <section className="space-y-5">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            {[
+              ['Last status', latestNightAudit?.status?.replace(/_/g, ' ') || 'Not run'],
+              ['Checked-in stays', latestNightAudit?.checked_in_bookings || 0],
+              ['Folios reviewed', latestNightAudit?.folios_reviewed || 0],
+              ['Open folios', latestNightAudit?.open_folios || 0],
+              ['Exceptions', latestNightAudit?.exceptions.length || 0],
+            ].map(([title, value]) => (
+              <article key={title} className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="text-xs font-semibold uppercase text-slate-500">{title}</p>
+                <p className="mt-2 text-xl font-semibold capitalize text-slate-900">{value}</p>
+              </article>
+            ))}
+          </div>
+
+          <div className="grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
+            <div className="space-y-5">
+              {can('accounting.journal.create') && (
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    updateNightAuditSchedule.mutate(nightAuditScheduleForm);
+                  }}
+                  className="rounded-2xl border border-slate-200 bg-white p-4"
+                >
+                  <h2 className="font-semibold text-slate-900">Schedule</h2>
+                  <div className="mt-4 grid gap-3">
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                      <input type="checkbox" checked={nightAuditScheduleForm.enabled} onChange={(e) => setNightAuditScheduleForm({ ...nightAuditScheduleForm, enabled: e.target.checked })} className="h-4 w-4 rounded border-slate-300" />
+                      Enabled
+                    </label>
+                    <input type="time" value={nightAuditScheduleForm.run_time} onChange={(e) => setNightAuditScheduleForm({ ...nightAuditScheduleForm, run_time: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+                    <input value={nightAuditScheduleForm.timezone} onChange={(e) => setNightAuditScheduleForm({ ...nightAuditScheduleForm, timezone: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+                    <textarea value={nightAuditScheduleForm.notes} onChange={(e) => setNightAuditScheduleForm({ ...nightAuditScheduleForm, notes: e.target.value })} placeholder="Notes" className="min-h-[80px] rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                    <button type="submit" disabled={updateNightAuditSchedule.status === 'pending'} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">
+                      {updateNightAuditSchedule.status === 'pending' ? 'Saving...' : 'Save schedule'}
+                    </button>
+                    {nightAuditSchedule?.last_run_at && <p className="text-xs text-slate-500">Last scheduled run {new Date(nightAuditSchedule.last_run_at).toLocaleString()}</p>}
+                  </div>
+                </form>
+              )}
+
+              {can('accounting.journal.create') && (
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    runNightAudit.mutate({ audit_date: nightAuditDate });
+                  }}
+                  className="rounded-2xl border border-slate-200 bg-white p-4"
+                >
+                  <h2 className="font-semibold text-slate-900">Run Audit</h2>
+                  <div className="mt-4 grid gap-3">
+                    <input type="date" value={nightAuditDate} onChange={(e) => setNightAuditDate(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                    <button type="submit" disabled={runNightAudit.status === 'pending'} className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-900 disabled:opacity-60">
+                      {runNightAudit.status === 'pending' ? 'Running...' : 'Run night audit'}
+                    </button>
+                    {runNightAudit.isError && <p className="text-sm text-red-600">{getApiErrorMessage(runNightAudit.error, 'Could not run night audit.')}</p>}
+                  </div>
+                </form>
+              )}
+            </div>
+
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+              <div className="border-b border-slate-100 px-4 py-3">
+                <h2 className="font-semibold text-slate-900">Audit Runs</h2>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[920px] text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                    <tr><th className="px-4 py-3">Date</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Stays</th><th className="px-4 py-3 text-right">Folios</th><th className="px-4 py-3 text-right">Room Lines</th><th className="px-4 py-3">Exceptions</th><th className="px-4 py-3">Completed</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {nightAuditRuns.map((run) => (
+                      <tr key={run.id} className="align-top">
+                        <td className="px-4 py-3 font-medium text-slate-900">{run.audit_date}</td>
+                        <td className="px-4 py-3 capitalize text-slate-700">{run.status.replace(/_/g, ' ')}</td>
+                        <td className="px-4 py-3 text-right">{run.checked_in_bookings}</td>
+                        <td className="px-4 py-3 text-right">{run.folios_reviewed}</td>
+                        <td className="px-4 py-3 text-right">{run.room_charge_lines_created}</td>
+                        <td className="px-4 py-3 text-slate-700">
+                          {run.exceptions.length ? run.exceptions.map((exception) => <p key={`${run.id}-${exception.type}-${exception.message}`} className="mb-1 last:mb-0">{exception.message}</p>) : '-'}
+                          {run.error_message && <p className="text-red-600">{run.error_message}</p>}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">{run.completed_at ? new Date(run.completed_at).toLocaleString() : '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {nightAuditRunsLoading && <p className="p-4 text-sm text-slate-600">Loading night audit runs...</p>}
+              {!nightAuditRunsLoading && nightAuditRuns.length === 0 && <p className="p-4 text-sm text-slate-600">No night audit runs yet.</p>}
+            </div>
           </div>
         </section>
       )}

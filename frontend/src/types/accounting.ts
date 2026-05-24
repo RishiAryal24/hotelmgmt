@@ -96,6 +96,42 @@ export interface VendorBillCreateInput {
   }>;
 }
 
+export interface NightAuditSchedule {
+  id: string;
+  enabled: boolean;
+  run_time: string;
+  timezone: string;
+  last_run_at: string | null;
+  notes: string;
+}
+
+export interface NightAuditRun {
+  id: string;
+  audit_date: string;
+  status: 'completed' | 'completed_with_exceptions' | 'failed';
+  started_at: string;
+  completed_at: string | null;
+  triggered_by: string | null;
+  triggered_by_details?: {
+    id: string;
+    email: string;
+    full_name: string;
+  } | null;
+  checked_in_bookings: number;
+  folios_reviewed: number;
+  room_charge_lines_created: number;
+  open_folios: number;
+  paid_folios: number;
+  exceptions: Array<{
+    type: string;
+    booking_id?: string;
+    folio_id?: string;
+    message: string;
+  }>;
+  summary: Record<string, number | string>;
+  error_message: string;
+}
+
 export interface JournalLine {
   id: string;
   journal_entry: string;

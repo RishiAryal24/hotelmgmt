@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/api';
-import { Account, BalanceSheetReport, FiscalPeriod, FiscalPeriodCreateInput, JournalEntry, JournalEntryCreateInput, ProfitAndLossReport, TaxRate, TaxRateCreateInput, TrialBalanceReport, VendorBill, VendorBillCreateInput } from '../types/accounting';
+import { Account, BalanceSheetReport, FiscalPeriod, FiscalPeriodCreateInput, JournalEntry, JournalEntryCreateInput, NightAuditRun, NightAuditSchedule, ProfitAndLossReport, TaxRate, TaxRateCreateInput, TrialBalanceReport, VendorBill, VendorBillCreateInput } from '../types/accounting';
 
 const getList = <T,>(data: T[] | { results: T[] }) => (Array.isArray(data) ? data : data.results);
 
@@ -50,6 +50,26 @@ export const useVendorBills = () => {
     queryFn: async (): Promise<VendorBill[]> => {
       const response = await apiClient.get<VendorBill[] | { results: VendorBill[] }>('/accounting/vendor-bills/');
       return getList(response.data);
+    },
+  });
+};
+
+export const useNightAuditRuns = () => {
+  return useQuery({
+    queryKey: ['night-audit-runs'],
+    queryFn: async (): Promise<NightAuditRun[]> => {
+      const response = await apiClient.get<NightAuditRun[] | { results: NightAuditRun[] }>('/accounting/night-audits/');
+      return getList(response.data);
+    },
+  });
+};
+
+export const useNightAuditSchedule = () => {
+  return useQuery({
+    queryKey: ['night-audit-schedule'],
+    queryFn: async (): Promise<NightAuditSchedule> => {
+      const response = await apiClient.get<NightAuditSchedule>('/accounting/night-audits/schedule/');
+      return response.data;
     },
   });
 };
@@ -161,6 +181,34 @@ export const useFiscalPeriodAction = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['fiscal-periods'] });
+    },
+  });
+};
+
+export const useUpdateNightAuditSchedule = () => {
+  const queryClient = useQueryClient();
+  return useMutation<NightAuditSchedule, Error, { enabled: boolean; run_time: string; timezone: string; notes?: string }>({
+    mutationFn: async (payload) => {
+      const response = await apiClient.put('/accounting/night-audits/configure-schedule/', payload);
+      return response.data as NightAuditSchedule;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['night-audit-schedule'] });
+    },
+  });
+};
+
+export const useRunNightAudit = () => {
+  const queryClient = useQueryClient();
+  return useMutation<NightAuditRun, Error, { audit_date?: string }>({
+    mutationFn: async (payload) => {
+      const response = await apiClient.post('/accounting/night-audits/run/', payload);
+      return response.data as NightAuditRun;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['night-audit-runs'] });
+      queryClient.invalidateQueries({ queryKey: ['night-audit-schedule'] });
+      queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
     },
   });
 };

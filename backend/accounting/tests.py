@@ -5,9 +5,10 @@ from django.db import connection
 from django_tenants.test.cases import TenantTestCase
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from accounting.models import FiscalPeriod, JournalEntry, JournalLine, TaxRate, VendorBill
-from accounting.services import get_balance_sheet, get_profit_and_loss, get_trial_balance, post_journal_entry, seed_default_accounts
-from accounting.views import FiscalPeriodViewSet, JournalEntryViewSet, TaxRateViewSet, VendorBillViewSet
+from accounting.models import FiscalPeriod, JournalEntry, JournalLine, NightAuditRun, TaxRate, VendorBill
+from accounting.services import get_balance_sheet, get_night_audit_schedule, get_profit_and_loss, get_trial_balance, post_journal_entry, run_night_audit, seed_default_accounts, update_night_audit_schedule
+from accounting.views import FiscalPeriodViewSet, JournalEntryViewSet, NightAuditRunViewSet, TaxRateViewSet, VendorBillViewSet
+from bookings.models import Booking, Guest, GuestFolioLine, Room, RoomType
 from inventory.models import Vendor
 from users.models import PlatformUser
 
@@ -311,3 +312,51 @@ class AccountingReportingTests(TenantTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['totals']['debit_balance'], Decimal('1200.00'))
+
+    def test_night_audit_run_creates_review_record_and_room_charge_line(self):
+        room_type = RoomType.objects.create(name='Audit Standard', code='AUD-STD', base_rate='100.00')
+        room = Room.objects.create(room_number='NA-101', room_type=room_type, capacity=2, price_per_night='100.00')
+        guest = Guest.objects.create(first_name='Night', last_name='Guest', email='night.guest@example.com')
+        booking = Booking.objects.create(
+            room=room,
+            guest=guest,
+            check_in_date=date(2026, 5, 24),
+            check_out_date=date(2026, 5, 25),
+            number_of_guests=1,
+            status='checked_in',
+        )
+
+        run = run_night_audit(audit_date=date(2026, 5, 24), triggered_by=self.user)
+
+        self.assertEqual(run.status, 'completed')
+        self.assertEqual(run.checked_in_bookings, 1)
+        self.assertEqual(run.room_charge_lines_created, 1)
+        self.assertTrue(GuestFolioLine.objects.filter(folio__booking=booking, source_module='room_charge').exists())
+
+    def test_night_audit_endpoint_runs_and_blocks_duplicate_date(self):
+        request = self.factory.post('/accounting/night-audits/run/', {'audit_date': '2026-05-24'}, format='json')
+        force_authenticate(request, user=self.user)
+        response = NightAuditRunViewSet.as_view({'post': 'run_now'})(request)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['audit_date'], '2026-05-24')
+        self.assertTrue(NightAuditRun.objects.filter(audit_date=date(2026, 5, 24)).exists())
+
+        duplicate_request = self.factory.post('/accounting/night-audits/run/', {'audit_date': '2026-05-24'}, format='json')
+        force_authenticate(duplicate_request, user=self.user)
+        duplicate_response = NightAuditRunViewSet.as_view({'post': 'run_now'})(duplicate_request)
+
+        self.assertEqual(duplicate_response.status_code, 400)
+        self.assertIn('already ran', str(duplicate_response.data))
+
+    def test_night_audit_schedule_can_be_updated(self):
+        schedule = update_night_audit_schedule(
+            enabled=True,
+            run_time='03:15',
+            timezone_name='Asia/Katmandu',
+            notes='Run after POS close',
+        )
+
+        self.assertTrue(schedule.enabled)
+        self.assertEqual(str(schedule.run_time), '03:15:00')
+        self.assertEqual(get_night_audit_schedule().notes, 'Run after POS close')

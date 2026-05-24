@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import time
 
 from django.db import models
 from django.utils import timezone
@@ -116,6 +117,51 @@ class VendorBillLine(UUIDModel):
 
     def __str__(self):
         return f'{self.vendor_bill.bill_number} - {self.description}'
+
+
+class NightAuditSchedule(UUIDModel):
+    enabled = models.BooleanField(default=False)
+    run_time = models.TimeField(default=time(2, 0))
+    timezone = models.CharField(max_length=80, default='Asia/Katmandu')
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Night audit schedule at {self.run_time}'
+
+
+class NightAuditRun(UUIDModel):
+    STATUS_CHOICES = [
+        ('completed', 'Completed'),
+        ('completed_with_exceptions', 'Completed with Exceptions'),
+        ('failed', 'Failed'),
+    ]
+
+    audit_date = models.DateField()
+    status = models.CharField(max_length=40, choices=STATUS_CHOICES, default='completed')
+    started_at = models.DateTimeField(default=timezone.now)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    triggered_by = models.ForeignKey('users.PlatformUser', on_delete=models.SET_NULL, null=True, blank=True, related_name='night_audit_runs')
+    checked_in_bookings = models.PositiveIntegerField(default=0)
+    folios_reviewed = models.PositiveIntegerField(default=0)
+    room_charge_lines_created = models.PositiveIntegerField(default=0)
+    open_folios = models.PositiveIntegerField(default=0)
+    paid_folios = models.PositiveIntegerField(default=0)
+    exceptions = models.JSONField(default=list, blank=True)
+    summary = models.JSONField(default=dict, blank=True)
+    error_message = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-audit_date', '-created_at']
+        constraints = [
+            models.UniqueConstraint(fields=['audit_date'], name='unique_night_audit_run_date'),
+        ]
+
+    def __str__(self):
+        return f'Night audit {self.audit_date} - {self.status}'
 
 
 class FiscalPeriod(UUIDModel):

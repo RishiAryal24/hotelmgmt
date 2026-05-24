@@ -134,6 +134,7 @@ Completed:
 - Checkout exception handling for missing/closed folios and unresolved restaurant postings.
 - Room transfer rate adjustment policy with keep-rate, upgrade-charge, complimentary-upgrade, and downgrade-credit options.
 - Dynamic pricing rules with nightly quote breakdowns, booking total integration, extension pricing, and Bookings UI controls.
+- Night audit scheduler and review UI with tenant schedule settings, manual execution, due-run command support, run history, folio reconciliation summaries, and exception visibility.
 
 Next slices:
 

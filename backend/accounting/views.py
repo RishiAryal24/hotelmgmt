@@ -6,9 +6,9 @@ from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from accounting.models import Account, FiscalPeriod, JournalEntry, TaxRate, VendorBill
-from accounting.serializers import AccountSerializer, AccountingDateRangeSerializer, FiscalPeriodSerializer, JournalEntrySerializer, TaxRateSerializer, VendorBillSerializer
-from accounting.services import get_balance_sheet, get_profit_and_loss, get_trial_balance, post_vendor_bill, seed_default_accounts
+from accounting.models import Account, FiscalPeriod, JournalEntry, NightAuditRun, TaxRate, VendorBill
+from accounting.serializers import AccountSerializer, AccountingDateRangeSerializer, FiscalPeriodSerializer, JournalEntrySerializer, NightAuditRunRequestSerializer, NightAuditRunSerializer, NightAuditScheduleSerializer, TaxRateSerializer, VendorBillSerializer
+from accounting.services import get_balance_sheet, get_night_audit_schedule, get_profit_and_loss, get_trial_balance, post_vendor_bill, run_night_audit, seed_default_accounts, update_night_audit_schedule
 from users.permissions import HasActionPermission
 
 
@@ -172,3 +172,48 @@ class FiscalPeriodViewSet(viewsets.ModelViewSet):
         period.closed_at = None
         period.save(update_fields=['status', 'closed_by', 'closed_at', 'updated_at'])
         return Response(self.get_serializer(period).data)
+
+
+class NightAuditRunViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = NightAuditRun.objects.select_related('triggered_by').all()
+    serializer_class = NightAuditRunSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'accounting.ledger.read',
+        'retrieve': 'accounting.ledger.read',
+        'schedule': 'accounting.ledger.read',
+        'update_schedule': 'accounting.journal.create',
+        'run_now': 'accounting.journal.create',
+    }
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_fields = ['status', 'audit_date']
+    ordering_fields = ['audit_date', 'started_at', 'completed_at']
+
+    @action(detail=False, methods=['get'])
+    def schedule(self, request):
+        return Response(NightAuditScheduleSerializer(get_night_audit_schedule()).data)
+
+    @action(detail=False, methods=['put'], url_path='configure-schedule')
+    def update_schedule(self, request):
+        serializer = NightAuditScheduleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        schedule = update_night_audit_schedule(
+            enabled=serializer.validated_data.get('enabled', False),
+            run_time=serializer.validated_data['run_time'],
+            timezone_name=serializer.validated_data.get('timezone') or 'Asia/Katmandu',
+            notes=serializer.validated_data.get('notes', ''),
+        )
+        return Response(NightAuditScheduleSerializer(schedule).data)
+
+    @action(detail=False, methods=['post'], url_path='run')
+    def run_now(self, request):
+        serializer = NightAuditRunRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            run = run_night_audit(
+                audit_date=serializer.validated_data.get('audit_date'),
+                triggered_by=request.user,
+            )
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self.get_serializer(run).data, status=status.HTTP_201_CREATED)

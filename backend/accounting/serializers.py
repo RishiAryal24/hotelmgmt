@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from accounting.models import Account, FiscalPeriod, JournalEntry, JournalLine, TaxRate, VendorBill, VendorBillLine
+from accounting.models import Account, FiscalPeriod, JournalEntry, JournalLine, NightAuditRun, NightAuditSchedule, TaxRate, VendorBill, VendorBillLine
 from inventory.serializers import VendorSerializer
 from accounting.services import ensure_open_fiscal_period
 from users.serializers import UserSerializer
@@ -115,6 +115,39 @@ class FiscalPeriodSerializer(serializers.ModelSerializer):
         if start_date and end_date and queryset.filter(start_date__lte=end_date, end_date__gte=start_date).exists():
             raise serializers.ValidationError('Fiscal periods cannot overlap.')
         return attrs
+
+
+class NightAuditScheduleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NightAuditSchedule
+        fields = '__all__'
+        read_only_fields = ['last_run_at']
+
+
+class NightAuditRunSerializer(serializers.ModelSerializer):
+    triggered_by_details = UserSerializer(source='triggered_by', read_only=True)
+
+    class Meta:
+        model = NightAuditRun
+        fields = '__all__'
+        read_only_fields = [
+            'status',
+            'started_at',
+            'completed_at',
+            'triggered_by',
+            'checked_in_bookings',
+            'folios_reviewed',
+            'room_charge_lines_created',
+            'open_folios',
+            'paid_folios',
+            'exceptions',
+            'summary',
+            'error_message',
+        ]
+
+
+class NightAuditRunRequestSerializer(serializers.Serializer):
+    audit_date = serializers.DateField(required=False)
 
 
 class JournalLineSerializer(serializers.ModelSerializer):

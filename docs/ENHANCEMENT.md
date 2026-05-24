@@ -146,8 +146,8 @@ The system is now a connected development-stage hospitality ERP with strong tena
 #### Night Audit
 
 - [x] `night_audit` management command.
-- [ ] Scheduler setup.
-- [ ] Night audit review UI and exception handling.
+- [x] Scheduler setup.
+- [x] Night audit review UI and exception handling.
 
 #### Loyalty and CRM
 
@@ -274,6 +274,7 @@ The system is now a connected development-stage hospitality ERP with strong tena
 - Broader POS manager analytics is implemented with sales trend, payment mix, top item, table/location performance, and exception summaries in the Restaurant UI.
 - Dynamic pricing rules are implemented with room-type/rate-plan scoped surcharges and discounts, date ranges, weekday filters, occupancy conditions, quote APIs, booking total integration, extension pricing, focused tests, and a Bookings pricing UI.
 - Package booking polish and reporting is implemented with package-backed quote totals, package selection in reservations and walk-ins, package creation UI, visible package catalog/listing, package revenue reporting, and focused booking tests.
+- Night audit scheduler and review UI are implemented with tenant schedule settings, manual run support, due-run management command, durable audit run history, folio/room-charge reconciliation summaries, exception visibility, and Accounting UI controls.
 - Walk-in booking polish is implemented with a faster front-desk mode, automatic today/tomorrow stay defaults, guest safety checks, room readiness context, and immediate folio review after check-in.
 - Checkout exception handling is implemented with readiness APIs, checkout blocking for missing/closed folios and unresolved restaurant postings, and front-desk blocker visibility.
 - Room transfer rate adjustment policy is implemented with keep-rate, upgrade-charge, complimentary-upgrade, and downgrade-credit options plus folio adjustment preview.
@@ -281,7 +282,7 @@ The system is now a connected development-stage hospitality ERP with strong tena
 
 ## Next Enhancement
 
-Recommended next enhancement: **night audit scheduler setup and review UI**.
+Recommended next enhancement: **guest communication timeline polish and campaign-ready segmentation**.
 
 Suggested order:
 
@@ -290,3 +291,4 @@ Suggested order:
 3. Add broader POS manager analytics. Done.
 4. Add dynamic pricing rules. Done.
 5. Add package booking polish, package list visibility, and reporting. Done.
+6. Add night audit scheduler setup and review UI. Done.

@@ -7,16 +7,22 @@ import {
   useBalanceSheet,
   useCreateFiscalPeriod,
   useCreateJournalEntry,
+  useCreateTaxRate,
+  useCreateVendorBill,
   useFiscalPeriodAction,
   useFiscalPeriods,
   useJournalEntries,
   useProfitAndLoss,
   useSeedAccounts,
+  useTaxRates,
   useTrialBalance,
+  useVendorBillAction,
+  useVendorBills,
 } from '../hooks/accounting';
+import { useVendors } from '../hooks/inventory';
 import { usePermissions } from '../hooks/permissions';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
-import { FiscalPeriod, JournalEntry } from '../types/accounting';
+import { FiscalPeriod, JournalEntry, TaxRate } from '../types/accounting';
 
 type JournalLineInput = {
   account: string;
@@ -40,7 +46,34 @@ type FiscalPeriodForm = {
   end_date: string;
 };
 
-type AccountingTab = 'summary' | 'statements' | 'journals' | 'fiscal_periods' | 'accounts' | 'create';
+type TaxRateForm = {
+  code: string;
+  name: string;
+  tax_type: TaxRate['tax_type'];
+  rate: string;
+  account: string;
+  description: string;
+  is_default: boolean;
+  is_active: boolean;
+};
+
+type VendorBillLineInput = {
+  account: string;
+  tax_rate: string;
+  description: string;
+  amount: string;
+};
+
+type VendorBillForm = {
+  vendor: string;
+  invoice_number: string;
+  bill_date: string;
+  due_date: string;
+  notes: string;
+  lines: VendorBillLineInput[];
+};
+
+type AccountingTab = 'summary' | 'statements' | 'journals' | 'fiscal_periods' | 'taxes' | 'vendor_bills' | 'accounts' | 'create';
 type JournalSourceFilter = 'all' | 'guest_folio' | 'restaurant_order' | 'inventory_purchase' | 'manual';
 type JournalStatusFilter = 'all' | JournalEntry['status'];
 
@@ -61,6 +94,28 @@ const emptyFiscalPeriod: FiscalPeriodForm = {
   start_date: '',
   end_date: '',
 };
+
+const emptyTaxRate: TaxRateForm = {
+  code: '',
+  name: '',
+  tax_type: 'sales',
+  rate: '',
+  account: '',
+  description: '',
+  is_default: false,
+  is_active: true,
+};
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+const emptyVendorBill = (): VendorBillForm => ({
+  vendor: '',
+  invoice_number: '',
+  bill_date: todayIso(),
+  due_date: '',
+  notes: '',
+  lines: [{ account: '', tax_rate: '', description: '', amount: '' }],
+});
 
 const sourceLabels: Record<string, string> = {
   guest_folio: 'Room Folio',
@@ -158,9 +213,15 @@ const Accounting = () => {
   const { data: accounts, isLoading: accountsLoading } = useAccounts();
   const { data: journalEntries, isLoading: entriesLoading } = useJournalEntries();
   const { data: fiscalPeriods = [], isLoading: fiscalPeriodsLoading } = useFiscalPeriods();
+  const { data: taxRates = [], isLoading: taxRatesLoading } = useTaxRates();
+  const { data: vendorBills = [], isLoading: vendorBillsLoading } = useVendorBills();
+  const { data: vendors = [] } = useVendors();
   const seedAccounts = useSeedAccounts();
   const createJournalEntry = useCreateJournalEntry();
   const createFiscalPeriod = useCreateFiscalPeriod();
+  const createTaxRate = useCreateTaxRate();
+  const createVendorBill = useCreateVendorBill();
+  const vendorBillAction = useVendorBillAction();
   const fiscalPeriodAction = useFiscalPeriodAction();
   const { can } = usePermissions();
 
@@ -168,6 +229,8 @@ const Accounting = () => {
   const [isJournalModalOpen, setIsJournalModalOpen] = useState(false);
   const [journalEntryForm, setJournalEntryForm] = useState<JournalEntryForm>(emptyJournalEntry);
   const [fiscalPeriodForm, setFiscalPeriodForm] = useState<FiscalPeriodForm>(emptyFiscalPeriod);
+  const [taxRateForm, setTaxRateForm] = useState<TaxRateForm>(emptyTaxRate);
+  const [vendorBillForm, setVendorBillForm] = useState<VendorBillForm>(emptyVendorBill());
   const [sourceFilter, setSourceFilter] = useState<JournalSourceFilter>('all');
   const [statusFilter, setStatusFilter] = useState<JournalStatusFilter>('all');
   const [dateFrom, setDateFrom] = useState('');
@@ -182,6 +245,9 @@ const Accounting = () => {
   const { data: trialBalance } = useTrialBalance({ date_from: statementRange.date_from, date_to: statementRange.date_to });
   const { data: profitAndLoss } = useProfitAndLoss({ date_from: statementRange.date_from, date_to: statementRange.date_to });
   const { data: balanceSheet } = useBalanceSheet({ as_of: statementRange.as_of });
+  const taxControlAccounts = useMemo(() => accounts?.filter((account) => account.account_type === 'liability' && account.is_active) || [], [accounts]);
+  const vendorBillAccounts = useMemo(() => accounts?.filter((account) => ['asset', 'expense'].includes(account.account_type) && account.is_active) || [], [accounts]);
+  const purchaseTaxRates = useMemo(() => taxRates.filter((taxRate) => taxRate.is_active && ['purchase', 'both'].includes(taxRate.tax_type)), [taxRates]);
 
   const totals = useMemo(
     () => ({
@@ -239,6 +305,27 @@ const Accounting = () => {
     });
   };
 
+  const updateVendorBillLine = (index: number, nextLine: Partial<VendorBillLineInput>) => {
+    const nextLines = [...vendorBillForm.lines];
+    nextLines[index] = { ...nextLines[index], ...nextLine };
+    setVendorBillForm({ ...vendorBillForm, lines: nextLines });
+  };
+
+  const removeVendorBillLine = (index: number) => {
+    setVendorBillForm({
+      ...vendorBillForm,
+      lines: vendorBillForm.lines.filter((_, lineIndex) => lineIndex !== index),
+    });
+  };
+
+  const getVendorBillTaxAmount = (line: VendorBillLineInput) => {
+    const taxRate = purchaseTaxRates.find((rate) => rate.id === line.tax_rate);
+    if (!taxRate || !line.amount) {
+      return '0.00';
+    }
+    return ((Number(line.amount) * Number(taxRate.rate)) / 100).toFixed(2);
+  };
+
   const handleTabChange = (tabId: string) => {
     if (tabId === 'create') {
       setIsJournalModalOpen(true);
@@ -275,6 +362,8 @@ const Accounting = () => {
           { id: 'statements', label: 'Statements' },
           { id: 'journals', label: 'Journals', count: journalEntries?.length || 0 },
           { id: 'fiscal_periods', label: 'Fiscal Periods', count: fiscalPeriods.length },
+          { id: 'taxes', label: 'Taxes', count: taxRates.length },
+          { id: 'vendor_bills', label: 'Vendor Bills', count: vendorBills.length },
           { id: 'accounts', label: 'Accounts', count: totals.activeAccounts },
           ...(can('accounting.journal.create') ? [{ id: 'create', label: 'Create Entry' }] : []),
         ]}
@@ -583,6 +672,266 @@ const Accounting = () => {
             </div>
             {fiscalPeriodsLoading && <p className="p-4 text-sm text-slate-600">Loading fiscal periods...</p>}
             {!fiscalPeriodsLoading && fiscalPeriods.length === 0 && <p className="p-4 text-sm text-slate-600">No fiscal periods yet.</p>}
+          </div>
+        </section>
+      )}
+
+      {activeTab === 'taxes' && (
+        <section className="grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <h2 className="font-semibold text-slate-900">Create Tax Rate</h2>
+            <form
+              className="mt-4 grid gap-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                createTaxRate.mutate(
+                  {
+                    ...taxRateForm,
+                    rate: taxRateForm.rate || '0',
+                  },
+                  {
+                    onSuccess: () => setTaxRateForm(emptyTaxRate),
+                  },
+                );
+              }}
+            >
+              <input value={taxRateForm.code} onChange={(e) => setTaxRateForm({ ...taxRateForm, code: e.target.value.toUpperCase() })} placeholder="VAT13" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+              <input value={taxRateForm.name} onChange={(e) => setTaxRateForm({ ...taxRateForm, name: e.target.value })} placeholder="VAT 13%" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+              <select value={taxRateForm.tax_type} onChange={(e) => setTaxRateForm({ ...taxRateForm, tax_type: e.target.value as TaxRate['tax_type'] })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                <option value="sales">Sales</option>
+                <option value="purchase">Purchase</option>
+                <option value="both">Sales and purchase</option>
+              </select>
+              <input type="number" min="0" step="0.001" value={taxRateForm.rate} onChange={(e) => setTaxRateForm({ ...taxRateForm, rate: e.target.value })} placeholder="Rate %" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+              <select value={taxRateForm.account} onChange={(e) => setTaxRateForm({ ...taxRateForm, account: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required>
+                <option value="">Tax control account</option>
+                {taxControlAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.code} - {account.name}
+                  </option>
+                ))}
+              </select>
+              <textarea value={taxRateForm.description} onChange={(e) => setTaxRateForm({ ...taxRateForm, description: e.target.value })} placeholder="Description" className="min-h-[80px] rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={taxRateForm.is_default} onChange={(e) => setTaxRateForm({ ...taxRateForm, is_default: e.target.checked })} className="h-4 w-4 rounded border-slate-300" />
+                Default rate
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={taxRateForm.is_active} onChange={(e) => setTaxRateForm({ ...taxRateForm, is_active: e.target.checked })} className="h-4 w-4 rounded border-slate-300" />
+                Active
+              </label>
+              <button type="submit" disabled={createTaxRate.status === 'pending'} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">
+                {createTaxRate.status === 'pending' ? 'Saving...' : 'Create tax rate'}
+              </button>
+              {createTaxRate.isError && <p className="text-sm text-red-600">{getApiErrorMessage(createTaxRate.error, 'Could not create tax rate.')}</p>}
+            </form>
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <div className="border-b border-slate-100 px-4 py-3">
+              <h2 className="font-semibold text-slate-900">Tax Register</h2>
+              <p className="text-sm text-slate-500">Rates map tax collection and purchase tax to accounting control accounts.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Code</th>
+                    <th className="px-4 py-3">Name</th>
+                    <th className="px-4 py-3">Type</th>
+                    <th className="px-4 py-3 text-right">Rate</th>
+                    <th className="px-4 py-3">Control Account</th>
+                    <th className="px-4 py-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {taxRates.map((taxRate) => (
+                    <tr key={taxRate.id} className="hover:bg-slate-50/70">
+                      <td className="px-4 py-3 font-mono text-sm text-slate-700">{taxRate.code}</td>
+                      <td className="px-4 py-3 font-medium text-slate-900">
+                        {taxRate.name}
+                        {taxRate.is_default && <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">Default</span>}
+                      </td>
+                      <td className="px-4 py-3 capitalize text-slate-700">{taxRate.tax_type.replace('_', ' ')}</td>
+                      <td className="px-4 py-3 text-right font-medium text-slate-900">{Number(taxRate.rate).toFixed(3)}%</td>
+                      <td className="px-4 py-3 text-slate-700">{taxRate.account_details ? `${taxRate.account_details.code} - ${taxRate.account_details.name}` : '-'}</td>
+                      <td className="px-4 py-3">
+                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+                          {taxRate.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {taxRatesLoading && <p className="p-4 text-sm text-slate-600">Loading tax rates...</p>}
+            {!taxRatesLoading && taxRates.length === 0 && <p className="p-4 text-sm text-slate-600">No tax rates configured yet.</p>}
+          </div>
+        </section>
+      )}
+
+      {activeTab === 'vendor_bills' && (
+        <section className="grid gap-5 xl:grid-cols-[420px_minmax(0,1fr)]">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <h2 className="font-semibold text-slate-900">Capture Vendor Bill</h2>
+            <form
+              className="mt-4 grid gap-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                createVendorBill.mutate(
+                  {
+                    vendor: vendorBillForm.vendor,
+                    invoice_number: vendorBillForm.invoice_number,
+                    bill_date: vendorBillForm.bill_date,
+                    due_date: vendorBillForm.due_date || undefined,
+                    notes: vendorBillForm.notes,
+                    lines: vendorBillForm.lines.map((line) => ({
+                      account: line.account,
+                      tax_rate: line.tax_rate || null,
+                      description: line.description,
+                      amount: line.amount || '0',
+                      tax_amount: getVendorBillTaxAmount(line),
+                    })),
+                  },
+                  {
+                    onSuccess: () => setVendorBillForm(emptyVendorBill()),
+                  },
+                );
+              }}
+            >
+              <select value={vendorBillForm.vendor} onChange={(e) => setVendorBillForm({ ...vendorBillForm, vendor: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required>
+                <option value="">Vendor</option>
+                {vendors.map((vendor) => (
+                  <option key={vendor.id} value={vendor.id}>
+                    {vendor.name}
+                  </option>
+                ))}
+              </select>
+              <input value={vendorBillForm.invoice_number} onChange={(e) => setVendorBillForm({ ...vendorBillForm, invoice_number: e.target.value })} placeholder="Invoice number" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+              <div className="grid gap-3 md:grid-cols-2">
+                <input type="date" value={vendorBillForm.bill_date} onChange={(e) => setVendorBillForm({ ...vendorBillForm, bill_date: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                <input type="date" value={vendorBillForm.due_date} onChange={(e) => setVendorBillForm({ ...vendorBillForm, due_date: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+              </div>
+              <div className="overflow-hidden rounded-xl border border-slate-200">
+                <table className="w-full min-w-[720px] text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2">Account</th>
+                      <th className="px-3 py-2">Description</th>
+                      <th className="px-3 py-2">Amount</th>
+                      <th className="px-3 py-2">Tax</th>
+                      <th className="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {vendorBillForm.lines.map((line, index) => (
+                      <tr key={index}>
+                        <td className="px-3 py-2">
+                          <select value={line.account} onChange={(e) => updateVendorBillLine(index, { account: e.target.value })} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm" required>
+                            <option value="">Account</option>
+                            {vendorBillAccounts.map((account) => (
+                              <option key={account.id} value={account.id}>
+                                {account.code} - {account.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-3 py-2">
+                          <input value={line.description} onChange={(e) => updateVendorBillLine(index, { description: e.target.value })} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm" required />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input type="number" min="0.01" step="0.01" value={line.amount} onChange={(e) => updateVendorBillLine(index, { amount: e.target.value })} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm" required />
+                        </td>
+                        <td className="px-3 py-2">
+                          <select value={line.tax_rate} onChange={(e) => updateVendorBillLine(index, { tax_rate: e.target.value })} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm">
+                            <option value="">No tax</option>
+                            {purchaseTaxRates.map((taxRate) => (
+                              <option key={taxRate.id} value={taxRate.id}>
+                                {taxRate.code} {Number(taxRate.rate).toFixed(3)}%
+                              </option>
+                            ))}
+                          </select>
+                          {line.tax_rate && <span className="mt-1 block text-xs text-slate-500">{formatMoney(getVendorBillTaxAmount(line), settings?.currency)}</span>}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <button type="button" onClick={() => removeVendorBillLine(index)} className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50">
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <textarea value={vendorBillForm.notes} onChange={(e) => setVendorBillForm({ ...vendorBillForm, notes: e.target.value })} placeholder="Notes" className="min-h-[80px] rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => setVendorBillForm({ ...vendorBillForm, lines: [...vendorBillForm.lines, { account: '', tax_rate: '', description: '', amount: '' }] })} className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                  Add line
+                </button>
+                <button type="submit" disabled={createVendorBill.status === 'pending'} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">
+                  {createVendorBill.status === 'pending' ? 'Saving...' : 'Save bill'}
+                </button>
+              </div>
+              {createVendorBill.isError && <p className="text-sm text-red-600">{getApiErrorMessage(createVendorBill.error, 'Could not save vendor bill.')}</p>}
+            </form>
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <div className="border-b border-slate-100 px-4 py-3">
+              <h2 className="font-semibold text-slate-900">Vendor Bill Register</h2>
+              <p className="text-sm text-slate-500">Draft bills can be posted to accounts payable when reviewed.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[900px] text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Bill</th>
+                    <th className="px-4 py-3">Vendor</th>
+                    <th className="px-4 py-3">Dates</th>
+                    <th className="px-4 py-3 text-right">Subtotal</th>
+                    <th className="px-4 py-3 text-right">Tax</th>
+                    <th className="px-4 py-3 text-right">Total</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {vendorBills.map((bill) => (
+                    <tr key={bill.id} className="align-top hover:bg-slate-50/70">
+                      <td className="px-4 py-3 font-medium text-slate-900">
+                        {bill.bill_number}
+                        {bill.invoice_number && <span className="block text-xs font-normal text-slate-500">{bill.invoice_number}</span>}
+                        {bill.journal_entry_number && <span className="block text-xs font-normal text-slate-500">{bill.journal_entry_number}</span>}
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">{bill.vendor_details?.name || '-'}</td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {bill.bill_date}
+                        {bill.due_date && <span className="block text-xs text-slate-500">Due {bill.due_date}</span>}
+                      </td>
+                      <td className="px-4 py-3 text-right">{formatMoney(bill.subtotal, settings?.currency)}</td>
+                      <td className="px-4 py-3 text-right">{formatMoney(bill.tax_total, settings?.currency)}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-slate-900">{formatMoney(bill.total_amount, settings?.currency)}</td>
+                      <td className="px-4 py-3">
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${bill.status === 'posted' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-700'}`}>
+                          {bill.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {bill.status === 'draft' && (
+                          <button type="button" onClick={() => vendorBillAction.mutate({ billId: bill.id, action: 'post' })} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                            Post
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {vendorBillsLoading && <p className="p-4 text-sm text-slate-600">Loading vendor bills...</p>}
+            {!vendorBillsLoading && vendorBills.length === 0 && <p className="p-4 text-sm text-slate-600">No vendor bills captured yet.</p>}
+            {vendorBillAction.isError && <p className="border-t border-slate-100 p-4 text-sm text-red-600">{getApiErrorMessage(vendorBillAction.error, 'Could not post vendor bill.')}</p>}
           </div>
         </section>
       )}

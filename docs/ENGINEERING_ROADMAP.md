@@ -136,8 +136,8 @@ Completed:
 
 Next slices:
 
-1. Tax configuration.
-2. Vendor bills.
+1. Tax configuration. Done.
+2. Vendor bills. Done.
 
 Acceptance criteria:
 
@@ -175,7 +175,7 @@ Completed:
 
 Next slices:
 
-1. Broader POS manager analytics.
+1. Broader POS manager analytics. Done.
 
 Acceptance criteria:
 
@@ -196,8 +196,8 @@ Next slices:
 2. Trial balance. Done.
 3. Profit and loss report. Done.
 4. Balance sheet. Done.
-5. Tax configuration. Next.
-6. Vendor bills. Next.
+5. Tax configuration. Done.
+6. Vendor bills. Done.
 
 Acceptance criteria:
 

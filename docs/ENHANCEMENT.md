@@ -69,7 +69,7 @@ The system is now a connected development-stage hospitality ERP with strong tena
 - [x] Walk-in booking polish.
 - [x] Checkout exception handling for missing/closed folios and unresolved postings.
 - [x] Room transfer rate adjustment policy.
-- [ ] Broader POS manager analytics.
+- [x] Broader POS manager analytics.
 
 ### Phase 3: Advanced Features
 
@@ -170,7 +170,7 @@ The system is now a connected development-stage hospitality ERP with strong tena
 - [x] Restaurant receipt numbering and reprint audit trail.
 - [x] Cash drawer reconciliation by payment row and cashier shift.
 - [x] POS operational reports for cashier exceptions.
-- [ ] Broader POS manager analytics.
+- [x] Broader POS manager analytics.
 
 ### 3. Security Enhancements
 
@@ -269,6 +269,9 @@ The system is now a connected development-stage hospitality ERP with strong tena
 - OTA channel sync foundation is implemented with channel configuration, room/rate mappings, availability/rate payload jobs, Zodomus Basic Auth provider calls, sandbox test reservation tooling, idempotent webhook event capture, inbound reservation import conflict detection, accept/reject review, cancellation/modification reconciliation, manager notifications, audit logging, and Integrations UI.
 - Stripe sandbox is implemented with tenant-scoped test settings, masked secret preservation, PaymentIntent creation/confirmation actions, and focused tests.
 - Accounting statements are implemented with fiscal periods, close/reopen controls, trial balance, profit and loss, balance sheet APIs, and Accounting UI tabs.
+- Accounting tax configuration is implemented with tax rate records, liability control account validation, API endpoints, focused tests, and an Accounting UI tab.
+- Vendor bill capture and posting is implemented with draft bills, expense/asset lines, purchase tax handling, AP journal posting, closed-period protection, focused tests, and an Accounting UI tab.
+- Broader POS manager analytics is implemented with sales trend, payment mix, top item, table/location performance, and exception summaries in the Restaurant UI.
 - Walk-in booking polish is implemented with a faster front-desk mode, automatic today/tomorrow stay defaults, guest safety checks, room readiness context, and immediate folio review after check-in.
 - Checkout exception handling is implemented with readiness APIs, checkout blocking for missing/closed folios and unresolved restaurant postings, and front-desk blocker visibility.
 - Room transfer rate adjustment policy is implemented with keep-rate, upgrade-charge, complimentary-upgrade, and downgrade-credit options plus folio adjustment preview.
@@ -276,9 +279,10 @@ The system is now a connected development-stage hospitality ERP with strong tena
 
 ## Next Enhancement
 
-Recommended next enhancement: **tax/vendor accounting**.
+Recommended next enhancement: **dynamic pricing rules**.
 
 Suggested order:
 
-1. Add accounting tax configuration.
-2. Add vendor bill capture and posting.
+1. Add accounting tax configuration. Done.
+2. Add vendor bill capture and posting. Done.
+3. Add broader POS manager analytics. Done.

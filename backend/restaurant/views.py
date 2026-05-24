@@ -21,6 +21,7 @@ from restaurant.serializers import (
     MenuModifierSerializer,
     MenuRecipeIngredientSerializer,
     RestaurantOrderLineSerializer,
+    RestaurantAnalyticsQuerySerializer,
     RestaurantOrderApprovalDecisionSerializer,
     RestaurantOrderApprovalRequestSerializer,
     RestaurantOrderApprovalSerializer,
@@ -40,6 +41,7 @@ from restaurant.services import (
     approve_order_approval,
     close_cashier_shift,
     get_open_cashier_shift,
+    get_pos_manager_analytics,
     merge_order_table,
     open_cashier_shift,
     reject_order_approval,
@@ -283,6 +285,7 @@ class RestaurantOrderViewSet(viewsets.ModelViewSet):
         'request_complimentary': 'restaurant.order.update',
         'settle': 'pos.sale.create',
         'reprint_receipt': 'pos.sale.create',
+        'manager_analytics': ['restaurant.order.update', 'restaurant.order.approve', 'pos.sale.create'],
     }
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['status', 'order_type', 'table', 'waiter']
@@ -294,6 +297,17 @@ class RestaurantOrderViewSet(viewsets.ModelViewSet):
         if order.table:
             order.table.status = 'occupied'
             order.table.save(update_fields=['status', 'updated_at'])
+
+    @action(detail=False, methods=['get'], url_path='manager-analytics')
+    def manager_analytics(self, request):
+        serializer = RestaurantAnalyticsQuerySerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        return Response(
+            get_pos_manager_analytics(
+                date_from=serializer.validated_data.get('date_from'),
+                date_to=serializer.validated_data.get('date_to'),
+            )
+        )
 
     @action(detail=True, methods=['post'])
     def add_line(self, request, pk=None):

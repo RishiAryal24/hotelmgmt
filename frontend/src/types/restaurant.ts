@@ -291,3 +291,47 @@ export interface CashierShift {
   notes: string;
   live_totals?: CashierShiftTotals;
 }
+
+export interface POSManagerAnalytics {
+  date_from: string | null;
+  date_to: string | null;
+  summary: {
+    orders: number;
+    gross_sales: string;
+    tax_total: string;
+    service_charge_total: string;
+    discount_total: string;
+    net_sales: string;
+    average_check: string;
+  };
+  payments: Array<{
+    payment_method: RestaurantOrder['payment_method'];
+    count: number;
+    amount: string;
+  }>;
+  daily_sales: Array<{
+    date: string;
+    orders: number;
+    net_sales: string;
+  }>;
+  top_items: Array<{
+    item_id: string;
+    item_name: string;
+    quantity: number;
+    net_sales: string;
+  }>;
+  table_performance: Array<{
+    label: string;
+    orders: number;
+    net_sales: string;
+  }>;
+  exceptions: {
+    pending_approvals: number;
+    approved_voids: number;
+    discount_approvals: number;
+    complimentary_approvals: number;
+    receipt_reprints: number;
+    closed_shifts: number;
+    total_variance: string;
+  };
+}

@@ -16,6 +16,7 @@ from restaurant.services import (
     approve_order_approval,
     calculate_cashier_shift_totals,
     close_cashier_shift,
+    get_pos_manager_analytics,
     merge_order_table,
     open_cashier_shift,
     record_restaurant_receipt_reprint,
@@ -436,6 +437,7 @@ class RestaurantRoomPostingTests(TenantTestCase):
         card_order = RestaurantOrder.objects.create(table=self.table, order_type='dine_in', status='served')
         RestaurantOrderLine.objects.create(order=card_order, menu_item=self.item, quantity=1, unit_price=Decimal('25.00'))
         card_order.refresh_from_db()
+        approval = request_order_approval(card_order, action_type='discount', discount_amount=Decimal('2.00'), reason='Late plate', requested_by=self.cashier)
         settle_restaurant_order(card_order, payment_method='card', paid_amount=Decimal('25.00'), cashier_shift=shift)
 
         close_cashier_shift(
@@ -526,6 +528,47 @@ class RestaurantRoomPostingTests(TenantTestCase):
         self.assertEqual(payments.count(), 2)
         self.assertEqual(totals['expected_cash'], Decimal('50.00'))
         self.assertEqual(totals['expected_card'], Decimal('20.00'))
+
+    def test_pos_manager_analytics_summarizes_sales_and_exceptions(self):
+        shift = open_cashier_shift(cashier=self.cashier, counter=self.counter, opening_cash=Decimal('20.00'))
+        apply_order_discount(self.order, discount_amount=Decimal('5.00'), reason='Manager recovery')
+        settle_restaurant_order(self.order, payment_method='cash', paid_amount=Decimal('45.00'), cashier_shift=shift)
+        record_restaurant_receipt_reprint(self.order, reprinted_by=self.cashier, reason='Guest copy')
+
+        card_order = RestaurantOrder.objects.create(table=self.table, order_type='dine_in', status='served')
+        RestaurantOrderLine.objects.create(order=card_order, menu_item=self.item, quantity=1, unit_price=Decimal('25.00'))
+        card_order.refresh_from_db()
+        settle_restaurant_order(card_order, payment_method='card', paid_amount=Decimal('25.00'), cashier_shift=shift)
+        close_cashier_shift(
+            shift,
+            actual_cash=Decimal('60.00'),
+            actual_card=Decimal('24.00'),
+            actual_wallet=Decimal('0.00'),
+            actual_bank_transfer=Decimal('0.00'),
+            actual_room_posting=Decimal('0.00'),
+        )
+        approval_order = RestaurantOrder.objects.create(table=self.table, order_type='dine_in', status='served')
+        RestaurantOrderLine.objects.create(order=approval_order, menu_item=self.item, quantity=1, unit_price=Decimal('25.00'))
+        approval_order.refresh_from_db()
+        approval = request_order_approval(approval_order, action_type='discount', discount_amount=Decimal('2.00'), reason='Late plate', requested_by=self.cashier)
+        report = get_pos_manager_analytics()
+
+        self.assertEqual(report['summary']['orders'], 2)
+        self.assertEqual(report['summary']['gross_sales'], Decimal('75.00'))
+        self.assertEqual(report['summary']['discount_total'], Decimal('5.00'))
+        self.assertEqual(report['summary']['net_sales'], Decimal('70.00'))
+        self.assertEqual(report['summary']['average_check'], Decimal('35.00'))
+        self.assertEqual(next(row for row in report['payments'] if row['payment_method'] == 'cash')['amount'], Decimal('45.00'))
+        self.assertEqual(next(row for row in report['payments'] if row['payment_method'] == 'card')['amount'], Decimal('25.00'))
+        self.assertEqual(report['top_items'][0]['quantity'], 3)
+        self.assertEqual(report['top_items'][0]['net_sales'], Decimal('75.00'))
+        self.assertEqual(report['table_performance'][0]['orders'], 2)
+        self.assertEqual(report['exceptions']['pending_approvals'], 1)
+        self.assertEqual(report['exceptions']['discount_approvals'], 1)
+        self.assertEqual(report['exceptions']['receipt_reprints'], 1)
+        self.assertEqual(report['exceptions']['closed_shifts'], 1)
+        self.assertEqual(report['exceptions']['total_variance'], Decimal('-6.00'))
+        self.assertEqual(approval.status, 'pending')
 
     def test_split_payments_must_match_order_total(self):
         with self.assertRaises(RestaurantSettlementError):

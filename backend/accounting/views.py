@@ -6,9 +6,9 @@ from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from accounting.models import Account, FiscalPeriod, JournalEntry
-from accounting.serializers import AccountSerializer, AccountingDateRangeSerializer, FiscalPeriodSerializer, JournalEntrySerializer
-from accounting.services import get_balance_sheet, get_profit_and_loss, get_trial_balance, seed_default_accounts
+from accounting.models import Account, FiscalPeriod, JournalEntry, TaxRate, VendorBill
+from accounting.serializers import AccountSerializer, AccountingDateRangeSerializer, FiscalPeriodSerializer, JournalEntrySerializer, TaxRateSerializer, VendorBillSerializer
+from accounting.services import get_balance_sheet, get_profit_and_loss, get_trial_balance, post_vendor_bill, seed_default_accounts
 from users.permissions import HasActionPermission
 
 
@@ -34,6 +34,56 @@ class AccountViewSet(viewsets.ModelViewSet):
     def seed_defaults(self, request):
         seed_default_accounts()
         return Response({'status': 'Default accounts seeded'}, status=status.HTTP_201_CREATED)
+
+
+class TaxRateViewSet(viewsets.ModelViewSet):
+    queryset = TaxRate.objects.select_related('account').all()
+    serializer_class = TaxRateSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'accounting.ledger.read',
+        'retrieve': 'accounting.ledger.read',
+        'create': 'accounting.journal.create',
+        'update': 'accounting.journal.create',
+        'partial_update': 'accounting.journal.create',
+        'destroy': 'accounting.journal.create',
+    }
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['tax_type', 'is_active', 'is_default']
+    search_fields = ['code', 'name', 'description']
+    ordering_fields = ['code', 'name', 'rate', 'created_at']
+
+
+class VendorBillViewSet(viewsets.ModelViewSet):
+    queryset = VendorBill.objects.select_related('vendor', 'journal_entry', 'posted_by').prefetch_related('lines', 'lines__account', 'lines__tax_rate', 'lines__tax_rate__account').all()
+    serializer_class = VendorBillSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'accounting.ledger.read',
+        'retrieve': 'accounting.ledger.read',
+        'create': 'accounting.journal.create',
+        'update': 'accounting.journal.create',
+        'partial_update': 'accounting.journal.create',
+        'destroy': 'accounting.journal.create',
+        'post_bill': 'accounting.journal.create',
+    }
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['status', 'vendor']
+    search_fields = ['bill_number', 'invoice_number', 'vendor__name', 'notes']
+    ordering_fields = ['bill_date', 'due_date', 'created_at', 'total_amount']
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+    @action(detail=True, methods=['post'], url_path='post')
+    def post_bill(self, request, pk=None):
+        bill = self.get_object()
+        try:
+            post_vendor_bill(bill, posted_by=request.user)
+        except ValueError as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        bill.refresh_from_db()
+        return Response(self.get_serializer(bill).data)
 
 
 class JournalEntryViewSet(viewsets.ModelViewSet):

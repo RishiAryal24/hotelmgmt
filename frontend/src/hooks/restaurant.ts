@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/api';
-import { CashierCounter, CashierShift, KitchenTicket, MenuCategory, MenuItem, MenuModifier, MenuModifierGroup, MenuRecipeIngredient, RestaurantOrder, RestaurantOrderApproval, RestaurantChargeConfig, RestaurantTable } from '../types/restaurant';
+import { CashierCounter, CashierShift, KitchenTicket, MenuCategory, MenuItem, MenuModifier, MenuModifierGroup, MenuRecipeIngredient, POSManagerAnalytics, RestaurantOrder, RestaurantOrderApproval, RestaurantChargeConfig, RestaurantTable } from '../types/restaurant';
 
 const getList = <T,>(data: T[] | { results: T[] }) => (Array.isArray(data) ? data : data.results);
 
@@ -80,6 +80,16 @@ export const useRestaurantOrders = () => {
     queryFn: async (): Promise<RestaurantOrder[]> => {
       const response = await apiClient.get<RestaurantOrder[] | { results: RestaurantOrder[] }>('/restaurant/orders/');
       return getList(response.data);
+    },
+  });
+};
+
+export const usePOSManagerAnalytics = (params?: { date_from?: string; date_to?: string }) => {
+  return useQuery({
+    queryKey: ['pos-manager-analytics', params || {}],
+    queryFn: async (): Promise<POSManagerAnalytics> => {
+      const response = await apiClient.get<POSManagerAnalytics>('/restaurant/orders/manager-analytics/', { params });
+      return response.data;
     },
   });
 };

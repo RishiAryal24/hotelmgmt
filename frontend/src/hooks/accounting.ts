@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/api';
-import { Account, BalanceSheetReport, FiscalPeriod, FiscalPeriodCreateInput, JournalEntry, JournalEntryCreateInput, ProfitAndLossReport, TrialBalanceReport } from '../types/accounting';
+import { Account, BalanceSheetReport, FiscalPeriod, FiscalPeriodCreateInput, JournalEntry, JournalEntryCreateInput, ProfitAndLossReport, TaxRate, TaxRateCreateInput, TrialBalanceReport, VendorBill, VendorBillCreateInput } from '../types/accounting';
 
 const getList = <T,>(data: T[] | { results: T[] }) => (Array.isArray(data) ? data : data.results);
 
@@ -29,6 +29,26 @@ export const useFiscalPeriods = () => {
     queryKey: ['fiscal-periods'],
     queryFn: async (): Promise<FiscalPeriod[]> => {
       const response = await apiClient.get<FiscalPeriod[] | { results: FiscalPeriod[] }>('/accounting/fiscal-periods/');
+      return getList(response.data);
+    },
+  });
+};
+
+export const useTaxRates = () => {
+  return useQuery({
+    queryKey: ['tax-rates'],
+    queryFn: async (): Promise<TaxRate[]> => {
+      const response = await apiClient.get<TaxRate[] | { results: TaxRate[] }>('/accounting/tax-rates/');
+      return getList(response.data);
+    },
+  });
+};
+
+export const useVendorBills = () => {
+  return useQuery({
+    queryKey: ['vendor-bills'],
+    queryFn: async (): Promise<VendorBill[]> => {
+      const response = await apiClient.get<VendorBill[] | { results: VendorBill[] }>('/accounting/vendor-bills/');
       return getList(response.data);
     },
   });
@@ -85,6 +105,49 @@ export const useCreateFiscalPeriod = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['fiscal-periods'] });
+    },
+  });
+};
+
+export const useCreateTaxRate = () => {
+  const queryClient = useQueryClient();
+  return useMutation<TaxRate, Error, TaxRateCreateInput>({
+    mutationFn: async (payload: TaxRateCreateInput) => {
+      const response = await apiClient.post('/accounting/tax-rates/', payload);
+      return response.data as TaxRate;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tax-rates'] });
+    },
+  });
+};
+
+export const useCreateVendorBill = () => {
+  const queryClient = useQueryClient();
+  return useMutation<VendorBill, Error, VendorBillCreateInput>({
+    mutationFn: async (payload: VendorBillCreateInput) => {
+      const response = await apiClient.post('/accounting/vendor-bills/', payload);
+      return response.data as VendorBill;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['vendor-bills'] });
+    },
+  });
+};
+
+export const useVendorBillAction = () => {
+  const queryClient = useQueryClient();
+  return useMutation<VendorBill, Error, { billId: string; action: 'post' }>({
+    mutationFn: async ({ billId, action }) => {
+      const response = await apiClient.post(`/accounting/vendor-bills/${billId}/${action}/`, {});
+      return response.data as VendorBill;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['vendor-bills'] });
+      queryClient.invalidateQueries({ queryKey: ['journal-entries'] });
+      queryClient.invalidateQueries({ queryKey: ['trial-balance'] });
+      queryClient.invalidateQueries({ queryKey: ['profit-loss'] });
+      queryClient.invalidateQueries({ queryKey: ['balance-sheet'] });
     },
   });
 };

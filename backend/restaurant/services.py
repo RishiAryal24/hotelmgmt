@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from django.db.models import Q, Sum
+from django.db.models import Count, Q, Sum
 from django.db import transaction
 from django.utils import timezone
 
@@ -575,6 +575,110 @@ def calculate_cashier_shift_totals(shift, *, closed_at=None):
         'sales_total': sales_total,
         'payment_breakdown': payment_breakdown,
         'payment_rows': _cashier_shift_payment_rows(restaurant_orders, folios),
+    }
+
+
+def get_pos_manager_analytics(*, date_from=None, date_to=None):
+    paid_orders = RestaurantOrder.objects.filter(status='paid')
+    if date_from:
+        paid_orders = paid_orders.filter(paid_at__date__gte=date_from)
+    if date_to:
+        paid_orders = paid_orders.filter(paid_at__date__lte=date_to)
+
+    paid_orders = paid_orders.select_related('table').prefetch_related('payments', 'lines', 'lines__menu_item')
+    order_count = paid_orders.count()
+    gross_sales = paid_orders.aggregate(total=Sum('subtotal'))['total'] or Decimal('0.00')
+    tax_total = paid_orders.aggregate(total=Sum('tax_total'))['total'] or Decimal('0.00')
+    service_charge_total = paid_orders.aggregate(total=Sum('service_charge_total'))['total'] or Decimal('0.00')
+    discount_total = paid_orders.aggregate(total=Sum('discount_total'))['total'] or Decimal('0.00')
+    net_sales = paid_orders.aggregate(total=Sum('grand_total'))['total'] or Decimal('0.00')
+
+    payment_buckets = {}
+    for payment in RestaurantOrderPayment.objects.filter(order__in=paid_orders):
+        bucket = payment_buckets.setdefault(payment.payment_method, {'payment_method': payment.payment_method, 'count': 0, 'amount': Decimal('0.00')})
+        bucket['count'] += 1
+        bucket['amount'] += payment.amount
+
+    daily_buckets = {}
+    table_buckets = {}
+    item_buckets = {}
+    for order in paid_orders:
+        business_date = timezone.localtime(order.paid_at).date() if order.paid_at else order.created_at.date()
+        daily = daily_buckets.setdefault(str(business_date), {'date': business_date, 'orders': 0, 'net_sales': Decimal('0.00')})
+        daily['orders'] += 1
+        daily['net_sales'] += order.grand_total
+
+        table_label = f'Table {order.table.table_number}' if order.table_id else order.get_order_type_display()
+        table_key = str(order.table_id or order.order_type)
+        table = table_buckets.setdefault(table_key, {'label': table_label, 'orders': 0, 'net_sales': Decimal('0.00')})
+        table['orders'] += 1
+        table['net_sales'] += order.grand_total
+
+        for line in order.lines.all():
+            if line.status == 'cancelled':
+                continue
+            item_key = str(line.menu_item_id)
+            item = item_buckets.setdefault(
+                item_key,
+                {
+                    'item_id': item_key,
+                    'item_name': line.menu_item.name,
+                    'quantity': 0,
+                    'net_sales': Decimal('0.00'),
+                },
+            )
+            item['quantity'] += line.quantity
+            item['net_sales'] += line.line_total
+
+    approvals = RestaurantOrderApproval.objects.all()
+    if date_from:
+        approvals = approvals.filter(created_at__date__gte=date_from)
+    if date_to:
+        approvals = approvals.filter(created_at__date__lte=date_to)
+
+    reprints = RestaurantReceiptReprint.objects.all()
+    if date_from:
+        reprints = reprints.filter(reprinted_at__date__gte=date_from)
+    if date_to:
+        reprints = reprints.filter(reprinted_at__date__lte=date_to)
+
+    closed_shifts = CashierShift.objects.filter(status='closed')
+    if date_from:
+        closed_shifts = closed_shifts.filter(business_date__gte=date_from)
+    if date_to:
+        closed_shifts = closed_shifts.filter(business_date__lte=date_to)
+    total_variance = closed_shifts.aggregate(total=Sum('total_variance'))['total'] or Decimal('0.00')
+
+    approval_counts = {
+        row['action_type']: row['count']
+        for row in approvals.values('action_type').annotate(count=Count('id'))
+    }
+
+    return {
+        'date_from': date_from,
+        'date_to': date_to,
+        'summary': {
+            'orders': order_count,
+            'gross_sales': gross_sales,
+            'tax_total': tax_total,
+            'service_charge_total': service_charge_total,
+            'discount_total': discount_total,
+            'net_sales': net_sales,
+            'average_check': net_sales / order_count if order_count else Decimal('0.00'),
+        },
+        'payments': sorted(payment_buckets.values(), key=lambda row: row['amount'], reverse=True),
+        'daily_sales': sorted(daily_buckets.values(), key=lambda row: row['date']),
+        'top_items': sorted(item_buckets.values(), key=lambda row: row['net_sales'], reverse=True)[:10],
+        'table_performance': sorted(table_buckets.values(), key=lambda row: row['net_sales'], reverse=True)[:10],
+        'exceptions': {
+            'pending_approvals': approvals.filter(status='pending').count(),
+            'approved_voids': approval_counts.get('void_line', 0),
+            'discount_approvals': approval_counts.get('discount', 0),
+            'complimentary_approvals': approval_counts.get('complimentary', 0),
+            'receipt_reprints': reprints.count(),
+            'closed_shifts': closed_shifts.count(),
+            'total_variance': total_variance,
+        },
     }
 
 

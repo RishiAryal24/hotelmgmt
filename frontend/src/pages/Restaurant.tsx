@@ -20,6 +20,7 @@ import {
   useMenuModifierGroups,
   useMenuModifiers,
   useMenuRecipeIngredients,
+  usePOSManagerAnalytics,
   useReprintRestaurantReceipt,
   useRequestRestaurantOrderApproval,
   useRestaurantOrderApprovalDecision,
@@ -84,6 +85,16 @@ const emptyVoidForm = { line: '', reason: '' };
 const emptyDiscountForm = { discount_amount: '', reason: '' };
 const emptyComplimentaryForm = { reason: '' };
 const kitchenStatuses = ['all', 'open', 'preparing', 'ready', 'served'] as const;
+
+const getDefaultAnalyticsRange = () => {
+  const today = new Date();
+  const from = new Date(today);
+  from.setDate(today.getDate() - 6);
+  return {
+    date_from: from.toISOString().slice(0, 10),
+    date_to: today.toISOString().slice(0, 10),
+  };
+};
 
 const getMutationErrorMessage = (error: unknown, fallback: string) => {
   const responseData = (error as { response?: { data?: unknown } })?.response?.data;
@@ -162,6 +173,8 @@ const Restaurant: React.FC = () => {
   const [receiptOrder, setReceiptOrder] = useState<RestaurantOrder | null>(null);
   const [historySearch, setHistorySearch] = useState('');
   const [kitchenFilter, setKitchenFilter] = useState<(typeof kitchenStatuses)[number]>('all');
+  const [analyticsRange, setAnalyticsRange] = useState(getDefaultAnalyticsRange);
+  const { data: posAnalytics, isLoading: posAnalyticsLoading } = usePOSManagerAnalytics(analyticsRange);
 
   const activeOrders = orders?.filter((order) => order.status !== 'paid' && order.status !== 'cancelled') || [];
   const historyOrders =
@@ -200,6 +213,7 @@ const Restaurant: React.FC = () => {
     { id: 'tables', label: 'Tables', count: tables?.length || 0 },
     { id: 'approvals', label: 'Approvals', count: pendingApprovals.length },
     { id: 'kitchen', label: 'Kitchen', count: tickets?.filter((ticket) => ticket.status !== 'served').length || 0 },
+    { id: 'analytics', label: 'Analytics' },
     { id: 'history', label: 'History', count: historyOrders.length },
   ];
 
@@ -776,6 +790,121 @@ const Restaurant: React.FC = () => {
             ))}
             {filteredTickets.length === 0 && <tr><td colSpan={7} className="py-6 text-center text-slate-500">No kitchen tickets for this filter.</td></tr>}
           </RowsTable>
+        </section>
+      )}
+
+      {activeTab === 'analytics' && (
+        <section className="space-y-5">
+          <div className="rounded-3xl bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="font-bold text-slate-900">POS Manager Analytics</h2>
+                <p className="mt-1 text-sm text-slate-500">Sales, payments, item mix, table performance, and exception signals.</p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <input type="date" value={analyticsRange.date_from} onChange={(e) => setAnalyticsRange({ ...analyticsRange, date_from: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                <input type="date" value={analyticsRange.date_to} onChange={(e) => setAnalyticsRange({ ...analyticsRange, date_to: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {[
+              ['Net Sales', posAnalytics?.summary.net_sales || '0.00'],
+              ['Gross Sales', posAnalytics?.summary.gross_sales || '0.00'],
+              ['Discounts', posAnalytics?.summary.discount_total || '0.00'],
+              ['Average Check', posAnalytics?.summary.average_check || '0.00'],
+            ].map(([label, value]) => (
+              <article key={label} className="rounded-3xl bg-white p-5 shadow-sm">
+                <p className="text-sm text-slate-500">{label}</p>
+                <p className="mt-2 text-2xl font-bold text-slate-900">{formatMoney(value, settings?.currency)}</p>
+              </article>
+            ))}
+          </div>
+
+          <div className="grid gap-5 xl:grid-cols-2">
+            <section className="rounded-3xl bg-white p-5 shadow-sm">
+              <h3 className="font-bold text-slate-900">Sales Trend</h3>
+              <div className="mt-4 space-y-3">
+                {(posAnalytics?.daily_sales || []).map((row) => {
+                  const maxSales = Math.max(...(posAnalytics?.daily_sales || []).map((item) => Number(item.net_sales || 0)), 1);
+                  const width = Math.max(5, (Number(row.net_sales || 0) / maxSales) * 100);
+                  return (
+                    <div key={row.date} className="grid gap-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-medium text-slate-700">{row.date}</span>
+                        <span className="text-slate-500">{row.orders} orders | {formatMoney(row.net_sales, settings?.currency)}</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-slate-100">
+                        <div className="h-2 rounded-full bg-emerald-600" style={{ width: `${width}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+                {!posAnalytics?.daily_sales.length && !posAnalyticsLoading && <p className="text-sm text-slate-500">No paid sales in this date range.</p>}
+              </div>
+            </section>
+
+            <section className="rounded-3xl bg-white p-5 shadow-sm">
+              <h3 className="font-bold text-slate-900">Payment Mix</h3>
+              <div className="mt-4 space-y-3">
+                {(posAnalytics?.payments || []).map((row) => (
+                  <div key={row.payment_method} className="flex items-center justify-between border-b border-slate-100 pb-2 text-sm">
+                    <span className="capitalize text-slate-700">{row.payment_method.replace('_', ' ')}</span>
+                    <span className="font-semibold text-slate-900">{row.count} | {formatMoney(row.amount, settings?.currency)}</span>
+                  </div>
+                ))}
+                {!posAnalytics?.payments.length && !posAnalyticsLoading && <p className="text-sm text-slate-500">No payments in this date range.</p>}
+              </div>
+            </section>
+          </div>
+
+          <div className="grid gap-5 xl:grid-cols-3">
+            <RowsTable headers={['Item', 'Qty', 'Sales']}>
+              {(posAnalytics?.top_items || []).map((row) => (
+                <tr key={row.item_id}>
+                  <td className="py-3 pr-4 font-medium text-slate-900">{row.item_name}</td>
+                  <td className="py-3 pr-4">{row.quantity}</td>
+                  <td className="py-3 pr-4 font-semibold">{formatMoney(row.net_sales, settings?.currency)}</td>
+                </tr>
+              ))}
+              {!posAnalytics?.top_items.length && <tr><td colSpan={3} className="py-6 text-center text-slate-500">No item sales yet.</td></tr>}
+            </RowsTable>
+
+            <RowsTable headers={['Location', 'Orders', 'Sales']}>
+              {(posAnalytics?.table_performance || []).map((row) => (
+                <tr key={row.label}>
+                  <td className="py-3 pr-4 font-medium text-slate-900">{row.label}</td>
+                  <td className="py-3 pr-4">{row.orders}</td>
+                  <td className="py-3 pr-4 font-semibold">{formatMoney(row.net_sales, settings?.currency)}</td>
+                </tr>
+              ))}
+              {!posAnalytics?.table_performance.length && <tr><td colSpan={3} className="py-6 text-center text-slate-500">No table sales yet.</td></tr>}
+            </RowsTable>
+
+            <section className="rounded-3xl bg-white p-5 shadow-sm">
+              <h3 className="font-bold text-slate-900">Exceptions</h3>
+              <div className="mt-4 grid gap-3 text-sm">
+                {[
+                  ['Pending approvals', posAnalytics?.exceptions.pending_approvals || 0],
+                  ['Void approvals', posAnalytics?.exceptions.approved_voids || 0],
+                  ['Discount approvals', posAnalytics?.exceptions.discount_approvals || 0],
+                  ['Complimentary approvals', posAnalytics?.exceptions.complimentary_approvals || 0],
+                  ['Receipt reprints', posAnalytics?.exceptions.receipt_reprints || 0],
+                  ['Closed shifts', posAnalytics?.exceptions.closed_shifts || 0],
+                ].map(([label, value]) => (
+                  <div key={label} className="flex items-center justify-between border-b border-slate-100 pb-2">
+                    <span className="text-slate-600">{label}</span>
+                    <span className="font-semibold text-slate-900">{value}</span>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-slate-600">Cashier variance</span>
+                  <span className="font-semibold text-slate-900">{formatMoney(posAnalytics?.exceptions.total_variance || '0.00', settings?.currency)}</span>
+                </div>
+              </div>
+            </section>
+          </div>
         </section>
       )}
 

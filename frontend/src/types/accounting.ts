@@ -1,3 +1,5 @@
+import { Vendor } from './inventory';
+
 export interface Account {
   id: string;
   code: string;
@@ -20,6 +22,78 @@ export interface FiscalPeriod {
     email: string;
     full_name: string;
   } | null;
+}
+
+export interface TaxRate {
+  id: string;
+  code: string;
+  name: string;
+  tax_type: 'sales' | 'purchase' | 'both';
+  rate: string;
+  account: string;
+  account_details?: Account;
+  description: string;
+  is_default: boolean;
+  is_active: boolean;
+}
+
+export interface TaxRateCreateInput {
+  code: string;
+  name: string;
+  tax_type: TaxRate['tax_type'];
+  rate: string;
+  account: string;
+  description?: string;
+  is_default?: boolean;
+  is_active?: boolean;
+}
+
+export interface VendorBillLine {
+  id?: string;
+  vendor_bill?: string;
+  account: string;
+  account_details?: Account;
+  tax_rate?: string | null;
+  tax_rate_details?: TaxRate | null;
+  description: string;
+  amount: string;
+  tax_amount: string;
+  line_total?: string;
+}
+
+export interface VendorBill {
+  id: string;
+  bill_number: string;
+  vendor: string;
+  vendor_details?: Vendor;
+  invoice_number: string;
+  bill_date: string;
+  due_date: string | null;
+  status: 'draft' | 'posted' | 'void';
+  subtotal: string;
+  tax_total: string;
+  total_amount: string;
+  notes: string;
+  journal_entry: string | null;
+  journal_entry_number?: string | null;
+  posted_by: string | null;
+  posted_at: string | null;
+  lines: VendorBillLine[];
+}
+
+export interface VendorBillCreateInput {
+  vendor: string;
+  invoice_number?: string;
+  bill_date?: string;
+  due_date?: string;
+  notes?: string;
+  lines: Array<{
+    account: string;
+    tax_rate?: string | null;
+    description: string;
+    amount: string;
+    tax_amount?: string;
+  }>;
 }
 
 export interface JournalLine {

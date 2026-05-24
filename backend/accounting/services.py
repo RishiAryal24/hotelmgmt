@@ -166,7 +166,7 @@ def get_balance_sheet(*, as_of=None):
 
 
 @transaction.atomic
-def post_journal_entry(*, description: str, lines: list[dict], source_module: str = '', source_id: str = '', posted_by=None):
+def post_journal_entry(*, description: str, lines: list[dict], source_module: str = '', source_id: str = '', posted_by=None, entry_date=None):
     debit_total = sum(Decimal(str(line.get('debit', '0') or '0')) for line in lines)
     credit_total = sum(Decimal(str(line.get('credit', '0') or '0')) for line in lines)
 
@@ -174,7 +174,7 @@ def post_journal_entry(*, description: str, lines: list[dict], source_module: st
         raise ValueError('Journal entry must include debit and credit amounts.')
     if debit_total != credit_total:
         raise ValueError('Journal entry is not balanced.')
-    entry_date = date.today()
+    entry_date = entry_date or date.today()
     fiscal_period = ensure_open_fiscal_period(entry_date)
 
     entry = JournalEntry.objects.create(
@@ -198,6 +198,67 @@ def post_journal_entry(*, description: str, lines: list[dict], source_module: st
         )
 
     return entry
+
+
+@transaction.atomic
+def post_vendor_bill(vendor_bill, posted_by=None):
+    if vendor_bill.status != 'draft':
+        raise ValueError('Only draft vendor bills can be posted.')
+    vendor_bill.recalculate_totals()
+    if vendor_bill.total_amount <= 0:
+        raise ValueError('Vendor bill total must be greater than zero.')
+    if JournalEntry.objects.filter(source_module='vendor_bill', source_id=str(vendor_bill.id), status='posted').exists():
+        raise ValueError('Vendor bill is already posted.')
+
+    seed_default_accounts()
+    debit_lines = []
+    for line in vendor_bill.lines.select_related('account', 'tax_rate', 'tax_rate__account'):
+        if line.amount <= 0:
+            raise ValueError('Vendor bill lines must have positive amounts.')
+        debit_lines.append(
+            {
+                'account': line.account,
+                'description': line.description,
+                'debit': line.amount,
+                'credit': 0,
+            }
+        )
+        if line.tax_amount:
+            if not line.tax_rate_id:
+                raise ValueError('Tax amount requires a tax rate.')
+            debit_lines.append(
+                {
+                    'account': line.tax_rate.account,
+                    'description': f'{line.tax_rate.name} on {line.description}',
+                    'debit': line.tax_amount,
+                    'credit': 0,
+                }
+            )
+
+    journal_entry = post_journal_entry(
+        description=f'Vendor bill {vendor_bill.bill_number}',
+        source_module='vendor_bill',
+        source_id=str(vendor_bill.id),
+        posted_by=posted_by,
+        entry_date=vendor_bill.bill_date,
+        lines=[
+            *debit_lines,
+            {
+                'account': '2000',
+                'description': f'Accounts payable for {vendor_bill.vendor.name}',
+                'debit': 0,
+                'credit': vendor_bill.total_amount,
+            },
+        ],
+    )
+    vendor_bill.status = 'posted'
+    vendor_bill.journal_entry = journal_entry
+    vendor_bill.posted_by = posted_by
+    from django.utils import timezone
+
+    vendor_bill.posted_at = timezone.now()
+    vendor_bill.save(update_fields=['status', 'journal_entry', 'posted_by', 'posted_at', 'subtotal', 'tax_total', 'total_amount', 'updated_at'])
+    return vendor_bill
 
 
 def post_restaurant_settlement(order, posted_by=None):

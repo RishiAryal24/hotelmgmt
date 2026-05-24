@@ -5,9 +5,10 @@ from django.db import connection
 from django_tenants.test.cases import TenantTestCase
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from accounting.models import FiscalPeriod, JournalEntry, JournalLine
+from accounting.models import FiscalPeriod, JournalEntry, JournalLine, TaxRate, VendorBill
 from accounting.services import get_balance_sheet, get_profit_and_loss, get_trial_balance, post_journal_entry, seed_default_accounts
-from accounting.views import FiscalPeriodViewSet, JournalEntryViewSet
+from accounting.views import FiscalPeriodViewSet, JournalEntryViewSet, TaxRateViewSet, VendorBillViewSet
+from inventory.models import Vendor
 from users.models import PlatformUser
 
 
@@ -181,6 +182,119 @@ class AccountingReportingTests(TenantTestCase):
         period.refresh_from_db()
         self.assertEqual(period.status, 'open')
         self.assertIsNone(period.closed_by)
+
+    def test_tax_rate_endpoint_creates_liability_backed_rate(self):
+        tax_account = seed_default_accounts()['2100']
+        request = self.factory.post(
+            '/accounting/tax-rates/',
+            {
+                'code': 'VAT13',
+                'name': 'VAT 13%',
+                'tax_type': 'sales',
+                'rate': '13.000',
+                'account': str(tax_account.id),
+                'is_default': True,
+                'is_active': True,
+            },
+            format='json',
+        )
+        force_authenticate(request, user=self.user)
+        response = TaxRateViewSet.as_view({'post': 'create'})(request)
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(TaxRate.objects.filter(code='VAT13', account=tax_account).exists())
+        self.assertEqual(response.data['account_details']['code'], '2100')
+
+    def test_tax_rate_rejects_non_liability_control_account(self):
+        cash_account = seed_default_accounts()['1000']
+        request = self.factory.post(
+            '/accounting/tax-rates/',
+            {
+                'code': 'BADTAX',
+                'name': 'Bad Tax',
+                'tax_type': 'sales',
+                'rate': '5.000',
+                'account': str(cash_account.id),
+                'is_active': True,
+            },
+            format='json',
+        )
+        force_authenticate(request, user=self.user)
+        response = TaxRateViewSet.as_view({'post': 'create'})(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('liability', str(response.data).lower())
+
+    def test_vendor_bill_create_and_post_creates_accounts_payable_journal(self):
+        accounts = seed_default_accounts()
+        vendor = Vendor.objects.create(name='Laundry Supplier')
+        tax_rate = TaxRate.objects.create(
+            code='VAT13',
+            name='VAT 13%',
+            tax_type='purchase',
+            rate=Decimal('13.000'),
+            account=accounts['2100'],
+        )
+        create_request = self.factory.post(
+            '/accounting/vendor-bills/',
+            {
+                'vendor': str(vendor.id),
+                'invoice_number': 'INV-1001',
+                'bill_date': '2026-05-18',
+                'due_date': '2026-06-01',
+                'notes': 'Laundry service bill',
+                'lines': [
+                    {
+                        'account': str(accounts['5000'].id),
+                        'tax_rate': str(tax_rate.id),
+                        'description': 'Laundry supplies',
+                        'amount': '1000.00',
+                        'tax_amount': '130.00',
+                    }
+                ],
+            },
+            format='json',
+        )
+        force_authenticate(create_request, user=self.user)
+        create_response = VendorBillViewSet.as_view({'post': 'create'})(create_request)
+
+        self.assertEqual(create_response.status_code, 201)
+        bill = VendorBill.objects.get(id=create_response.data['id'])
+        self.assertEqual(bill.total_amount, Decimal('1130.00'))
+        self.assertEqual(bill.status, 'draft')
+
+        post_request = self.factory.post(f'/accounting/vendor-bills/{bill.id}/post/', {}, format='json')
+        force_authenticate(post_request, user=self.user)
+        post_response = VendorBillViewSet.as_view({'post': 'post_bill'})(post_request, pk=str(bill.id))
+
+        self.assertEqual(post_response.status_code, 200)
+        bill.refresh_from_db()
+        self.assertEqual(bill.status, 'posted')
+        journal = JournalEntry.objects.get(source_module='vendor_bill', source_id=str(bill.id))
+        self.assertEqual(journal.entry_date, date(2026, 5, 18))
+        self.assertEqual(JournalLine.objects.get(journal_entry=journal, account__code='5000').debit, Decimal('1000.00'))
+        self.assertEqual(JournalLine.objects.get(journal_entry=journal, account__code='2100').debit, Decimal('130.00'))
+        self.assertEqual(JournalLine.objects.get(journal_entry=journal, account__code='2000').credit, Decimal('1130.00'))
+
+    def test_closed_fiscal_period_blocks_vendor_bill_posting(self):
+        accounts = seed_default_accounts()
+        vendor = Vendor.objects.create(name='Closed Period Supplier')
+        bill = VendorBill.objects.create(vendor=vendor, invoice_number='INV-CLOSED', bill_date=date(2026, 5, 20))
+        bill.lines.create(account=accounts['5000'], description='Blocked bill', amount=Decimal('50.00'))
+        bill.recalculate_totals()
+        FiscalPeriod.objects.create(
+            name='Closed May 2026',
+            start_date=date(2026, 5, 1),
+            end_date=date(2026, 5, 31),
+            status='closed',
+        )
+
+        request = self.factory.post(f'/accounting/vendor-bills/{bill.id}/post/', {}, format='json')
+        force_authenticate(request, user=self.user)
+        response = VendorBillViewSet.as_view({'post': 'post_bill'})(request, pk=str(bill.id))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('closed', str(response.data).lower())
 
     def test_trial_balance_endpoint_returns_report(self):
         self._create_entry(

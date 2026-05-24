@@ -178,6 +178,18 @@ class RestaurantReceiptReprintRequestSerializer(serializers.Serializer):
     reason = serializers.CharField(required=False, allow_blank=True, max_length=255)
 
 
+class RestaurantAnalyticsQuerySerializer(serializers.Serializer):
+    date_from = serializers.DateField(required=False)
+    date_to = serializers.DateField(required=False)
+
+    def validate(self, attrs):
+        date_from = attrs.get('date_from')
+        date_to = attrs.get('date_to')
+        if date_from and date_to and date_from > date_to:
+            raise serializers.ValidationError('date_from must be on or before date_to.')
+        return attrs
+
+
 class RestaurantOrderApprovalRequestSerializer(serializers.Serializer):
     line = serializers.PrimaryKeyRelatedField(queryset=RestaurantOrderLine.objects.all(), required=False, allow_null=True)
     discount_amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0.00'), required=False)

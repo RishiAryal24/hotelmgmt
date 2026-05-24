@@ -141,7 +141,7 @@ The system is now a connected development-stage hospitality ERP with strong tena
 
 - [x] RatePlan and Package models, serializers, viewsets, and URLs.
 - [x] Dynamic pricing rules.
-- [ ] Package booking polish and reporting.
+- [x] Package booking polish, package list visibility, and reporting.
 
 #### Night Audit
 
@@ -273,6 +273,7 @@ The system is now a connected development-stage hospitality ERP with strong tena
 - Vendor bill capture and posting is implemented with draft bills, expense/asset lines, purchase tax handling, AP journal posting, closed-period protection, focused tests, and an Accounting UI tab.
 - Broader POS manager analytics is implemented with sales trend, payment mix, top item, table/location performance, and exception summaries in the Restaurant UI.
 - Dynamic pricing rules are implemented with room-type/rate-plan scoped surcharges and discounts, date ranges, weekday filters, occupancy conditions, quote APIs, booking total integration, extension pricing, focused tests, and a Bookings pricing UI.
+- Package booking polish and reporting is implemented with package-backed quote totals, package selection in reservations and walk-ins, package creation UI, visible package catalog/listing, package revenue reporting, and focused booking tests.
 - Walk-in booking polish is implemented with a faster front-desk mode, automatic today/tomorrow stay defaults, guest safety checks, room readiness context, and immediate folio review after check-in.
 - Checkout exception handling is implemented with readiness APIs, checkout blocking for missing/closed folios and unresolved restaurant postings, and front-desk blocker visibility.
 - Room transfer rate adjustment policy is implemented with keep-rate, upgrade-charge, complimentary-upgrade, and downgrade-credit options plus folio adjustment preview.
@@ -280,7 +281,7 @@ The system is now a connected development-stage hospitality ERP with strong tena
 
 ## Next Enhancement
 
-Recommended next enhancement: **package booking polish and reporting**.
+Recommended next enhancement: **night audit scheduler setup and review UI**.
 
 Suggested order:
 
@@ -288,3 +289,4 @@ Suggested order:
 2. Add vendor bill capture and posting. Done.
 3. Add broader POS manager analytics. Done.
 4. Add dynamic pricing rules. Done.
+5. Add package booking polish, package list visibility, and reporting. Done.

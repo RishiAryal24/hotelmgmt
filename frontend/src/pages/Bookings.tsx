@@ -12,6 +12,7 @@ import {
   useBookings,
   useCreateBooking,
   useCreateDynamicPricingRule,
+  useCreatePackage,
   useCreateGuestCommunication,
   useCreateGuest,
   useCreateGuestFollowUp,
@@ -24,6 +25,8 @@ import {
   useGuestHistory,
   useGuests,
   useRatePlans,
+  usePackageBookingReport,
+  usePackages,
   useRooms,
   useRoomTypes,
   useUpdateGuest,
@@ -31,7 +34,7 @@ import {
 import { usePermissions } from '../hooks/permissions';
 import { useCurrentCashierShift } from '../hooks/restaurant';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
-import { Booking, DynamicPricingRule, Guest, GuestCommunication, GuestFolio, GuestFolioLine, GuestFollowUpReminder } from '../types/bookings';
+import { Booking, DynamicPricingRule, Guest, GuestCommunication, GuestFolio, GuestFolioLine, GuestFollowUpReminder, Package } from '../types/bookings';
 
 const emptyGuest = {
   first_name: '',
@@ -51,6 +54,7 @@ const emptyBooking = {
   room: '',
   guest: '',
   rate_plan: '',
+  package: '',
   check_in_date: '',
   check_out_date: '',
   number_of_guests: 1,
@@ -71,6 +75,14 @@ const emptyPricingRule = {
   max_occupancy: '',
   days_of_week: [] as number[],
   priority: 100,
+  is_active: true,
+};
+
+const emptyPackage = {
+  name: '',
+  description: '',
+  total_price: '',
+  includesText: '',
   is_active: true,
 };
 
@@ -168,6 +180,7 @@ const Bookings: React.FC = () => {
   const { data: roomTypes } = useRoomTypes();
   const { data: ratePlans } = useRatePlans();
   const { data: pricingRules } = useDynamicPricingRules();
+  const { data: packages } = usePackages();
   const createGuest = useCreateGuest();
   const updateGuest = useUpdateGuest();
   const createCommunication = useCreateGuestCommunication();
@@ -176,6 +189,7 @@ const Bookings: React.FC = () => {
   const createBooking = useCreateBooking();
   const createWalkInBooking = useCreateWalkInBooking();
   const createPricingRule = useCreateDynamicPricingRule();
+  const createPackage = useCreatePackage();
   const bookingAction = useBookingAction();
   const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState<BookingTab>((searchParams.get('tab') as BookingTab | null) || 'reservations');
@@ -211,6 +225,8 @@ const Bookings: React.FC = () => {
     emptyBooking,
   );
   const [pricingRuleForm, setPricingRuleForm] = useState(emptyPricingRule);
+  const [packageForm, setPackageForm] = useState(emptyPackage);
+  const [packageReportRange, setPackageReportRange] = useState({ date_from: '', date_to: '' });
   const [bookingFormError, setBookingFormError] = useState('');
   const [availabilityRange, setAvailabilityRange] = useState({ check_in_date: '', check_out_date: '' });
 
@@ -231,8 +247,10 @@ const Bookings: React.FC = () => {
     check_in_date: bookingForm.check_in_date,
     check_out_date: bookingForm.check_out_date,
     rate_plan: bookingForm.rate_plan || undefined,
+    package: bookingForm.package || undefined,
     number_of_guests: bookingForm.number_of_guests,
   });
+  const { data: packageReport } = usePackageBookingReport(packageReportRange);
   const { data: guestHistory, isFetching: guestHistoryLoading } = useGuestHistory(selectedGuestId);
   const { data: guestCommunications, isFetching: guestCommunicationsLoading } = useGuestCommunications(selectedGuestId);
   const { data: guestFollowUps, isFetching: guestFollowUpsLoading } = useGuestFollowUps({ guest: selectedGuestId }, Boolean(selectedGuestId));
@@ -455,6 +473,7 @@ const Bookings: React.FC = () => {
     const bookingPayload = {
       ...bookingForm,
       rate_plan: bookingForm.rate_plan || null,
+      package: bookingForm.package || null,
     };
     if (bookingForm.status === 'checked_in') {
       createWalkInBooking.mutate(bookingPayload, {
@@ -491,6 +510,23 @@ const Bookings: React.FC = () => {
         is_active: pricingRuleForm.is_active,
       },
       { onSuccess: () => setPricingRuleForm(emptyPricingRule) },
+    );
+  };
+
+  const handleCreatePackage = (e: React.FormEvent) => {
+    e.preventDefault();
+    createPackage.mutate(
+      {
+        name: packageForm.name,
+        description: packageForm.description,
+        total_price: packageForm.total_price || '0',
+        includes: packageForm.includesText
+          .split('\n')
+          .map((item) => item.trim())
+          .filter(Boolean),
+        is_active: packageForm.is_active,
+      },
+      { onSuccess: () => setPackageForm(emptyPackage) },
     );
   };
 
@@ -1433,6 +1469,97 @@ const Bookings: React.FC = () => {
             </div>
             {pricingRules?.length === 0 && <p className="p-4 text-sm text-slate-600">No pricing rules yet.</p>}
           </div>
+          <div className="grid gap-5 xl:col-span-2 xl:grid-cols-[380px_minmax(0,1fr)]">
+            {can('bookings.reservation.create') && (
+              <form onSubmit={handleCreatePackage} className="rounded-2xl border border-slate-200 bg-white p-4">
+                <h2 className="font-semibold text-slate-900">Booking Package</h2>
+                <div className="mt-4 grid gap-3">
+                  <input value={packageForm.name} onChange={(e) => setPackageForm({ ...packageForm, name: e.target.value })} placeholder="Romance Weekend" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+                  <input type="number" step="0.01" min="0" value={packageForm.total_price} onChange={(e) => setPackageForm({ ...packageForm, total_price: e.target.value })} placeholder="Total price" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+                  <textarea value={packageForm.description} onChange={(e) => setPackageForm({ ...packageForm, description: e.target.value })} placeholder="Description" className="min-h-[70px] rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  <textarea value={packageForm.includesText} onChange={(e) => setPackageForm({ ...packageForm, includesText: e.target.value })} placeholder="Included item per line" className="min-h-[90px] rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input type="checkbox" checked={packageForm.is_active} onChange={(e) => setPackageForm({ ...packageForm, is_active: e.target.checked })} className="h-4 w-4 rounded border-slate-300" />
+                    Active
+                  </label>
+                  <button type="submit" disabled={createPackage.status === 'pending'} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">
+                    {createPackage.status === 'pending' ? 'Saving...' : 'Create package'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            <div className="grid gap-5">
+              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                <div className="border-b border-slate-100 px-4 py-3">
+                  <h2 className="font-semibold text-slate-900">Packages</h2>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[640px] text-left text-sm">
+                    <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                      <tr><th className="px-4 py-3">Package</th><th className="px-4 py-3">Includes</th><th className="px-4 py-3 text-right">Price</th><th className="px-4 py-3">Status</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {packages?.map((pkg) => (
+                        <tr key={pkg.id}>
+                          <td className="px-4 py-3">
+                            <p className="font-medium text-slate-900">{pkg.name}</p>
+                            {pkg.description && <p className="mt-1 text-xs text-slate-500">{pkg.description}</p>}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {pkg.includes.length > 0 ? pkg.includes.join(', ') : '-'}
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold text-slate-900">{formatMoney(pkg.total_price, settings?.currency)}</td>
+                          <td className="px-4 py-3">
+                            <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${pkg.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                              {pkg.is_active ? 'Active' : 'Inactive'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {packages?.length === 0 && <p className="p-4 text-sm text-slate-600">No packages yet.</p>}
+              </div>
+
+              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                <div className="border-b border-slate-100 px-4 py-3">
+                  <h2 className="font-semibold text-slate-900">Package Report</h2>
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    <input type="date" value={packageReportRange.date_from} onChange={(e) => setPackageReportRange({ ...packageReportRange, date_from: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                    <input type="date" value={packageReportRange.date_to} onChange={(e) => setPackageReportRange({ ...packageReportRange, date_to: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  </div>
+                </div>
+                <div className="grid gap-3 border-b border-slate-100 p-4 md:grid-cols-2">
+                  <div className="rounded-xl bg-slate-50 p-3">
+                    <p className="text-xs font-medium uppercase text-slate-500">Package bookings</p>
+                    <p className="mt-1 text-xl font-semibold text-slate-900">{packageReport?.totals.package_bookings || 0}</p>
+                  </div>
+                  <div className="rounded-xl bg-slate-50 p-3">
+                    <p className="text-xs font-medium uppercase text-slate-500">Package revenue</p>
+                    <p className="mt-1 text-xl font-semibold text-slate-900">{formatMoney(packageReport?.totals.package_revenue || 0, settings?.currency)}</p>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[520px] text-left text-sm">
+                    <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                      <tr><th className="px-4 py-3">Package</th><th className="px-4 py-3 text-right">Bookings</th><th className="px-4 py-3 text-right">Revenue</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {packageReport?.rows.map((row) => (
+                        <tr key={row.package_id || 'no-package'}>
+                          <td className="px-4 py-3 font-medium text-slate-900">{row.package_name}</td>
+                          <td className="px-4 py-3 text-right">{row.bookings}</td>
+                          <td className="px-4 py-3 text-right font-semibold">{formatMoney(row.revenue, settings?.currency)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
       )}
 
@@ -1663,11 +1790,19 @@ const Bookings: React.FC = () => {
                 </option>
               ))}
             </select>
-            <select value={bookingForm.rate_plan || ''} onChange={(e) => setBookingForm({ ...bookingForm, rate_plan: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+            <select value={bookingForm.rate_plan || ''} onChange={(e) => setBookingForm({ ...bookingForm, rate_plan: e.target.value, package: e.target.value ? '' : bookingForm.package })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
               <option value="">Standard room rate</option>
               {ratePlans?.filter((ratePlan) => !selectedRoom || ratePlan.room_type === selectedRoom.room_type).map((ratePlan) => (
                 <option key={ratePlan.id} value={ratePlan.id}>
                   {ratePlan.name} - {formatMoney(ratePlan.base_rate, settings?.currency)}
+                </option>
+              ))}
+            </select>
+            <select value={bookingForm.package || ''} onChange={(e) => setBookingForm({ ...bookingForm, package: e.target.value, rate_plan: e.target.value ? '' : bookingForm.rate_plan })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+              <option value="">No package</option>
+              {packages?.filter((pkg) => pkg.is_active).map((pkg) => (
+                <option key={pkg.id} value={pkg.id}>
+                  {pkg.name} - {formatMoney(pkg.total_price, settings?.currency)}
                 </option>
               ))}
             </select>
@@ -1705,6 +1840,12 @@ const Bookings: React.FC = () => {
                 {bookingQuote && (
                   <div className="mt-3 overflow-x-auto rounded-xl bg-white p-3">
                     <p className="mb-2 text-xs font-semibold uppercase text-slate-500">Nightly pricing</p>
+                    {bookingQuote.package && (
+                      <div className="mb-3 rounded-lg bg-emerald-50 p-3 text-xs text-emerald-800">
+                        <p className="font-semibold">{bookingQuote.package.name} package total {formatMoney(bookingQuote.package.total_price, settings?.currency)}</p>
+                        {bookingQuote.package.includes.length > 0 && <p className="mt-1">{bookingQuote.package.includes.join(', ')}</p>}
+                      </div>
+                    )}
                     <table className="w-full min-w-[520px] text-left text-xs">
                       <thead className="uppercase text-slate-500">
                         <tr><th className="py-2 pr-3">Date</th><th className="py-2 pr-3 text-right">Base</th><th className="py-2 pr-3">Rules</th><th className="py-2 pr-3 text-right">Final</th></tr>

@@ -28,6 +28,7 @@ from bookings.serializers import (
     GuestPointsSerializer,
     GuestSerializer,
     LoyaltyProgramSerializer,
+    PackageReportQuerySerializer,
     PackageSerializer,
     RatePlanSerializer,
     RoomSerializer,
@@ -561,7 +562,7 @@ class PackageViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def report(self, request):
-        serializer = AccountingDateRangeLikeSerializer(data=request.query_params)
+        serializer = PackageReportQuerySerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
         return Response(
             get_package_booking_report(

@@ -76,6 +76,7 @@ class BookingSerializer(serializers.ModelSerializer):
     def validate(self, data):
         room = data.get('room') or getattr(self.instance, 'room', None)
         rate_plan = data.get('rate_plan') or getattr(self.instance, 'rate_plan', None)
+        package = data.get('package') or getattr(self.instance, 'package', None)
         guest = data.get('guest') or getattr(self.instance, 'guest', None)
         check_in_date = data.get('check_in_date') or getattr(self.instance, 'check_in_date', None)
         check_out_date = data.get('check_out_date') or getattr(self.instance, 'check_out_date', None)
@@ -89,6 +90,8 @@ class BookingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Number of guests exceeds room capacity.")
         if room and rate_plan and rate_plan.room_type_id != room.room_type_id:
             raise serializers.ValidationError("Rate plan does not apply to this room type.")
+        if rate_plan and package:
+            raise serializers.ValidationError("Select either a rate plan or a package, not both.")
 
         if not room or not check_in_date or not check_out_date:
             return data
@@ -201,15 +204,31 @@ class BookingPriceQuoteSerializer(serializers.Serializer):
     check_in_date = serializers.DateField()
     check_out_date = serializers.DateField()
     rate_plan = serializers.PrimaryKeyRelatedField(queryset=RatePlan.objects.filter(is_active=True), required=False, allow_null=True)
+    package = serializers.PrimaryKeyRelatedField(queryset=Package.objects.filter(is_active=True), required=False, allow_null=True)
     number_of_guests = serializers.IntegerField(min_value=1, default=1)
 
     def validate(self, attrs):
         if attrs['check_out_date'] <= attrs['check_in_date']:
             raise serializers.ValidationError('Check-out date must be after check-in date.')
         rate_plan = attrs.get('rate_plan')
+        package = attrs.get('package')
         room = attrs['room']
         if rate_plan and rate_plan.room_type_id != room.room_type_id:
             raise serializers.ValidationError('Rate plan does not apply to this room type.')
+        if rate_plan and package:
+            raise serializers.ValidationError('Select either a rate plan or a package, not both.')
+        return attrs
+
+
+class PackageReportQuerySerializer(serializers.Serializer):
+    date_from = serializers.DateField(required=False)
+    date_to = serializers.DateField(required=False)
+
+    def validate(self, attrs):
+        date_from = attrs.get('date_from')
+        date_to = attrs.get('date_to')
+        if date_from and date_to and date_from > date_to:
+            raise serializers.ValidationError('date_from must be on or before date_to.')
         return attrs
 
 

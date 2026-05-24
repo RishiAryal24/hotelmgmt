@@ -139,7 +139,7 @@ Next slices:
 
 1. Tax configuration. Done.
 2. Vendor bills. Done.
-3. Package booking polish and reporting.
+3. Package booking polish, package list visibility, and reporting. Done.
 
 Acceptance criteria:
 

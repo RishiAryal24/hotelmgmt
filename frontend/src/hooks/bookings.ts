@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Room, RoomType, Guest, Booking, GuestCommunication, GuestFolio, GuestFollowUpReminder, GuestHistory, FacilityAmenity, FacilityService, RatePlan, DynamicPricingRule, BookingPriceQuote } from '../types/bookings';
+import { Room, RoomType, Guest, Booking, GuestCommunication, GuestFolio, GuestFollowUpReminder, GuestHistory, FacilityAmenity, FacilityService, RatePlan, DynamicPricingRule, BookingPriceQuote, Package, PackageBookingReport } from '../types/bookings';
 import apiClient from '../services/api';
 
 const getList = <T,>(data: T[] | { results: T[] }) => (Array.isArray(data) ? data : data.results);
@@ -60,7 +60,32 @@ export const useDynamicPricingRules = () => {
   });
 };
 
-export const useBookingPriceQuote = (params?: { room?: string; check_in_date?: string; check_out_date?: string; rate_plan?: string; number_of_guests?: number }) => {
+export const usePackages = () => {
+  return useQuery({
+    queryKey: ['packages'],
+    queryFn: async (): Promise<Package[]> => {
+      const response = await apiClient.get<Package[] | { results: Package[] }>('/bookings/packages/');
+      return getList(response.data);
+    },
+  });
+};
+
+export const usePackageBookingReport = (params?: { date_from?: string; date_to?: string }) => {
+  return useQuery({
+    queryKey: ['package-booking-report', params || {}],
+    queryFn: async (): Promise<PackageBookingReport> => {
+      const response = await apiClient.get<PackageBookingReport>('/bookings/packages/report/', {
+        params: {
+          date_from: params?.date_from || undefined,
+          date_to: params?.date_to || undefined,
+        },
+      });
+      return response.data;
+    },
+  });
+};
+
+export const useBookingPriceQuote = (params?: { room?: string; check_in_date?: string; check_out_date?: string; rate_plan?: string; package?: string; number_of_guests?: number }) => {
   return useQuery({
     queryKey: ['booking-price-quote', params || {}],
     enabled: Boolean(params?.room && params?.check_in_date && params?.check_out_date),
@@ -282,6 +307,20 @@ export const useCreateDynamicPricingRule = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['dynamic-pricing-rules'] });
       queryClient.invalidateQueries({ queryKey: ['booking-price-quote'] });
+    },
+  });
+};
+
+export const useCreatePackage = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (pkg: Omit<Package, 'id'>): Promise<Package> => {
+      const response = await apiClient.post('/bookings/packages/', pkg);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['packages'] });
+      queryClient.invalidateQueries({ queryKey: ['package-booking-report'] });
     },
   });
 };

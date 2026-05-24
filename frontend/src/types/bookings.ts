@@ -58,6 +58,12 @@ export interface BookingPriceQuote {
   nights: number;
   base_rate: string;
   total_amount: string;
+  package?: {
+    id: string;
+    name: string;
+    total_price: string;
+    includes: string[];
+  } | null;
   nightly_breakdown: Array<{
     date: string;
     base_rate: string;
@@ -71,6 +77,32 @@ export interface BookingPriceQuote {
       adjustment: string;
     }>;
   }>;
+}
+
+export interface Package {
+  id: string;
+  name: string;
+  description: string;
+  total_price: string;
+  includes: string[];
+  is_active: boolean;
+}
+
+export interface PackageBookingReport {
+  date_from: string | null;
+  date_to: string | null;
+  rows: Array<{
+    package_id: string | null;
+    package_name: string;
+    bookings: number;
+    revenue: string;
+  }>;
+  totals: {
+    bookings: number;
+    revenue: string;
+    package_bookings: number;
+    package_revenue: string;
+  };
 }
 
 export interface Guest {

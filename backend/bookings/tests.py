@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.test import override_settings
@@ -10,8 +11,8 @@ from django_tenants.utils import schema_context, tenant_context
 from django.utils import timezone
 
 from bookings.followups import create_booking_follow_up_reminders, create_open_folio_follow_up, create_post_stay_follow_up
-from bookings.models import Booking, DynamicPricingRule, FacilityAmenity, FacilityService, Guest, GuestCommunication, GuestFolio, GuestFolioLine, GuestFollowUpReminder, Room, RoomType
-from bookings.services import calculate_booking_price, check_in_booking, create_walk_in_booking, extend_booking_stay, get_guest_history, modify_confirmed_booking, transfer_booking_room
+from bookings.models import Booking, DynamicPricingRule, FacilityAmenity, FacilityService, Guest, GuestCommunication, GuestFolio, GuestFolioLine, GuestFollowUpReminder, Package, Room, RoomType
+from bookings.services import calculate_booking_price, check_in_booking, create_walk_in_booking, extend_booking_stay, get_guest_history, get_package_booking_report, modify_confirmed_booking, transfer_booking_room
 from bookings.tasks import queue_booking_confirmation_email
 from housekeeping.models import HousekeepingTask
 from housekeeping.services import complete_housekeeping_task, create_checkout_cleaning_task
@@ -568,6 +569,115 @@ class DynamicPricingRuleTests(TenantTestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertTrue(DynamicPricingRule.objects.filter(name='High occupancy').exists())
+
+
+class PackageBookingTests(TenantTestCase):
+    @classmethod
+    def get_test_schema_name(cls):
+        return 'tenant_package_booking'
+
+    @classmethod
+    def get_test_tenant_domain(cls):
+        return 'tenant-package-booking.test.com'
+
+    @classmethod
+    def setup_tenant(cls, tenant):
+        tenant.name = 'Tenant Package Booking'
+        tenant.created_by = 'test'
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient(HTTP_HOST=self.get_test_tenant_domain())
+        self.user = PlatformUser.objects.create_user(
+            email='package-admin@example.com',
+            password='testpass123456',
+            tenant=self.tenant,
+            is_tenant_admin=True,
+        )
+        self.client.force_authenticate(self.user)
+        self.room_type = RoomType.objects.create(name='Package Deluxe', code='PKG-DLX', base_rate='120.00')
+        self.room = Room.objects.create(room_number='551', room_type=self.room_type, capacity=2, price_per_night='120.00', status='available')
+        self.guest = Guest.objects.create(first_name='Package', last_name='Guest', email='package.guest@example.com')
+        self.package = Package.objects.create(
+            name='Romance Weekend',
+            description='Two nights with dinner',
+            total_price='299.00',
+            includes=['Room', 'Dinner', 'Late checkout'],
+        )
+
+    def test_package_booking_uses_package_total(self):
+        booking = Booking.objects.create(
+            room=self.room,
+            guest=self.guest,
+            package=self.package,
+            check_in_date=date(2026, 5, 20),
+            check_out_date=date(2026, 5, 23),
+            number_of_guests=2,
+            status='confirmed',
+        )
+
+        self.assertEqual(booking.total_amount, Decimal('299.00'))
+
+    def test_package_quote_returns_package_details(self):
+        response = self.client.get(
+            '/api/v1/bookings/bookings/quote/',
+            {
+                'room': str(self.room.id),
+                'package': str(self.package.id),
+                'check_in_date': '2026-05-20',
+                'check_out_date': '2026-05-23',
+                'number_of_guests': '2',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['total_amount'], Decimal('299.00'))
+        self.assertEqual(response.data['package']['name'], 'Romance Weekend')
+        self.assertEqual(response.data['package']['includes'], ['Room', 'Dinner', 'Late checkout'])
+
+    def test_package_report_groups_booking_revenue(self):
+        Booking.objects.create(
+            room=self.room,
+            guest=self.guest,
+            package=self.package,
+            check_in_date=date(2026, 5, 20),
+            check_out_date=date(2026, 5, 22),
+            number_of_guests=2,
+            status='confirmed',
+        )
+        other_guest = Guest.objects.create(first_name='Room', last_name='Only', email='room.only@example.com')
+        Booking.objects.create(
+            room=self.room,
+            guest=other_guest,
+            check_in_date=date(2026, 6, 1),
+            check_out_date=date(2026, 6, 2),
+            number_of_guests=1,
+            status='confirmed',
+        )
+
+        report = get_package_booking_report()
+
+        package_row = next(row for row in report['rows'] if row['package_id'] == str(self.package.id))
+        self.assertEqual(package_row['bookings'], 1)
+        self.assertEqual(package_row['revenue'], Decimal('299.00'))
+        self.assertEqual(report['totals']['package_bookings'], 1)
+        self.assertEqual(report['totals']['bookings'], 2)
+
+    def test_package_report_endpoint_filters_by_date(self):
+        Booking.objects.create(
+            room=self.room,
+            guest=self.guest,
+            package=self.package,
+            check_in_date=date(2026, 5, 20),
+            check_out_date=date(2026, 5, 22),
+            number_of_guests=2,
+            status='confirmed',
+        )
+
+        response = self.client.get('/api/v1/bookings/packages/report/', {'date_from': '2026-05-01', 'date_to': '2026-05-31'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['totals']['package_bookings'], 1)
 
 
 class GuestCommunicationApiTests(TenantTestCase):

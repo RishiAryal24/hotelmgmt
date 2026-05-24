@@ -1,9 +1,13 @@
 from decimal import Decimal
+from datetime import timedelta
 
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
 
-from bookings.models import Booking, GuestFolio, GuestFolioLine, Room
+from bookings.models import Booking, DynamicPricingRule, GuestFolio, GuestFolioLine, Room
+
+
+MONEY_QUANT = Decimal('0.01')
 
 
 class CheckoutException(ValueError):
@@ -18,6 +22,141 @@ TRANSFER_RATE_POLICIES = {
     'complimentary_upgrade': 'Complimentary upgrade',
     'credit_downgrade': 'Credit downgrade difference',
 }
+
+
+def _date_range(start_date, end_date):
+    current = start_date
+    while current < end_date:
+        yield current
+        current = current + timedelta(days=1)
+
+
+def _rule_matches(rule, *, room, rate_plan, stay_date, number_of_guests):
+    if rule.room_type_id and rule.room_type_id != room.room_type_id:
+        return False
+    if rule.rate_plan_id and (not rate_plan or rule.rate_plan_id != rate_plan.id):
+        return False
+    if rule.valid_from > stay_date or rule.valid_to < stay_date:
+        return False
+    if rule.min_occupancy and number_of_guests < rule.min_occupancy:
+        return False
+    if rule.max_occupancy and number_of_guests > rule.max_occupancy:
+        return False
+    if rule.days_of_week and stay_date.weekday() not in [int(day) for day in rule.days_of_week]:
+        return False
+    return True
+
+
+def calculate_booking_price(*, room: Room, check_in_date, check_out_date, rate_plan=None, package=None, number_of_guests: int = 1):
+    if check_out_date <= check_in_date:
+        raise ValueError('Checkout date must be after check-in date.')
+    base_rate = Decimal(str(rate_plan.base_rate if rate_plan else room.price_per_night))
+    if package:
+        return {
+            'nights': (check_out_date - check_in_date).days,
+            'base_rate': base_rate.quantize(MONEY_QUANT),
+            'total_amount': Decimal(str(package.total_price)).quantize(MONEY_QUANT),
+            'package': {
+                'id': str(package.id),
+                'name': package.name,
+                'total_price': Decimal(str(package.total_price)).quantize(MONEY_QUANT),
+                'includes': package.includes,
+            },
+            'nightly_breakdown': [
+                {
+                    'date': stay_date,
+                    'base_rate': base_rate.quantize(MONEY_QUANT),
+                    'final_rate': Decimal('0.00'),
+                    'rules': [],
+                }
+                for stay_date in _date_range(check_in_date, check_out_date)
+            ],
+        }
+    rules = list(
+        DynamicPricingRule.objects.filter(
+            is_active=True,
+            valid_from__lt=check_out_date,
+            valid_to__gte=check_in_date,
+        )
+        .filter(models.Q(room_type__isnull=True) | models.Q(room_type=room.room_type))
+        .filter(models.Q(rate_plan__isnull=True) | models.Q(rate_plan=rate_plan))
+        .order_by('priority', 'created_at')
+    )
+    breakdown = []
+    total = Decimal('0.00')
+    for stay_date in _date_range(check_in_date, check_out_date):
+        nightly_rate = base_rate
+        applied_rules = []
+        for rule in rules:
+            if not _rule_matches(rule, room=room, rate_plan=rate_plan, stay_date=stay_date, number_of_guests=number_of_guests):
+                continue
+            adjustment = (nightly_rate * rule.value / Decimal('100.00')) if rule.value_type == 'percentage' else rule.value
+            if rule.adjustment_type == 'discount':
+                adjustment = -adjustment
+            nightly_rate = max(Decimal('0.00'), (nightly_rate + adjustment).quantize(MONEY_QUANT))
+            applied_rules.append(
+                {
+                    'id': str(rule.id),
+                    'name': rule.name,
+                    'adjustment_type': rule.adjustment_type,
+                    'value_type': rule.value_type,
+                    'value': rule.value,
+                    'adjustment': adjustment.quantize(MONEY_QUANT),
+                }
+            )
+        total += nightly_rate
+        breakdown.append(
+            {
+                'date': stay_date,
+                'base_rate': base_rate.quantize(MONEY_QUANT),
+                'final_rate': nightly_rate.quantize(MONEY_QUANT),
+                'rules': applied_rules,
+            }
+        )
+    return {
+        'nights': len(breakdown),
+        'base_rate': base_rate.quantize(MONEY_QUANT),
+        'total_amount': total.quantize(MONEY_QUANT),
+        'package': None,
+        'nightly_breakdown': breakdown,
+    }
+
+
+def get_package_booking_report(*, date_from=None, date_to=None):
+    bookings = Booking.objects.select_related('package').all()
+    if date_from:
+        bookings = bookings.filter(check_in_date__gte=date_from)
+    if date_to:
+        bookings = bookings.filter(check_in_date__lte=date_to)
+
+    rows_by_package = {}
+    for booking in bookings:
+        key = str(booking.package_id) if booking.package_id else 'no_package'
+        label = booking.package.name if booking.package_id else 'No package'
+        row = rows_by_package.setdefault(
+            key,
+            {
+                'package_id': str(booking.package_id) if booking.package_id else None,
+                'package_name': label,
+                'bookings': 0,
+                'revenue': Decimal('0.00'),
+            },
+        )
+        row['bookings'] += 1
+        row['revenue'] += booking.total_amount
+
+    rows = sorted(rows_by_package.values(), key=lambda row: row['revenue'], reverse=True)
+    return {
+        'date_from': date_from,
+        'date_to': date_to,
+        'rows': rows,
+        'totals': {
+            'bookings': sum(row['bookings'] for row in rows),
+            'revenue': sum((row['revenue'] for row in rows), Decimal('0.00')),
+            'package_bookings': sum(row['bookings'] for row in rows if row['package_id']),
+            'package_revenue': sum((row['revenue'] for row in rows if row['package_id']), Decimal('0.00')),
+        },
+    }
 
 
 def get_guest_history(guest):
@@ -233,6 +372,8 @@ def create_walk_in_booking(
     guest,
     check_in_date,
     check_out_date,
+    rate_plan=None,
+    package=None,
     number_of_guests: int = 1,
     special_requests: str = '',
 ):
@@ -262,6 +403,8 @@ def create_walk_in_booking(
     booking = Booking.objects.create(
         room=room,
         guest=guest,
+        rate_plan=rate_plan,
+        package=package,
         check_in_date=check_in_date,
         check_out_date=check_out_date,
         number_of_guests=number_of_guests,
@@ -301,8 +444,13 @@ def extend_booking_stay(booking: Booking, new_check_out_date):
 
     old_check_out_date = booking.check_out_date
     old_total = booking.total_amount
-    extension_nights = Decimal((new_check_out_date - old_check_out_date).days)
-    extension_amount = extension_nights * Decimal(str(booking.room.price_per_night))
+    extension_amount = calculate_booking_price(
+        room=booking.room,
+        check_in_date=old_check_out_date,
+        check_out_date=new_check_out_date,
+        rate_plan=booking.rate_plan,
+        number_of_guests=booking.number_of_guests,
+    )['total_amount']
 
     folio, _ = GuestFolio.objects.get_or_create(
         booking=booking,

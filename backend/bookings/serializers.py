@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from bookings.models import (
     Booking,
+    DynamicPricingRule,
     FacilityAmenity,
     FacilityService,
     Guest,
@@ -74,6 +75,7 @@ class BookingSerializer(serializers.ModelSerializer):
 
     def validate(self, data):
         room = data.get('room') or getattr(self.instance, 'room', None)
+        rate_plan = data.get('rate_plan') or getattr(self.instance, 'rate_plan', None)
         guest = data.get('guest') or getattr(self.instance, 'guest', None)
         check_in_date = data.get('check_in_date') or getattr(self.instance, 'check_in_date', None)
         check_out_date = data.get('check_out_date') or getattr(self.instance, 'check_out_date', None)
@@ -85,6 +87,8 @@ class BookingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Check-out date must be after check-in date.")
         if room and number_of_guests and number_of_guests > room.capacity:
             raise serializers.ValidationError("Number of guests exceeds room capacity.")
+        if room and rate_plan and rate_plan.room_type_id != room.room_type_id:
+            raise serializers.ValidationError("Rate plan does not apply to this room type.")
 
         if not room or not check_in_date or not check_out_date:
             return data
@@ -166,6 +170,47 @@ class RatePlanSerializer(serializers.ModelSerializer):
     class Meta:
         model = RatePlan
         fields = '__all__'
+
+
+class DynamicPricingRuleSerializer(serializers.ModelSerializer):
+    room_type_name = serializers.CharField(source='room_type.name', read_only=True)
+    rate_plan_name = serializers.CharField(source='rate_plan.name', read_only=True)
+
+    class Meta:
+        model = DynamicPricingRule
+        fields = '__all__'
+
+    def validate(self, attrs):
+        valid_from = attrs.get('valid_from', getattr(self.instance, 'valid_from', None))
+        valid_to = attrs.get('valid_to', getattr(self.instance, 'valid_to', None))
+        min_occupancy = attrs.get('min_occupancy', getattr(self.instance, 'min_occupancy', None))
+        max_occupancy = attrs.get('max_occupancy', getattr(self.instance, 'max_occupancy', None))
+        days_of_week = attrs.get('days_of_week', getattr(self.instance, 'days_of_week', []))
+        if valid_from and valid_to and valid_to < valid_from:
+            raise serializers.ValidationError('valid_to must be on or after valid_from.')
+        if min_occupancy and max_occupancy and max_occupancy < min_occupancy:
+            raise serializers.ValidationError('max_occupancy must be greater than or equal to min_occupancy.')
+        if days_of_week:
+            if not isinstance(days_of_week, list) or any(int(day) < 0 or int(day) > 6 for day in days_of_week):
+                raise serializers.ValidationError('days_of_week must contain weekday numbers from 0 to 6.')
+        return attrs
+
+
+class BookingPriceQuoteSerializer(serializers.Serializer):
+    room = serializers.PrimaryKeyRelatedField(queryset=Room.objects.select_related('room_type').all())
+    check_in_date = serializers.DateField()
+    check_out_date = serializers.DateField()
+    rate_plan = serializers.PrimaryKeyRelatedField(queryset=RatePlan.objects.filter(is_active=True), required=False, allow_null=True)
+    number_of_guests = serializers.IntegerField(min_value=1, default=1)
+
+    def validate(self, attrs):
+        if attrs['check_out_date'] <= attrs['check_in_date']:
+            raise serializers.ValidationError('Check-out date must be after check-in date.')
+        rate_plan = attrs.get('rate_plan')
+        room = attrs['room']
+        if rate_plan and rate_plan.room_type_id != room.room_type_id:
+            raise serializers.ValidationError('Rate plan does not apply to this room type.')
+        return attrs
 
 
 class PackageSerializer(serializers.ModelSerializer):

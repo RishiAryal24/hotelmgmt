@@ -10,8 +10,8 @@ from django_tenants.utils import schema_context, tenant_context
 from django.utils import timezone
 
 from bookings.followups import create_booking_follow_up_reminders, create_open_folio_follow_up, create_post_stay_follow_up
-from bookings.models import Booking, FacilityAmenity, FacilityService, Guest, GuestCommunication, GuestFolio, GuestFolioLine, GuestFollowUpReminder, Room, RoomType
-from bookings.services import check_in_booking, create_walk_in_booking, extend_booking_stay, get_guest_history, modify_confirmed_booking, transfer_booking_room
+from bookings.models import Booking, DynamicPricingRule, FacilityAmenity, FacilityService, Guest, GuestCommunication, GuestFolio, GuestFolioLine, GuestFollowUpReminder, Room, RoomType
+from bookings.services import calculate_booking_price, check_in_booking, create_walk_in_booking, extend_booking_stay, get_guest_history, modify_confirmed_booking, transfer_booking_room
 from bookings.tasks import queue_booking_confirmation_email
 from housekeeping.models import HousekeepingTask
 from housekeeping.services import complete_housekeeping_task, create_checkout_cleaning_task
@@ -193,6 +193,24 @@ class StayExtensionTests(TenantTestCase):
         self.assertEqual(folio.grand_total, 400)
         extension_line = GuestFolioLine.objects.get(folio=folio, source_module='booking_extension')
         self.assertEqual(extension_line.amount, 200)
+
+    def test_extension_uses_dynamic_pricing_for_added_nights(self):
+        DynamicPricingRule.objects.create(
+            name='Extension surcharge',
+            room_type=self.room_type,
+            valid_from=date(2026, 5, 12),
+            valid_to=date(2026, 5, 14),
+            adjustment_type='surcharge',
+            value_type='percentage',
+            value='50.00',
+            days_of_week=[1, 2],
+        )
+
+        _booking, folio = extend_booking_stay(self.booking, date(2026, 5, 14))
+
+        extension_line = GuestFolioLine.objects.get(folio=folio, source_module='booking_extension')
+        self.assertEqual(extension_line.amount, 300)
+        self.assertEqual(folio.grand_total, 500)
 
     def test_extension_is_blocked_when_room_has_future_overlap(self):
         other_guest = Guest.objects.create(
@@ -416,6 +434,140 @@ class StayExtensionTests(TenantTestCase):
 
         self.room.refresh_from_db()
         self.assertEqual(self.room.status, 'cleaning')
+
+
+class DynamicPricingRuleTests(TenantTestCase):
+    @classmethod
+    def get_test_schema_name(cls):
+        return 'tenant_dynamic_pricing'
+
+    @classmethod
+    def get_test_tenant_domain(cls):
+        return 'tenant-dynamic-pricing.test.com'
+
+    @classmethod
+    def setup_tenant(cls, tenant):
+        tenant.name = 'Tenant Dynamic Pricing'
+        tenant.created_by = 'test'
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient(HTTP_HOST=self.get_test_tenant_domain())
+        self.user = PlatformUser.objects.create_user(
+            email='pricing-admin@example.com',
+            password='testpass123456',
+            tenant=self.tenant,
+            is_tenant_admin=True,
+        )
+        self.client.force_authenticate(self.user)
+        self.room_type = RoomType.objects.create(
+            name='Dynamic Deluxe',
+            code='DYN-DLX',
+            base_rate='100.00',
+        )
+        self.room = Room.objects.create(
+            room_number='501',
+            room_type=self.room_type,
+            capacity=3,
+            price_per_night='100.00',
+            status='available',
+        )
+        self.guest = Guest.objects.create(
+            first_name='Dynamic',
+            last_name='Guest',
+            email='dynamic.guest@example.com',
+        )
+
+    def test_dynamic_pricing_applies_matching_rules_to_booking_total(self):
+        DynamicPricingRule.objects.create(
+            name='Weekend demand',
+            room_type=self.room_type,
+            valid_from=date(2026, 5, 22),
+            valid_to=date(2026, 5, 24),
+            adjustment_type='surcharge',
+            value_type='percentage',
+            value='20.00',
+            days_of_week=[4, 5],
+        )
+        DynamicPricingRule.objects.create(
+            name='Three guest extra',
+            room_type=self.room_type,
+            valid_from=date(2026, 5, 20),
+            valid_to=date(2026, 5, 31),
+            adjustment_type='surcharge',
+            value_type='fixed',
+            value='10.00',
+            min_occupancy=3,
+        )
+
+        quote = calculate_booking_price(
+            room=self.room,
+            check_in_date=date(2026, 5, 22),
+            check_out_date=date(2026, 5, 25),
+            number_of_guests=3,
+        )
+        booking = Booking.objects.create(
+            room=self.room,
+            guest=self.guest,
+            check_in_date=date(2026, 5, 22),
+            check_out_date=date(2026, 5, 25),
+            number_of_guests=3,
+            status='confirmed',
+        )
+
+        self.assertEqual(quote['total_amount'], 370)
+        self.assertEqual(booking.total_amount, 370)
+        self.assertEqual(len(quote['nightly_breakdown']), 3)
+        self.assertEqual(quote['nightly_breakdown'][0]['final_rate'], 130)
+        self.assertEqual(quote['nightly_breakdown'][2]['final_rate'], 110)
+
+    def test_quote_endpoint_returns_dynamic_breakdown(self):
+        DynamicPricingRule.objects.create(
+            name='Festival discount',
+            room_type=self.room_type,
+            valid_from=date(2026, 5, 20),
+            valid_to=date(2026, 5, 21),
+            adjustment_type='discount',
+            value_type='fixed',
+            value='15.00',
+        )
+
+        response = self.client.get(
+            '/api/v1/bookings/bookings/quote/',
+            {
+                'room': str(self.room.id),
+                'check_in_date': '2026-05-20',
+                'check_out_date': '2026-05-22',
+                'number_of_guests': '1',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['nights'], 2)
+        self.assertEqual(response.data['total_amount'], 170)
+        self.assertEqual(response.data['nightly_breakdown'][0]['final_rate'], 85)
+
+    def test_dynamic_pricing_rule_api_creates_rule(self):
+        response = self.client.post(
+            '/api/v1/bookings/dynamic-pricing-rules/',
+            {
+                'name': 'High occupancy',
+                'room_type': str(self.room_type.id),
+                'valid_from': '2026-05-20',
+                'valid_to': '2026-05-30',
+                'adjustment_type': 'surcharge',
+                'value_type': 'percentage',
+                'value': '12.50',
+                'min_occupancy': 2,
+                'days_of_week': [0, 1, 2, 3, 4],
+                'priority': 10,
+                'is_active': True,
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(DynamicPricingRule.objects.filter(name='High occupancy').exists())
 
 
 class GuestCommunicationApiTests(TenantTestCase):

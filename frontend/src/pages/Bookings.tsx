@@ -8,25 +8,30 @@ import {
   downloadGuestFolioPdf,
   useAvailableRooms,
   useBookingAction,
+  useBookingPriceQuote,
   useBookings,
   useCreateBooking,
+  useCreateDynamicPricingRule,
   useCreateGuestCommunication,
   useCreateGuest,
   useCreateGuestFollowUp,
   useCreateWalkInBooking,
+  useDynamicPricingRules,
   useGuestCommunications,
   useGuestFollowUpAction,
   useGuestFollowUps,
   useGuestFolios,
   useGuestHistory,
   useGuests,
+  useRatePlans,
   useRooms,
+  useRoomTypes,
   useUpdateGuest,
 } from '../hooks/bookings';
 import { usePermissions } from '../hooks/permissions';
 import { useCurrentCashierShift } from '../hooks/restaurant';
 import { formatMoney, getTenantSettings } from '../services/tenantSettings';
-import { Booking, Guest, GuestCommunication, GuestFolio, GuestFolioLine, GuestFollowUpReminder } from '../types/bookings';
+import { Booking, DynamicPricingRule, Guest, GuestCommunication, GuestFolio, GuestFolioLine, GuestFollowUpReminder } from '../types/bookings';
 
 const emptyGuest = {
   first_name: '',
@@ -45,11 +50,28 @@ const emptyGuest = {
 const emptyBooking = {
   room: '',
   guest: '',
+  rate_plan: '',
   check_in_date: '',
   check_out_date: '',
   number_of_guests: 1,
   status: 'confirmed' as Booking['status'],
   special_requests: '',
+};
+
+const emptyPricingRule = {
+  name: '',
+  room_type: '',
+  rate_plan: '',
+  valid_from: '',
+  valid_to: '',
+  adjustment_type: 'surcharge' as DynamicPricingRule['adjustment_type'],
+  value_type: 'percentage' as DynamicPricingRule['value_type'],
+  value: '',
+  min_occupancy: '',
+  max_occupancy: '',
+  days_of_week: [] as number[],
+  priority: 100,
+  is_active: true,
 };
 
 const emptyCommunication = {
@@ -115,7 +137,7 @@ const paymentMethods = [
 ] as const;
 
 type CheckoutPaymentMethod = (typeof paymentMethods)[number]['value'];
-type BookingTab = 'reservations' | 'guests' | 'availability' | 'folios' | 'new';
+type BookingTab = 'reservations' | 'guests' | 'availability' | 'folios' | 'pricing' | 'new';
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
@@ -143,6 +165,9 @@ const Bookings: React.FC = () => {
   const { data: guests } = useGuests();
   const { data: folios } = useGuestFolios();
   const { data: rooms } = useRooms();
+  const { data: roomTypes } = useRoomTypes();
+  const { data: ratePlans } = useRatePlans();
+  const { data: pricingRules } = useDynamicPricingRules();
   const createGuest = useCreateGuest();
   const updateGuest = useUpdateGuest();
   const createCommunication = useCreateGuestCommunication();
@@ -150,6 +175,7 @@ const Bookings: React.FC = () => {
   const followUpAction = useGuestFollowUpAction();
   const createBooking = useCreateBooking();
   const createWalkInBooking = useCreateWalkInBooking();
+  const createPricingRule = useCreateDynamicPricingRule();
   const bookingAction = useBookingAction();
   const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState<BookingTab>((searchParams.get('tab') as BookingTab | null) || 'reservations');
@@ -184,6 +210,7 @@ const Bookings: React.FC = () => {
   const [bookingForm, setBookingForm] = useState<Omit<Booking, 'id' | 'total_amount' | 'room_details' | 'guest_details'>>(
     emptyBooking,
   );
+  const [pricingRuleForm, setPricingRuleForm] = useState(emptyPricingRule);
   const [bookingFormError, setBookingFormError] = useState('');
   const [availabilityRange, setAvailabilityRange] = useState({ check_in_date: '', check_out_date: '' });
 
@@ -199,6 +226,13 @@ const Bookings: React.FC = () => {
     transferBooking?.check_in_date,
     transferBooking?.check_out_date,
   );
+  const { data: bookingQuote } = useBookingPriceQuote({
+    room: bookingForm.room,
+    check_in_date: bookingForm.check_in_date,
+    check_out_date: bookingForm.check_out_date,
+    rate_plan: bookingForm.rate_plan || undefined,
+    number_of_guests: bookingForm.number_of_guests,
+  });
   const { data: guestHistory, isFetching: guestHistoryLoading } = useGuestHistory(selectedGuestId);
   const { data: guestCommunications, isFetching: guestCommunicationsLoading } = useGuestCommunications(selectedGuestId);
   const { data: guestFollowUps, isFetching: guestFollowUpsLoading } = useGuestFollowUps({ guest: selectedGuestId }, Boolean(selectedGuestId));
@@ -274,12 +308,13 @@ const Bookings: React.FC = () => {
   }, [guestHistory]);
 
   const estimatedTotal = useMemo(() => {
+    if (bookingQuote) return Number(bookingQuote.total_amount);
     if (!selectedRoom || !bookingForm.check_in_date || !bookingForm.check_out_date) return 0;
     const checkIn = new Date(bookingForm.check_in_date);
     const checkOut = new Date(bookingForm.check_out_date);
     const nights = Math.max(0, Math.round((checkOut.getTime() - checkIn.getTime()) / 86400000));
     return nights * Number(selectedRoom.price_per_night);
-  }, [bookingForm.check_in_date, bookingForm.check_out_date, selectedRoom]);
+  }, [bookingForm.check_in_date, bookingForm.check_out_date, bookingQuote, selectedRoom]);
 
   const bookingCounts = useMemo(
     () => ({
@@ -376,6 +411,7 @@ const Bookings: React.FC = () => {
     { id: 'guests', label: 'Guests', count: guests?.length || 0 },
     { id: 'availability', label: 'Availability' },
     { id: 'folios', label: 'Folios', count: bookingCounts.openFolios },
+    { id: 'pricing', label: 'Pricing', count: pricingRules?.filter((rule) => rule.is_active).length || 0 },
     ...(can('bookings.reservation.create') ? [{ id: 'new', label: 'New Booking' }] : []),
   ];
 
@@ -416,8 +452,12 @@ const Bookings: React.FC = () => {
       setGuestSearch('');
       setActiveTab('reservations');
     };
+    const bookingPayload = {
+      ...bookingForm,
+      rate_plan: bookingForm.rate_plan || null,
+    };
     if (bookingForm.status === 'checked_in') {
-      createWalkInBooking.mutate(bookingForm, {
+      createWalkInBooking.mutate(bookingPayload, {
         onSuccess: (result) => {
           onSuccess();
           setSelectedFolio(result.folio);
@@ -426,10 +466,32 @@ const Bookings: React.FC = () => {
       });
       return;
     }
-    createBooking.mutate(bookingForm, {
+    createBooking.mutate(bookingPayload, {
       onSuccess,
       onError: () => setBookingFormError('Could not create booking. Check dates, guest, and room availability.'),
     });
+  };
+
+  const handleCreatePricingRule = (e: React.FormEvent) => {
+    e.preventDefault();
+    createPricingRule.mutate(
+      {
+        name: pricingRuleForm.name,
+        room_type: pricingRuleForm.room_type || null,
+        rate_plan: pricingRuleForm.rate_plan || null,
+        valid_from: pricingRuleForm.valid_from,
+        valid_to: pricingRuleForm.valid_to,
+        adjustment_type: pricingRuleForm.adjustment_type,
+        value_type: pricingRuleForm.value_type,
+        value: pricingRuleForm.value || '0',
+        min_occupancy: pricingRuleForm.min_occupancy ? Number(pricingRuleForm.min_occupancy) : null,
+        max_occupancy: pricingRuleForm.max_occupancy ? Number(pricingRuleForm.max_occupancy) : null,
+        days_of_week: pricingRuleForm.days_of_week,
+        priority: pricingRuleForm.priority,
+        is_active: pricingRuleForm.is_active,
+      },
+      { onSuccess: () => setPricingRuleForm(emptyPricingRule) },
+    );
   };
 
   const selectGuestForBooking = (guest: Guest) => {
@@ -1287,6 +1349,93 @@ const Bookings: React.FC = () => {
         </section>
       )}
 
+      {activeTab === 'pricing' && (
+        <section className="grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
+          {can('bookings.reservation.create') && (
+            <form onSubmit={handleCreatePricingRule} className="rounded-2xl border border-slate-200 bg-white p-4">
+              <h2 className="font-semibold text-slate-900">Dynamic Pricing Rule</h2>
+              <div className="mt-4 grid gap-3">
+                <input value={pricingRuleForm.name} onChange={(e) => setPricingRuleForm({ ...pricingRuleForm, name: e.target.value })} placeholder="Weekend demand" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+                <select value={pricingRuleForm.room_type} onChange={(e) => setPricingRuleForm({ ...pricingRuleForm, room_type: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                  <option value="">All room types</option>
+                  {roomTypes?.map((roomType) => <option key={roomType.id} value={roomType.id}>{roomType.name}</option>)}
+                </select>
+                <select value={pricingRuleForm.rate_plan} onChange={(e) => setPricingRuleForm({ ...pricingRuleForm, rate_plan: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                  <option value="">Any rate plan</option>
+                  {ratePlans?.map((ratePlan) => <option key={ratePlan.id} value={ratePlan.id}>{ratePlan.name}</option>)}
+                </select>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <input type="date" value={pricingRuleForm.valid_from} onChange={(e) => setPricingRuleForm({ ...pricingRuleForm, valid_from: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+                  <input type="date" value={pricingRuleForm.valid_to} onChange={(e) => setPricingRuleForm({ ...pricingRuleForm, valid_to: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <select value={pricingRuleForm.adjustment_type} onChange={(e) => setPricingRuleForm({ ...pricingRuleForm, adjustment_type: e.target.value as DynamicPricingRule['adjustment_type'] })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                    <option value="surcharge">Surcharge</option>
+                    <option value="discount">Discount</option>
+                  </select>
+                  <select value={pricingRuleForm.value_type} onChange={(e) => setPricingRuleForm({ ...pricingRuleForm, value_type: e.target.value as DynamicPricingRule['value_type'] })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+                    <option value="percentage">Percentage</option>
+                    <option value="fixed">Fixed amount</option>
+                  </select>
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  <input type="number" step="0.01" min="0" value={pricingRuleForm.value} onChange={(e) => setPricingRuleForm({ ...pricingRuleForm, value: e.target.value })} placeholder="Value" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" required />
+                  <input type="number" min="1" value={pricingRuleForm.min_occupancy} onChange={(e) => setPricingRuleForm({ ...pricingRuleForm, min_occupancy: e.target.value })} placeholder="Min guests" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                  <input type="number" min="1" value={pricingRuleForm.max_occupancy} onChange={(e) => setPricingRuleForm({ ...pricingRuleForm, max_occupancy: e.target.value })} placeholder="Max guests" className="rounded-xl border border-slate-200 px-3 py-2 text-sm" />
+                </div>
+                <div className="grid grid-cols-7 gap-1">
+                  {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => {
+                    const checked = pricingRuleForm.days_of_week.includes(index);
+                    return (
+                      <button key={day} type="button" onClick={() => setPricingRuleForm({ ...pricingRuleForm, days_of_week: checked ? pricingRuleForm.days_of_week.filter((value) => value !== index) : [...pricingRuleForm.days_of_week, index] })} className={`rounded-lg px-2 py-2 text-xs font-medium ${checked ? 'bg-emerald-600 text-white' : 'border border-slate-200 text-slate-600'}`}>
+                        {day}
+                      </button>
+                    );
+                  })}
+                </div>
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input type="checkbox" checked={pricingRuleForm.is_active} onChange={(e) => setPricingRuleForm({ ...pricingRuleForm, is_active: e.target.checked })} className="h-4 w-4 rounded border-slate-300" />
+                  Active
+                </label>
+                <button type="submit" disabled={createPricingRule.status === 'pending'} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60">
+                  {createPricingRule.status === 'pending' ? 'Saving...' : 'Create rule'}
+                </button>
+              </div>
+            </form>
+          )}
+
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <div className="border-b border-slate-100 px-4 py-3">
+              <h2 className="font-semibold text-slate-900">Pricing Rules</h2>
+              <p className="text-sm text-slate-500">Rules apply nightly to matching room types, dates, occupancy, weekdays, and rate plans.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[860px] text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                  <tr><th className="px-4 py-3">Rule</th><th className="px-4 py-3">Scope</th><th className="px-4 py-3">Dates</th><th className="px-4 py-3">Adjustment</th><th className="px-4 py-3">Occupancy</th><th className="px-4 py-3">Status</th></tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {pricingRules?.map((rule) => (
+                    <tr key={rule.id}>
+                      <td className="px-4 py-3 font-medium text-slate-900">{rule.name}</td>
+                      <td className="px-4 py-3 text-slate-700">
+                        {rule.room_type_name || 'All room types'}
+                        {rule.rate_plan_name && <span className="block text-xs text-slate-500">{rule.rate_plan_name}</span>}
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">{rule.valid_from} to {rule.valid_to}</td>
+                      <td className="px-4 py-3 capitalize text-slate-700">{rule.adjustment_type} {rule.value_type === 'percentage' ? `${rule.value}%` : formatMoney(rule.value, settings?.currency)}</td>
+                      <td className="px-4 py-3 text-slate-700">{rule.min_occupancy || '-'} to {rule.max_occupancy || '-'}</td>
+                      <td className="px-4 py-3"><span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">{rule.is_active ? 'Active' : 'Inactive'}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {pricingRules?.length === 0 && <p className="p-4 text-sm text-slate-600">No pricing rules yet.</p>}
+          </div>
+        </section>
+      )}
+
       {activeTab === 'new' && can('bookings.reservation.create') && (
         <form onSubmit={handleCreateBooking} className="rounded-2xl border border-slate-200 bg-white p-4">
           <div className="mb-4 flex flex-col gap-3 border-b border-slate-100 pb-4 md:flex-row md:items-start md:justify-between">
@@ -1514,6 +1663,14 @@ const Bookings: React.FC = () => {
                 </option>
               ))}
             </select>
+            <select value={bookingForm.rate_plan || ''} onChange={(e) => setBookingForm({ ...bookingForm, rate_plan: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm">
+              <option value="">Standard room rate</option>
+              {ratePlans?.filter((ratePlan) => !selectedRoom || ratePlan.room_type === selectedRoom.room_type).map((ratePlan) => (
+                <option key={ratePlan.id} value={ratePlan.id}>
+                  {ratePlan.name} - {formatMoney(ratePlan.base_rate, settings?.currency)}
+                </option>
+              ))}
+            </select>
             <textarea placeholder="Special requests" value={bookingForm.special_requests} onChange={(e) => setBookingForm({ ...bookingForm, special_requests: e.target.value })} className="rounded-xl border border-slate-200 px-3 py-2 text-sm md:col-span-2" />
             {bookingForm.check_in_date && bookingForm.check_out_date && (
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm md:col-span-2">
@@ -1543,6 +1700,26 @@ const Bookings: React.FC = () => {
                       <strong className="block text-slate-900 capitalize">{selectedRoom.status}</strong>
                       readiness
                     </span>
+                  </div>
+                )}
+                {bookingQuote && (
+                  <div className="mt-3 overflow-x-auto rounded-xl bg-white p-3">
+                    <p className="mb-2 text-xs font-semibold uppercase text-slate-500">Nightly pricing</p>
+                    <table className="w-full min-w-[520px] text-left text-xs">
+                      <thead className="uppercase text-slate-500">
+                        <tr><th className="py-2 pr-3">Date</th><th className="py-2 pr-3 text-right">Base</th><th className="py-2 pr-3">Rules</th><th className="py-2 pr-3 text-right">Final</th></tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {bookingQuote.nightly_breakdown.map((night) => (
+                          <tr key={night.date}>
+                            <td className="py-2 pr-3 font-medium text-slate-800">{night.date}</td>
+                            <td className="py-2 pr-3 text-right">{formatMoney(night.base_rate, settings?.currency)}</td>
+                            <td className="py-2 pr-3 text-slate-600">{night.rules.length ? night.rules.map((rule) => rule.name).join(', ') : '-'}</td>
+                            <td className="py-2 pr-3 text-right font-semibold text-slate-900">{formatMoney(night.final_rate, settings?.currency)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </div>

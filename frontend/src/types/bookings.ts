@@ -35,6 +35,44 @@ export interface RatePlan {
   conditions: Record<string, any>;
 }
 
+export interface DynamicPricingRule {
+  id: string;
+  name: string;
+  room_type?: string | null;
+  room_type_name?: string;
+  rate_plan?: string | null;
+  rate_plan_name?: string;
+  valid_from: string;
+  valid_to: string;
+  adjustment_type: 'surcharge' | 'discount';
+  value_type: 'percentage' | 'fixed';
+  value: string;
+  min_occupancy?: number | null;
+  max_occupancy?: number | null;
+  days_of_week: number[];
+  priority: number;
+  is_active: boolean;
+}
+
+export interface BookingPriceQuote {
+  nights: number;
+  base_rate: string;
+  total_amount: string;
+  nightly_breakdown: Array<{
+    date: string;
+    base_rate: string;
+    final_rate: string;
+    rules: Array<{
+      id: string;
+      name: string;
+      adjustment_type: DynamicPricingRule['adjustment_type'];
+      value_type: DynamicPricingRule['value_type'];
+      value: string;
+      adjustment: string;
+    }>;
+  }>;
+}
+
 export interface Guest {
   id: string;
   first_name: string;
@@ -55,6 +93,8 @@ export interface Booking {
   id: string;
   room: string;
   guest: string;
+  rate_plan?: string | null;
+  package?: string | null;
   check_in_date: string;
   check_out_date: string;
   number_of_guests: number;

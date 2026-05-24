@@ -107,9 +107,16 @@ class Booking(UUIDModel):
     def save(self, *args, **kwargs):
         # Calculate total amount based on nights and room price or rate plan
         if self.check_in_date and self.check_out_date and self.room:
-            nights = (self.check_out_date - self.check_in_date).days
-            rate = self.rate_plan.base_rate if self.rate_plan else self.room.price_per_night
-            self.total_amount = Decimal(nights) * Decimal(str(rate))
+            from bookings.services import calculate_booking_price
+
+            self.total_amount = calculate_booking_price(
+                room=self.room,
+                check_in_date=self.check_in_date,
+                check_out_date=self.check_out_date,
+                rate_plan=self.rate_plan,
+                package=self.package,
+                number_of_guests=self.number_of_guests,
+            )['total_amount']
         super().save(*args, **kwargs)
 
 
@@ -250,6 +257,37 @@ class RatePlan(UUIDModel):
     valid_from = models.DateField()
     valid_to = models.DateField()
     conditions = models.JSONField(default=dict, blank=True)  # e.g., {"min_stay": 2, "max_stay": 7}
+
+    def __str__(self):
+        return self.name
+
+
+class DynamicPricingRule(UUIDModel):
+    ADJUSTMENT_TYPE_CHOICES = [
+        ('surcharge', 'Surcharge'),
+        ('discount', 'Discount'),
+    ]
+    VALUE_TYPE_CHOICES = [
+        ('percentage', 'Percentage'),
+        ('fixed', 'Fixed Amount'),
+    ]
+
+    name = models.CharField(max_length=120)
+    room_type = models.ForeignKey(RoomType, on_delete=models.CASCADE, related_name='dynamic_pricing_rules', null=True, blank=True)
+    rate_plan = models.ForeignKey(RatePlan, on_delete=models.CASCADE, related_name='dynamic_pricing_rules', null=True, blank=True)
+    valid_from = models.DateField()
+    valid_to = models.DateField()
+    adjustment_type = models.CharField(max_length=20, choices=ADJUSTMENT_TYPE_CHOICES, default='surcharge')
+    value_type = models.CharField(max_length=20, choices=VALUE_TYPE_CHOICES, default='percentage')
+    value = models.DecimalField(max_digits=10, decimal_places=2)
+    min_occupancy = models.PositiveIntegerField(null=True, blank=True)
+    max_occupancy = models.PositiveIntegerField(null=True, blank=True)
+    days_of_week = models.JSONField(default=list, blank=True)
+    priority = models.PositiveIntegerField(default=100)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['priority', 'name']
 
     def __str__(self):
         return self.name

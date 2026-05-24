@@ -12,10 +12,12 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.permissions import IsAuthenticated
 from bookings.followups import create_booking_follow_up_reminders, create_open_folio_follow_up, create_post_stay_follow_up
-from bookings.models import Booking, FacilityAmenity, FacilityService, Guest, GuestCommunication, GuestFolio, GuestFolioLine, GuestFollowUpReminder, GuestPoints, LoyaltyProgram, Package, RatePlan, Room, RoomType
+from bookings.models import Booking, DynamicPricingRule, FacilityAmenity, FacilityService, Guest, GuestCommunication, GuestFolio, GuestFolioLine, GuestFollowUpReminder, GuestPoints, LoyaltyProgram, Package, RatePlan, Room, RoomType
 from bookings.pdf import booking_confirmation_pdf, guest_folio_pdf
 from bookings.serializers import (
     BookingSerializer,
+    BookingPriceQuoteSerializer,
+    DynamicPricingRuleSerializer,
     FacilityAmenitySerializer,
     FacilityServiceSerializer,
     GuestCommunicationSerializer,
@@ -31,7 +33,7 @@ from bookings.serializers import (
     RoomSerializer,
     RoomTypeSerializer,
 )
-from bookings.services import CheckoutException, TRANSFER_RATE_POLICIES, check_in_booking, check_out_booking, create_walk_in_booking, extend_booking_stay, get_checkout_readiness, get_guest_history, modify_confirmed_booking, require_checkout_ready, transfer_booking_room
+from bookings.services import CheckoutException, TRANSFER_RATE_POLICIES, calculate_booking_price, check_in_booking, check_out_booking, create_walk_in_booking, extend_booking_stay, get_checkout_readiness, get_guest_history, get_package_booking_report, modify_confirmed_booking, require_checkout_ready, transfer_booking_room
 from users.permissions import HasActionPermission
 from .tasks import queue_booking_confirmation_email
 
@@ -122,6 +124,7 @@ class BookingViewSet(viewsets.ModelViewSet):
         'list': 'bookings.reservation.read',
         'retrieve': 'bookings.reservation.read',
         'availability': 'bookings.reservation.read',
+        'quote': 'bookings.reservation.read',
         'create': 'bookings.reservation.create',
         'update': 'bookings.reservation.create',
         'partial_update': 'bookings.reservation.create',
@@ -170,6 +173,8 @@ class BookingViewSet(viewsets.ModelViewSet):
             booking, folio = create_walk_in_booking(
                 room=data['room'],
                 guest=data['guest'],
+                rate_plan=data.get('rate_plan'),
+                package=data.get('package'),
                 check_in_date=data['check_in_date'],
                 check_out_date=data['check_out_date'],
                 number_of_guests=data.get('number_of_guests', 1),
@@ -356,6 +361,22 @@ class BookingViewSet(viewsets.ModelViewSet):
         serializer = RoomSerializer(available_rooms, many=True)
         return Response(serializer.data)
 
+    @action(detail=False, methods=['get'])
+    def quote(self, request):
+        serializer = BookingPriceQuoteSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        return Response(
+            calculate_booking_price(
+                room=data['room'],
+                check_in_date=data['check_in_date'],
+                check_out_date=data['check_out_date'],
+                rate_plan=data.get('rate_plan'),
+                package=data.get('package'),
+                number_of_guests=data['number_of_guests'],
+            )
+        )
+
     @action(detail=True, methods=['get'], url_path='confirmation-pdf')
     def confirmation_pdf(self, request, pk=None):
         booking = self.get_object()
@@ -503,6 +524,24 @@ class RatePlanViewSet(viewsets.ModelViewSet):
     ordering_fields = ['name', 'base_rate']
 
 
+class DynamicPricingRuleViewSet(viewsets.ModelViewSet):
+    queryset = DynamicPricingRule.objects.select_related('room_type', 'rate_plan').all()
+    serializer_class = DynamicPricingRuleSerializer
+    permission_classes = [IsAuthenticated, HasActionPermission]
+    permission_map = {
+        'list': 'bookings.reservation.read',
+        'retrieve': 'bookings.reservation.read',
+        'create': 'bookings.reservation.create',
+        'update': 'bookings.reservation.create',
+        'partial_update': 'bookings.reservation.create',
+        'destroy': 'bookings.reservation.create',
+    }
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['room_type', 'rate_plan', 'adjustment_type', 'value_type', 'is_active']
+    search_fields = ['name', 'room_type__name', 'rate_plan__name']
+    ordering_fields = ['priority', 'valid_from', 'valid_to', 'value']
+
+
 class PackageViewSet(viewsets.ModelViewSet):
     queryset = Package.objects.all()
     serializer_class = PackageSerializer
@@ -514,10 +553,22 @@ class PackageViewSet(viewsets.ModelViewSet):
         'update': 'bookings.reservation.create',
         'partial_update': 'bookings.reservation.create',
         'destroy': 'bookings.reservation.create',
+        'report': 'bookings.reservation.read',
     }
     filter_backends = [SearchFilter, OrderingFilter]
     search_fields = ['name', 'description']
     ordering_fields = ['name', 'total_price']
+
+    @action(detail=False, methods=['get'])
+    def report(self, request):
+        serializer = AccountingDateRangeLikeSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        return Response(
+            get_package_booking_report(
+                date_from=serializer.validated_data.get('date_from'),
+                date_to=serializer.validated_data.get('date_to'),
+            )
+        )
 
 
 class LoyaltyProgramViewSet(viewsets.ModelViewSet):
